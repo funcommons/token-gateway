@@ -1,0 +1,595 @@
+openapi: 3.0.3
+info:
+  title: token-gateway API · LLM 面
+  version: 1.0.0
+  description: |
+    通用 LLM 推理网关 · LLM 面（对话 / 向量 / 同步生图 / 模型目录）。
+
+    - 协议归一：/v1/chat/completions 等端点无论命中哪种上游，一律以 OpenAI 形状返回；
+      /v1/messages 一律以 Anthropic 形状返回。成功响应为上游透传形状（无信封），
+      错误响应为 6 字段信封（code != 0 即失败）。
+    - 认证：Authorization: Bearer <凭证> 或 x-api-key: <凭证>（两头同发 Bearer 优先）。
+      凭证语义由模型路由命中的后端定义（MMagiX token / TokenHub sk-thmp-* / TokenGo token）。
+    - 接入手册见 docs/用户文档/01_LLM面接入手册.md；
+      任务面契约见 04_任务面API契约.yaml（规划中 M2.5）；
+      设计方案见 docs/开发文档/01_设计方案.md。
+servers:
+  - url: http://localhost:9401
+    description: 本地开发
+tags:
+  - name: chat
+    description: 对话补全（OpenAI / Anthropic 双协议）
+  - name: embeddings
+    description: 向量化
+  - name: images
+    description: 图像生成
+  - name: models
+    description: 模型目录
+security:
+  - bearerAuth: []
+  - apiKeyHeader: []
+
+paths:
+  /v1/chat/completions:
+    post:
+      tags: [chat]
+      operationId: createChatCompletion
+      summary: 创建对话补全（OpenAI 形状）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatCompletionRequest'
+            example:
+              model: gpt-4o-mini
+              messages:
+                - role: user
+                  content: 你好
+      responses:
+        '200':
+          description: |
+            成功。stream=true 时为 text/event-stream（data: {...} 逐段 + data: [DONE] 结束）；
+            否则为协议归一后的 OpenAI ChatCompletion 形状（透传，无信封）。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionResponse'
+            text/event-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          $ref: '#/components/responses/InsufficientBalance'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '502':
+          $ref: '#/components/responses/UpstreamFailure'
+        '504':
+          $ref: '#/components/responses/Timeout'
+
+  /v1/messages:
+    post:
+      tags: [chat]
+      operationId: createMessage
+      summary: 创建对话消息（Anthropic 形状）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessagesRequest'
+            example:
+              model: claude-sonnet-4-5
+              max_tokens: 1024
+              messages:
+                - role: user
+                  content: 你好
+      responses:
+        '200':
+          description: |
+            成功。stream=true 时为 text/event-stream（Anthropic event/data 形状，
+            message_stop 结束）；否则为 Anthropic Message 形状（透传，无信封）。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagesResponse'
+            text/event-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '502':
+          $ref: '#/components/responses/UpstreamFailure'
+
+  /v1/messages/count_tokens:
+    post:
+      tags: [chat]
+      operationId: countTokens
+      summary: Token 计数（Anthropic 形状；不计费，仅 anthropic 协议上游支持）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessagesRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [input_tokens]
+                properties:
+                  input_tokens:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/embeddings:
+    post:
+      tags: [embeddings]
+      operationId: createEmbedding
+      summary: 创建向量（OpenAI 形状）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmbeddingRequest'
+      responses:
+        '200':
+          description: 成功（透传，无信封）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          $ref: '#/components/responses/InsufficientBalance'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '502':
+          $ref: '#/components/responses/UpstreamFailure'
+
+  /v1/images/generations:
+    post:
+      tags: [images]
+      operationId: createImage
+      summary: 生成图像（OpenAI 形状，按张计费）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImageRequest'
+      responses:
+        '200':
+          description: 成功（透传，无信封）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          $ref: '#/components/responses/InsufficientBalance'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '502':
+          $ref: '#/components/responses/UpstreamFailure'
+
+  /v1/models:
+    get:
+      tags: [models]
+      operationId: listModels
+      summary: 可用模型目录
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 'Authorization: Bearer <凭证>'
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: 'x-api-key: <凭证>（Anthropic 生态；与 Bearer 同发时 Bearer 优先）'
+
+  parameters:
+    TraceId:
+      name: X-Trace-Id
+      in: header
+      required: false
+      schema:
+        type: string
+      description: 链路追踪 ID，不传网关生成；响应头必回。
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: |
+        幂等键（UUID v4 建议）。同凭证 + 同 key 在窗口内重复请求被拒绝式去重（10501），
+        不会重复计费。图片生成等非幂等安全调用建议必带。
+
+  responses:
+    BadRequest:
+      description: 参数错误（10100~10106；10106 亦用于内容安全拒绝）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unauthorized:
+      description: 未认证/令牌无效（10200/10202）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Forbidden:
+      description: 权限不足/模型未开通（10300）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: 模型不存在或无可用渠道（10400）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    InsufficientBalance:
+      description: 余额不足（10617）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    DuplicateSubmit:
+      description: 重复提交（10501，幂等键命中）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    RateLimited:
+      description: |
+        请求过频（10500）。响应头含 Retry-After / X-RateLimit-Limit /
+        X-RateLimit-Remaining / X-RateLimit-Reset，客户端应按 Retry-After 指数退避。
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: 建议等待秒数
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    UpstreamFailure:
+      description: 第三方服务异常（10004，上游全失败，已自动退款）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Timeout:
+      description: 服务调用超时（10003）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      description: 6 字段错误信封（所有错误响应的统一形状；成功响应无信封）
+      required: [code, message, trace_id, timestamp]
+      properties:
+        code:
+          type: integer
+          description: '0=成功；非 0 见错误码表（10001/10003/10004/101xx/102xx/10300/104xx/105xx/10617/10700）'
+        message:
+          type: string
+        data:
+          nullable: true
+        error:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ApiError'
+        trace_id:
+          type: string
+        timestamp:
+          type: integer
+          format: int64
+          description: 毫秒时间戳
+    ApiError:
+      type: object
+      properties:
+        field:
+          type: string
+          nullable: true
+        code:
+          type: string
+          nullable: true
+          description: 子类型（FORMAT_INVALID 等）
+        message:
+          type: string
+        value:
+          nullable: true
+
+    ChatCompletionRequest:
+      type: object
+      required: [messages]
+      additionalProperties: true
+      properties:
+        model:
+          type: string
+          description: 模型名（路由依据）；缺省时网关回退默认模型
+        messages:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        stream:
+          type: boolean
+          default: false
+          description: true 时响应为 text/event-stream
+        max_tokens:
+          type: integer
+        temperature:
+          type: number
+        tools:
+          type: array
+          description: OpenAI 工具定义（跨协议上游由网关 sanitizer 归一）
+          items:
+            type: object
+            additionalProperties: true
+    ChatMessage:
+      type: object
+      required: [role]
+      additionalProperties: true
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant, tool]
+        content:
+          nullable: true
+          description: 字符串或多模态分段数组
+    ChatCompletionResponse:
+      type: object
+      description: 协议归一后的 OpenAI ChatCompletion 形状（上游透传）
+      additionalProperties: true
+      required: [id, object, choices]
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          example: chat.completion
+        created:
+          type: integer
+          format: int64
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              index:
+                type: integer
+              message:
+                $ref: '#/components/schemas/ChatMessage'
+              finish_reason:
+                type: string
+                nullable: true
+        usage:
+          type: object
+          description: 计费结算依据；缺失时按估算结算
+          additionalProperties: true
+          properties:
+            prompt_tokens:
+              type: integer
+            completion_tokens:
+              type: integer
+
+    MessagesRequest:
+      type: object
+      description: Anthropic Messages 形状（count_tokens 复用同形状）
+      required: [model, messages]
+      additionalProperties: true
+      properties:
+        model:
+          type: string
+        messages:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              role:
+                type: string
+                enum: [user, assistant]
+              content:
+                nullable: true
+        max_tokens:
+          type: integer
+        stream:
+          type: boolean
+          default: false
+        system:
+          nullable: true
+    MessagesResponse:
+      type: object
+      description: Anthropic Message 形状（上游透传，协议归一后恒为该形状）
+      additionalProperties: true
+      required: [id, type, role, content]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          example: message
+        role:
+          type: string
+          example: assistant
+        content:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        usage:
+          type: object
+          additionalProperties: true
+          description: input_tokens / output_tokens（计费结算依据）
+
+    EmbeddingRequest:
+      type: object
+      required: [model, input]
+      additionalProperties: true
+      properties:
+        model:
+          type: string
+        input:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+    EmbeddingResponse:
+      type: object
+      additionalProperties: true
+      required: [object, data]
+      properties:
+        object:
+          type: string
+          example: list
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              object:
+                type: string
+                example: embedding
+              embedding:
+                type: array
+                items:
+                  type: number
+              index:
+                type: integer
+        usage:
+          type: object
+          additionalProperties: true
+
+    ImageRequest:
+      type: object
+      required: [model, prompt]
+      additionalProperties: true
+      properties:
+        model:
+          type: string
+        prompt:
+          type: string
+        size:
+          type: string
+          example: 1024x1024
+        n:
+          type: integer
+          minimum: 1
+          description: 生成张数（按张计费）
+    ImageResponse:
+      type: object
+      additionalProperties: true
+      required: [created, data]
+      properties:
+        created:
+          type: integer
+          format: int64
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              url:
+                type: string
+              b64_json:
+                type: string
+
+    ModelListResponse:
+      type: object
+      required: [object, data]
+      properties:
+        object:
+          type: string
+          example: list
+        data:
+          type: array
+          items:
+            type: object
+            required: [id, object]
+            properties:
+              id:
+                type: string
+                description: 模型名（请求 model 字段取值）
+              object:
+                type: string
+                example: model
+              owned_by:
+                type: string
+                description: 归属后端标识（mmagix/tokenhub/…）

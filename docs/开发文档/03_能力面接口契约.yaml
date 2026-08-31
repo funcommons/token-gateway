@@ -1,0 +1,649 @@
+openapi: 3.0.3
+info:
+  title: token-gateway Capability-Face Contract（后端能力面契约）
+  version: 1.0.0
+  description: |
+    后端接入 token-gateway 需实现本契约（服务端角色；网关是客户端）。语言不限：
+    Go / Python / Node / Java 实现这些 HTTP 端点即可，网关以 `adapter: openapi` 调用。
+    接入手册见 docs/开发文档/02_后端接入开发手册.md。
+
+    通用规则（违反 = 接入验收不过）：
+    - 所有响应 HTTP 200 + 6 字段信封（code/message/data/error/trace_id/timestamp）；
+      业务错误在 code（10202 凭证 / 10400 无路由 / 10617 余额 / 101xx 参数），
+      禁用 5xx 表达业务错误——5xx/超时会被网关判为基础设施故障并触发重试或 saga 补偿。
+    - 请求头 X-Trace-Id 必须透传，并回填信封 trace_id 同值。
+    - settle / refund / access-log / audit 必须幂等（重复请求返回首次结果）。
+    - 鉴权四式 none | key | jwt | token 由网关 yml 逐能力面配置；服务端校验方法见手册 §3.4。
+    - 访问日志可选 MQ 通道（kafka | rocketmq，topic 默认 token-gateway-access-log，
+      消息体与 AccessLogEntry 同构 + gw_sent_at，at-least-once，按 (trace_id, ts) 幂等消费）
+      ——MQ 契约无法用 OpenAPI 表达，见手册 §5。
+servers:
+  - url: https://your-backend.example.com
+    description: 你的后端（按需实现下列端点的子集）
+tags:
+  - name: token
+    description: 凭证校验
+  - name: route
+    description: 路由分发
+  - name: billing
+    description: 计费三件套（saga）
+  - name: moderation
+    description: 内容审核
+  - name: log
+    description: 日志与审计
+  - name: models
+    description: 模型目录
+  - name: task
+    description: 任务委托面（可选；仅后端自持任务状态时实现。哑上游任务 API 无需实现——网关本地状态机经 route 面驱动）
+security:
+  - apiKeyHeader: []
+  - bearerJwt: []
+  - internalTokenHeader: []
+
+paths:
+  /gw/v1/token/validate:
+    post:
+      tags: [token]
+      operationId: validateToken
+      summary: 凭证校验（高频热点面，建议 60s 级本地缓存）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credential]
+              properties:
+                credential:
+                  type: string
+                  description: 调用方原始凭证（网关原样转交）
+      responses:
+        '200':
+          description: 校验结果（无效凭证也是 200 + code=10202）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TokenContextData'
+
+  /gw/v1/route/resolve:
+    post:
+      tags: [route]
+      operationId: resolveRoute
+      summary: 路由解析（模型 → 上游候选，等价旧 distribute）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model]
+              properties:
+                model:
+                  type: string
+                tenant_id:
+                  type: string
+                  description: 调用方租户（token-validate 的 tenant_id），缺省 0
+                request_id:
+                  type: string
+                  description: 请求级幂等/分桶键
+      responses:
+        '200':
+          description: 候选列表（按 priority 降序 failover；无候选 code=10400）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RouteData'
+
+  /gw/v1/billing/pre-consume:
+    post:
+      tags: [billing]
+      operationId: preConsume
+      summary: 预扣（余额不足 code=10617；成功返回 pre_consume_id 供结算/退款引用）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreConsumeRequest'
+      responses:
+        '200':
+          description: 预扣结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [pre_consume_id, amount]
+                        properties:
+                          pre_consume_id:
+                            type: string
+                          amount:
+                            type: string
+                            description: 预扣金额（元，字符串）
+
+  /gw/v1/billing/settle:
+    post:
+      tags: [billing]
+      operationId: settle
+      summary: 结算（按实际 usage 收支差额；按 pre_consume_id 幂等，重放返回首次结果）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettleRequest'
+      responses:
+        '200':
+          description: 结算结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [credit]
+                        properties:
+                          credit:
+                            type: string
+                            description: 实际消费金额（元，字符串）
+                          balance:
+                            type: string
+                            nullable: true
+
+  /gw/v1/billing/refund:
+    post:
+      tags: [billing]
+      operationId: refund
+      summary: 退款补偿（上游全失败/超时；按 pre_consume_id 幂等）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pre_consume_id]
+              properties:
+                pre_consume_id:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: 退款结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /gw/v1/moderation/scan:
+    post:
+      tags: [moderation]
+      operationId: scanModeration
+      summary: 内容审核扫描（超时/5xx 由网关 fail-open 策略兜底，不重试拖慢主链路）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                content_type:
+                  type: string
+                  enum: [prompt, output]
+                tenant_id:
+                  type: string
+      responses:
+        '200':
+          description: 审核结论
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [action]
+                        properties:
+                          action:
+                            type: string
+                            enum: [PASS, BLOCK, SANITIZE]
+                          sanitized_content:
+                            type: string
+                            nullable: true
+                            description: action=SANITIZE 时的替换内容
+                          reason:
+                            type: string
+                            nullable: true
+
+  /gw/v1/access-log/record:
+    post:
+      tags: [log]
+      operationId: recordAccessLog
+      summary: 访问日志落库（transport=rpc 时网关异步批量推送；不阻塞主链路）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entries]
+              properties:
+                entries:
+                  type: array
+                  maxItems: 100
+                  items:
+                    $ref: '#/components/schemas/AccessLogEntry'
+      responses:
+        '200':
+          description: 受理结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          accepted:
+                            type: integer
+                          rejected:
+                            type: integer
+
+  /gw/v1/audit/record:
+    post:
+      tags: [log]
+      operationId: recordAudit
+      summary: 审计事件外发（安全/管理事件；失败不阻塞主链路；你侧 append-only 落库）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditEvent'
+      responses:
+        '200':
+          description: 受理结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /gw/v1/models:
+    get:
+      tags: [models]
+      operationId: listModels
+      summary: 模型目录（id 即调用方请求的 model 名）
+      security:
+        - apiKeyHeader: []
+        - bearerJwt: []
+        - internalTokenHeader: []
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      responses:
+        '200':
+          description: 目录
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [object, data]
+                        properties:
+                          object:
+                            type: string
+                            example: list
+                          data:
+                            type: array
+                            items:
+                              type: object
+                              required: [id]
+                              properties:
+                                id:
+                                  type: string
+                                owned_by:
+                                  type: string
+
+  /gw/v1/task/create:
+    post:
+      tags: [task]
+      operationId: createTask
+      summary: 任务创建委托（网关已生成 task_no 并完成全额预扣后下发；失败回业务 code，网关将退款并置 FAILED）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [task_no, model]
+              properties:
+                task_no:
+                  type: string
+                  description: 网关生成的任务号（幂等键——重复请求返回首次结果）
+                model:
+                  type: string
+                params:
+                  type: object
+                  additionalProperties: true
+                  description: 模态参数（duration/resolution/input 等）
+                notify_url:
+                  type: string
+                  nullable: true
+                tenant_id:
+                  type: string
+      responses:
+        '200':
+          description: 受理结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [accepted]
+                        properties:
+                          accepted:
+                            type: boolean
+                          status:
+                            type: string
+                            enum: [PENDING, RUNNING]
+
+  /gw/v1/task/poll:
+    post:
+      tags: [task]
+      operationId: pollTask
+      summary: 任务轮询委托（只读；终态后网关停止轮询）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [task_no]
+              properties:
+                task_no:
+                  type: string
+      responses:
+        '200':
+          description: 任务状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [status]
+                        properties:
+                          status:
+                            type: string
+                            enum: [PENDING, RUNNING, SUCCEEDED, FAILED, EXPIRED]
+                          result:
+                            type: object
+                            nullable: true
+                            additionalProperties: true
+                            properties:
+                              resources:
+                                type: array
+                                items:
+                                  type: string
+                                  description: 原始资源 URL（资源代理与 sig 签名由网关承接）
+                              usage:
+                                type: object
+                                nullable: true
+                                additionalProperties: true
+
+components:
+  securitySchemes:
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: 'auth=key：静态共享 key，恒定时间比较'
+    bearerJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'auth=jwt：HS256 JWT（claims iss/caller/tenant_id/exp），换 secret 两端同步'
+    internalTokenHeader:
+      type: apiKey
+      in: header
+      name: X-Internal-Token
+      description: 'auth=token：静态不透明令牌，恒定时间比较'
+
+  parameters:
+    TraceId:
+      name: X-Trace-Id
+      in: header
+      required: false
+      schema:
+        type: string
+      description: 必须透传，并回填信封 trace_id 同值
+
+  schemas:
+    Envelope:
+      type: object
+      description: 6 字段信封；code=0 成功，业务错误在 code（禁用 5xx 表达业务错误）
+      required: [code, message, trace_id, timestamp]
+      properties:
+        code:
+          type: integer
+          description: 0=成功；10202 凭证无效 / 10400 无路由 / 10617 余额不足 / 101xx 参数错误
+        message:
+          type: string
+        data:
+          nullable: true
+        error:
+          type: array
+          nullable: true
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                nullable: true
+              code:
+                type: string
+                nullable: true
+              message:
+                type: string
+        trace_id:
+          type: string
+        timestamp:
+          type: integer
+          format: int64
+
+    TokenContextData:
+      type: object
+      required: [active]
+      properties:
+        tenant_id:
+          type: string
+        user_id:
+          type: string
+        active:
+          type: boolean
+        masked_credential:
+          type: string
+          description: 掩码形态（日志展示用），不含明文
+
+    RouteData:
+      type: object
+      required: [candidates]
+      properties:
+        candidates:
+          type: array
+          description: 按 priority 降序（1 最优），网关按序 failover
+          items:
+            type: object
+            required: [base_url, protocol]
+            properties:
+              base_url:
+                type: string
+                description: 上游基地址（网关拼接协议路径）
+              credential:
+                type: string
+                nullable: true
+                description: 出站凭证；免鉴权渠道可为空
+              credential_type:
+                type: string
+                enum: [plain, bearer]
+                description: 出站凭证的携带方式
+              protocol:
+                type: string
+                enum: [openai, anthropic]
+                description: 上游原生协议（网关负责协议归一）
+              model_mapping:
+                type: object
+                nullable: true
+                description: 模型名映射（chat code → upstream code）；空 = 同名直转
+              priority:
+                type: integer
+
+    PreConsumeRequest:
+      type: object
+      required: [trace_id, credential, model, prompt_tokens, completion_tokens]
+      properties:
+        trace_id:
+          type: string
+        credential:
+          type: string
+          description: 调用方凭证（脱敏引用由你的 token-validate 上下文关联）
+        tenant_id:
+          type: string
+        model:
+          type: string
+        prompt_tokens:
+          type: integer
+          description: 估算 prompt tokens
+        completion_tokens:
+          type: integer
+          description: 估算 completion tokens（max_tokens 启发）
+
+    SettleRequest:
+      type: object
+      required: [pre_consume_id, prompt_tokens, completion_tokens]
+      properties:
+        pre_consume_id:
+          type: string
+        prompt_tokens:
+          type: integer
+          description: 实际 usage（缺失时为估算值，网关侧标记 estimated）
+        completion_tokens:
+          type: integer
+        cached_tokens:
+          type: integer
+        latency_ms:
+          type: integer
+
+    AccessLogEntry:
+      type: object
+      required: [trace_id, model, path, status, ts]
+      properties:
+        trace_id:
+          type: string
+        ts:
+          type: integer
+          format: int64
+          description: 请求完成时间戳（幂等键之一）
+        tenant_id:
+          type: string
+        user_id:
+          type: string
+        model:
+          type: string
+        path:
+          type: string
+        prompt_tokens:
+          type: integer
+        completion_tokens:
+          type: integer
+        cached_tokens:
+          type: integer
+        credit:
+          type: string
+          nullable: true
+        latency_ms:
+          type: integer
+        status:
+          type: string
+          description: SUCCESS / FAILED / BLOCKED 等
+
+    AuditEvent:
+      type: object
+      required: [action, ts]
+      properties:
+        action:
+          type: string
+          description: 事件名（TENANT_CREATE / API_KEY_DISABLE / MODERATION_BLOCK 等）
+        ts:
+          type: integer
+          format: int64
+        tenant_id:
+          type: string
+        actor:
+          type: string
+        target_type:
+          type: string
+          nullable: true
+        target_id:
+          type: string
+          nullable: true
+        detail:
+          type: object
+          nullable: true
+          additionalProperties: true
+        trace_id:
+          type: string

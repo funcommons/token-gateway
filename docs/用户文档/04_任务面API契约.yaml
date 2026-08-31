@@ -1,0 +1,343 @@
+openapi: 3.0.3
+info:
+  title: token-gateway API · 任务面（规划中 M2.5，未实现）
+  version: 1.0.0
+  description: |
+    通用模型能力网关 · 任务面（videos / images / audios / tts 异步任务四模态）。
+
+    ⚠️ 状态：规划中（设计方案 M2.5，THMP 任务域移植），当前版本未实现，
+    本文为契约预发布（协议权威 = THMP 18 号 §3.7），落地前端点不可用。
+
+    - 四段式：create（全额预扣）→ poll（3~5s 驱动，终态幂等）→ notify（HMAC 回调）
+      → 资源代理（exp+sig 24h 能力凭证，上游原始 URL 永不透传）。
+    - 认证 / 限流 / 幂等 / 错误信封与 LLM 面一致（见 03_LLM面API契约.yaml components）。
+    - 接入手册见 docs/用户文档/02_任务面接入手册.md。
+servers:
+  - url: http://localhost:9401
+    description: 本地开发（face=task/all 部署分组）
+tags:
+  - name: task
+    description: 异步任务四模态（videos / images / audios / tts，create→poll→资源代理）
+security:
+  - bearerAuth: []
+  - apiKeyHeader: []
+
+paths:
+  /v1/videos:
+    post:
+      tags: [task]
+      operationId: createVideoTask
+      summary: 创建视频任务（创建即全额预扣；FAILED/EXPIRED 自动全额退款）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCreateRequest'
+      responses:
+        '200':
+          description: 创建成功（异步任务）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskCreated'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          $ref: '#/components/responses/InsufficientBalance'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/images:
+    post:
+      tags: [task]
+      operationId: createImageTask
+      summary: 创建图像任务（异步；与视频同构。注意与 LLM 面 /v1/images/generations 同步生图区分）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCreateRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskCreated'
+
+  /v1/audios:
+    post:
+      tags: [task]
+      operationId: createAudioTask
+      summary: 创建音频（asr/音乐类）任务，与视频同构
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCreateRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskCreated'
+
+  /v1/tts:
+    post:
+      tags: [task]
+      operationId: createTtsTask
+      summary: 创建语音合成任务，与视频同构
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCreateRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskCreated'
+
+  /v1/videos/{task_no}:
+    get:
+      tags: [task]
+      operationId: pollVideoTask
+      summary: 轮询视频任务（3~5s 驱动；终态幂等不触上游。images/audios/tts 端点同构）
+      description: |
+        状态机 PENDING → RUNNING → SUCCEEDED / FAILED / EXPIRED（超 24h）。
+        FAILED/EXPIRED 已自动全额退款；终态后重复轮询返回存储结果（不触上游）。
+        上游查询异常时状态不变，调用方退避重试。
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+        - name: task_no
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 任务状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/resources/{task_no}/{index}:
+    get:
+      tags: [task]
+      operationId: fetchTaskResource
+      summary: 任务资源代理（浏览器/下载端免凭证直取；exp+sig 为 24h 能力凭证）
+      description: |
+        result.resources 返回的是本端点代理 URL（上游原始 URL 永不透传）。
+        签名过期/篡改返回 10100 信封；任务非 SUCCEEDED 返回 10402。
+      security: []
+      parameters:
+        - name: task_no
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: exp
+          in: query
+          required: true
+          schema:
+            type: integer
+            description: 过期时间（epoch 秒）
+        - name: sig
+          in: query
+          required: true
+          schema:
+            type: string
+            description: HMAC 签名能力凭证
+      responses:
+        '200':
+          description: 文件流（Content-Type 透传上游）
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 'Authorization: Bearer <凭证>'
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: 'x-api-key: <凭证>（Anthropic 生态；与 Bearer 同发时 Bearer 优先）'
+
+  parameters:
+    TraceId:
+      name: X-Trace-Id
+      in: header
+      required: false
+      schema:
+        type: string
+      description: 链路追踪 ID，不传网关生成；响应头必回。
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: 幂等键（UUID v4 建议）。同凭证 + 同 key 在窗口内重复请求被拒绝式去重（10501）。
+
+  responses:
+    BadRequest:
+      description: 参数错误（10100~10106；资源代理签名过期/篡改亦回 10100）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unauthorized:
+      description: 未认证/令牌无效（10200/10202）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: 任务不存在（10400）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    InsufficientBalance:
+      description: 余额不足（10617，创建失败且不产生任务）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    RateLimited:
+      description: 请求过频（10500），响应头含 Retry-After 等四头
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      description: 6 字段错误信封（与 LLM 面同构）
+      required: [code, message, trace_id, timestamp]
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        data:
+          nullable: true
+        error:
+          type: array
+          nullable: true
+          items:
+            type: object
+            additionalProperties: true
+        trace_id:
+          type: string
+        timestamp:
+          type: integer
+          format: int64
+
+    TaskCreateRequest:
+      type: object
+      required: [model]
+      additionalProperties: true
+      properties:
+        model:
+          type: string
+          description: 任务模型名（路由依据）
+        params:
+          type: object
+          additionalProperties: true
+          description: 模态参数（duration 秒 / resolution / input 文本等，按模型而定；计量与计费依据）
+        input:
+          nullable: true
+          description: 输入内容（文本 / 图像引用，按模态而定）
+        notify_url:
+          type: string
+          format: uri
+          description: 终态回调地址；网关以 X-THMP-Signature（HMAC）签名，失败自动退避重发
+    TaskCreated:
+      type: object
+      description: 创建响应（透传形状；创建即全额预扣，余额不足返回 10617 信封且不产生任务）
+      required: [task_no, status]
+      properties:
+        task_no:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, RUNNING]
+          description: 出站成功即返回；上游创建失败则任务转 FAILED（已自动退款）并返回 10004 信封
+        poll_url:
+          type: string
+          description: 轮询端点相对路径
+    TaskStatus:
+      type: object
+      description: 轮询响应（透传形状；终态幂等）
+      required: [task_no, status]
+      properties:
+        task_no:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, RUNNING, SUCCEEDED, FAILED, EXPIRED]
+        result:
+          nullable: true
+          description: status=SUCCEEDED 时返回
+          type: object
+          additionalProperties: true
+          properties:
+            resources:
+              type: array
+              items:
+                type: string
+                description: 网关代理 URL（携 exp+sig，24h 有效；上游原始 URL 永不透传）
+            usage:
+              type: object
+              additionalProperties: true
+              nullable: true
+        error:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: status=FAILED/EXPIRED 时的错误信息
