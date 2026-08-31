@@ -1,0 +1,69 @@
+server:
+  port: 9401
+  netty:
+    connection-timeout: 60s
+    idle-timeout: 300s
+
+spring:
+  application:
+    name: token-gateway
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+      password:
+      timeout: 5s
+      lettuce:
+        pool:
+          max-active: 32
+          max-idle: 16
+          min-idle: 4
+  codec:
+    max-in-memory-size: 16MB
+
+# 主应用 RPC 目标
+gateway:
+  backend:
+    url: http://localhost:9400
+    # 固定内部签名 JWT, 与 bootstrap application-dev.yml / application-onetoken.yml
+    # 的 mmagix.internal-token.secret 一致 (HS256, secret=7UYrDe7Zr2DLXTS2k1l9fjdQ9hNyW6WT8rrfRjFlb4A).
+    # 后端换 secret 必须用 sign-internal-token.sh 同步重铸本 token.
+    internal-token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJtbWFnaXgiLCJzdWIiOiIwIiwiY2FsbGVyIjoiZ2F0ZXdheS13ZWJmbHV4IiwidGVuYW50X2lkIjoiMCIsInVzZXJfaWQiOiIwIiwiaWF0IjoxNzg2NTIyNDM3LCJleHAiOjE4NDcwMDI0Mzd9.3VJ8tlyfO-HZDN5Xk7m15dSiWhS0cBK-drBbvCsbIms
+    timeout: 10s
+
+  # 渠道健康上报 (record-success/record-failure): off 时渠道健康信号缺失需在监控侧补偿
+  health-report:
+    enabled: true
+
+  # THMP 契约面影子双跑 (22 号 S2-W1): enabled=true 后旧 distribute 与中台 resolve 并行比对,
+  # 结果只埋点不执行; secret 环境变量注入 (thmp_tenants 契约租户, 禁入仓).
+  thmp:
+    enabled: false
+    base-url: http://localhost:9300
+    client-id: thmp-mmagix-gw
+    secret: ${THMP_CONTRACT_SECRET:}
+    timeout: 3s
+    cache-ttl: 30s
+    negative-ttl: 15s
+    # W3 灰度切流 (enabled=true 且名单非空才生效): 名单内 SKU 按 percent 确定性分桶走 THMP 候选,
+    # 未命中/THMP 失败自动回旧 distribute; 一键回旧 = 清空 cutover-models. 密钥解密口令须与
+    # THMP thmp.enc.passphrase 兜底口令一致 (BYOK 逐租户口令 = 未决#12 决议).
+    cutover-models: []
+    cutover-percent: 0
+    key-passphrase: ${THMP_CONTRACT_KEY_PASSPHRASE:thmp-dev-enc-passphrase-0000000000000001}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    root: INFO
+    fun.commons.tokengateway: DEBUG
+    org.springframework.web.reactive: INFO

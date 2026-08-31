@@ -1,0 +1,17 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+### IntelliJ IDEA ###
+.idea/
+*.iml
+
+### macOS ###
+.DS_Store
+
+### Logs ###
+*.log
+
+### Node / VitePress ###
+node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
