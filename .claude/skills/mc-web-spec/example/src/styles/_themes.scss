@@ -1,0 +1,80 @@
+// _themes.scss
+// Three color themes (light / dark / orange-black) applied via
+// html[data-theme="..."] on the root element.
+//
+// Data-driven: the $themes map in _variables.scss drives the @each loop.
+// The 4-step border palette is derived at runtime via color-mix() —
+// no need to hand-write border-light / -lighter / -extra-light per theme.
+
+@use 'variables' as *;
+
+// Element Plus color tokens. Mapped to --app-* once per theme — the same
+// block for every theme, so extracted to a mixin for reuse.
+@mixin ep-tokens {
+  --el-bg-color: var(--app-bg-elevated);
+  --el-bg-color-page: var(--app-bg-page);
+  --el-bg-color-overlay: var(--app-bg-elevated);
+  --el-text-color-primary: var(--app-text);
+  --el-text-color-regular: var(--app-text);
+  --el-text-color-secondary: var(--app-text-secondary);
+  --el-text-color-placeholder: var(--app-text-tertiary);
+  --el-text-color-disabled: var(--app-text-tertiary);
+  --el-border-color: var(--app-border);
+  --el-border-color-light: var(--app-border-light);
+  --el-border-color-lighter: var(--app-border-lighter);
+  --el-border-color-extra-light: var(--app-border-extra-light);
+  --el-fill-color-blank: var(--app-bg-elevated);
+  --el-fill-color-light: var(--app-bg-muted);
+  --el-fill-color-lighter: var(--app-bg-muted);
+  --el-fill-color-extra-light: var(--app-bg-muted);
+  --el-fill-color: var(--app-bg-muted);
+  --el-mask-color: var(--app-mask);
+
+  // ---- App-level aliases that flow brand tokens through the theme layer.
+  // Components SHOULD reference these (--app-radius-* / --app-shadow-* /
+  // --app-bg-card / --app-separator) rather than reading --brand-* directly,
+  // so themes (orange-black etc.) can override at a single layer.
+  --app-radius-card: var(--brand-radius-card);
+  --app-radius-md:   var(--brand-radius-md);
+  --app-radius-sm:   var(--brand-radius-sm);
+  --app-radius-chip: var(--brand-radius-chip);
+  --app-radius-button: var(--brand-radius-button);
+  --app-radius-input:  var(--brand-radius-input);
+  --app-shadow-sm: var(--brand-shadow-sm);
+  --app-shadow-md: var(--brand-shadow-md);
+  --app-shadow-lg: var(--brand-shadow-lg);
+  --app-bg-card:   var(--brand-bg-card, var(--app-bg-elevated));
+  --app-separator: var(--brand-separator, var(--app-border));
+
+  // ---- 规格 7: 字号随 风格 (Apple 13/15/22 · vonnex 14/16/22 · ldx2 14/16/24)
+  --app-font-size-base:   var(--brand-font-size-base, 14px);
+  --app-font-size-large:  var(--brand-font-size-large, 16px);
+  --app-font-size-header: var(--brand-font-size-header, 22px);
+}
+
+@each $name, $tokens in $themes {
+  html[data-theme='#{$name}'] {
+    @each $key, $value in $tokens {
+      --app-#{$key}: #{$value};
+    }
+    // Derived 4-step border palette (used by Element Plus + components)
+    --app-border-light: color-mix(in srgb, var(--app-border) 70%, transparent);
+    --app-border-lighter: color-mix(in srgb, var(--app-border) 40%, transparent);
+    --app-border-extra-light: color-mix(in srgb, var(--app-border) 15%, transparent);
+    // orange-black: force primary to orange regardless of brand.
+    // Both --app-primary (consumed by --el-color-primary) AND
+    // --brand-primary (consumed by el-button--primary, app-header__badge,
+    // app-logo i, brand-card.active border) must be overridden — themes
+    // load after brands, so this wins at runtime.
+    // --brand-primary-gradient is also flattened to a solid orange (same
+    // stop on both ends) so any brand that defined a gradient still
+    // renders pure orange in this theme.
+    @if $name == 'orange-black' {
+      --app-primary: #{$brand-orange-primary};
+      --brand-primary: #{$brand-orange-primary};
+      --brand-primary-gradient: linear-gradient(90deg, #{$brand-orange-primary}, #{$brand-orange-primary});
+      --brand-on-primary: #ffffff;
+    }
+    @include ep-tokens;
+  }
+}

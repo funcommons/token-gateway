@@ -1,0 +1,76 @@
+// _ep-overrides.scss
+// Map --app-* tokens to Element Plus --el-* tokens (including color variants)
+// color-mix() provides runtime light/dark variants based on the active primary.
+
+:root {
+  --el-color-primary: var(--app-primary);
+  --el-color-primary-light-3: color-mix(in srgb, var(--app-primary) 70%, white);
+  --el-color-primary-light-5: color-mix(in srgb, var(--app-primary) 50%, white);
+  --el-color-primary-light-7: color-mix(in srgb, var(--app-primary) 30%, white);
+  --el-color-primary-light-8: color-mix(in srgb, var(--app-primary) 20%, white);
+  --el-color-primary-light-9: color-mix(in srgb, var(--app-primary) 10%, white);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--app-primary) 80%, black);
+
+  // Standard semantic colors (kept fixed across themes/brands)
+  --el-color-success: #67c23a;
+  --el-color-success-light-3: color-mix(in srgb, #67c23a 70%, white);
+  --el-color-success-light-5: color-mix(in srgb, #67c23a 50%, white);
+  --el-color-success-light-7: color-mix(in srgb, #67c23a 30%, white);
+  --el-color-success-light-8: color-mix(in srgb, #67c23a 20%, white);
+  --el-color-success-light-9: color-mix(in srgb, #67c23a 10%, white);
+  --el-color-success-dark-2: color-mix(in srgb, #67c23a 80%, black);
+
+  --el-color-warning: #e6a23c;
+  --el-color-warning-light-3: color-mix(in srgb, #e6a23c 70%, white);
+  --el-color-warning-light-5: color-mix(in srgb, #e6a23c 50%, white);
+  --el-color-warning-light-7: color-mix(in srgb, #e6a23c 30%, white);
+  --el-color-warning-light-8: color-mix(in srgb, #e6a23c 20%, white);
+  --el-color-warning-light-9: color-mix(in srgb, #e6a23c 10%, white);
+  --el-color-warning-dark-2: color-mix(in srgb, #e6a23c 80%, black);
+
+  --el-color-danger: #f56c6c;
+  --el-color-danger-light-3: color-mix(in srgb, #f56c6c 70%, white);
+  --el-color-danger-light-5: color-mix(in srgb, #f56c6c 50%, white);
+  --el-color-danger-light-7: color-mix(in srgb, #f56c6c 30%, white);
+  --el-color-danger-light-8: color-mix(in srgb, #f56c6c 20%, white);
+  --el-color-danger-light-9: color-mix(in srgb, #f56c6c 10%, white);
+  --el-color-danger-dark-2: color-mix(in srgb, #f56c6c 80%, black);
+
+  --el-color-info: var(--app-text-tertiary);
+  --el-color-info-light-3: color-mix(in srgb, var(--app-text-tertiary) 70%, white);
+  --el-color-info-light-5: color-mix(in srgb, var(--app-text-tertiary) 50%, white);
+  --el-color-info-light-7: color-mix(in srgb, var(--app-text-tertiary) 30%, white);
+  --el-color-info-light-8: color-mix(in srgb, var(--app-text-tertiary) 20%, white);
+  --el-color-info-light-9: color-mix(in srgb, var(--app-text-tertiary) 10%, white);
+  --el-color-info-dark-2: color-mix(in srgb, var(--app-text-tertiary) 80%, black);
+}
+
+// Force Element Plus dropdown/menu/select popper containers to inherit theme bg/text
+.el-popper,
+.el-popper.is-light,
+.el-select-dropdown,
+.el-dropdown-menu,
+.el-autocomplete-suggestion,
+.el-cascader-dropdown,
+.el-cascader-menu,
+.el-color-picker__panel,
+.el-date-picker__panel,
+.el-time-picker__panel,
+.el-tooltip__popper,
+.el-message,
+.el-message-box,
+// The .el-overlay is the modal backdrop (drawer/dialog/etc). It should be
+// transparent + blurred (Apple style), NOT a solid card. We exclude it
+// from the elevated-bg override so the blur rule in _reset.scss wins.
+.el-notification,
+.el-dialog,
+.el-drawer {
+  background-color: var(--app-bg-elevated) !important;
+  color: var(--app-text) !important;
+  border-color: var(--app-border-light) !important;
+}
+
+.el-popper .el-popper__arrow::before {
+  background: var(--app-bg-elevated) !important;
+  border-color: var(--app-border-light) !important;
+}

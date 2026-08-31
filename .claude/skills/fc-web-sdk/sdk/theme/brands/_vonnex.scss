@@ -1,0 +1,129 @@
+// brands/_vonnex.scss
+// Vonnex AI brand style — Material 3 design language. Light sidebar
+// (M3 surface-container), Inter font, M3 elevation shadows, 8px grid.
+
+@use '../mixins' as *;
+
+@include define-brand(vonnex, (
+  // Primary
+  primary: #004ac6,
+  primary-dark: #003ea8,
+  on-primary: #ffffff,
+  on-primary-container: #00174b,
+
+  // Text
+  text-primary: #0b1c30,
+  text-secondary: #434655,
+  text-tertiary: #737686,
+  text-quaternary: #c3c6d7,
+
+  // Background
+  bg-page: #f0f4f8,
+  bg-card: #f8f9ff,
+  bg-elevated: #ffffff,
+  bg-muted: #eff4ff,
+
+  // Sidebar (M3 surface-container, light)
+  sidebar-bg: #eff4ff,
+  sidebar-text-main: #0b1c30,
+  sidebar-text-regular: #434655,
+  sidebar-text-secondary: #737686,
+  sidebar-hover-bg: rgba(255, 255, 255, 0.6),
+  sidebar-active-bg: #dbe1ff,
+  sidebar-active-text: #004ac6,
+
+  // Separator & border
+  separator: #c3c6d7,
+
+  // Shadow (M3 elevation)
+  shadow-sm: (0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04)),
+  shadow-md: (0 1px 2px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.06)),
+  shadow-lg: (0 4px 8px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06)),
+  shadow-xl: (0 12px 24px rgba(0, 0, 0, 0.14), 0 4px 8px rgba(0, 0, 0, 0.10)),
+
+  // Radius (M3 functional, smaller than Apple)
+  radius-xs: 2px,
+  radius-sm: 6px,
+  radius-md: 12px,
+  radius-lg: 16px,
+  radius-xl: 28px,
+  radius-2xl: 32px,
+  radius-card: 12px,
+  radius-button: 6px,
+  radius-input: 6px,
+  radius-chip: 8px,
+
+  // Frosted glass (vonnex also uses glass)
+  blur-sm: blur(12px),
+  blur-md: blur(20px),
+  blur-lg: blur(40px),
+
+  // Default (dark) scrollbar thumb on light sidebar
+  scrollbar-thumb: rgba(0, 0, 0, 0.18),
+  scrollbar-thumb-hover: rgba(0, 0, 0, 0.32),
+
+  // Font
+  font-family: ('Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif,),
+
+  // 规格 7: vonnex 字号 适中
+  'font-size-base':   14px,
+  'font-size-large':  16px,
+  'font-size-header': 22px,
+));
+
+// Brand-specific extras (M3 panel, metric, status colors). Only read by
+// vonnex-specific components, so they live in this file with no alias
+// layer. The `define-brand` call above already opened
+// html[data-brand='vonnex'], so we extend that scope here directly.
+html[data-brand='vonnex'] {
+  // === M3 status colors (for badges, alerts, status indicators) ===
+  --brand-success: #2e7d32;
+  --brand-success-bg: #e8f5e9;
+  --brand-success-text: #1b5e20;
+  --brand-warning: #e65100;
+  --brand-warning-bg: #fff3e0;
+  --brand-warning-text: #bf360c;
+  --brand-error: #ba1a1a;
+  --brand-error-bg: #ffdad6;
+  --brand-info: #1976d2;
+  --brand-info-bg: #e3f2fd;
+  --brand-info-text: #0d47a1;
+
+  // === Glass Panel (vonnex distinctive feature) ===
+  --brand-glass-bg: rgba(255, 255, 255, 0.65);
+  --brand-glass-blur: blur(20px);
+  --brand-panel-radius: 16px;
+  --brand-panel-shadow: 0 8px 32px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+
+  // === Metric Card (M3 hover lift) ===
+  --brand-metric-radius: 16px;
+  --brand-metric-padding: 20px;
+  --brand-metric-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
+  --brand-metric-hover-shadow: 0 12px 40px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.03);
+  --brand-metric-hover-translate: translateY(-3px);
+
+  // === Layout (compact M3) ===
+  --brand-header-height: 56px;
+  --brand-sidebar-width-default: 240px;
+  --brand-sidebar-width-collapsed: 64px;
+  --brand-grid-main: 1fr 320px;
+  --brand-grid-tiles: 1fr 1fr;
+
+  // === AppHeader overrides (vonnex: 半透明 + 40px 强模糊) ===
+  --app-header-bg: rgba(255, 255, 255, 0.7);
+  --app-header-backdrop: blur(40px);
+}
+
+// =====================================================================
+// Dark-mode overrides for vonnex. Uses shared brand-dark-surface mixin,
+// then re-flips the translucent AppHeader bg so the title bar stays
+// glass-on-dark (consistent with M3 dark surface tinting) instead of
+// glass-on-white.
+// =====================================================================
+html[data-brand='vonnex'][data-theme='dark'],
+html[data-brand='vonnex'][data-theme='orange-black'] {
+  @include brand-dark-surface;
+
+  // Header: translucent dark M3 surface
+  --app-header-bg: rgba(31, 41, 55, 0.7);
+}

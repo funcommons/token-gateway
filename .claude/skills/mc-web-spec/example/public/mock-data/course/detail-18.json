@@ -1,0 +1,96 @@
+{
+  "id": 18,
+  "title": "Web 性能优化全景",
+  "cover": "/images/courses/18.jpg",
+  "category": "fe-engineering",
+  "duration": 420,
+  "level": "intermediate",
+  "instructor": {
+    "name": "Gary Sun",
+    "title": "资深工程师 / 前 性能 专家",
+    "avatar": "/images/avatars/3.png",
+    "bio": "10 年以上开发经验,曾任职于多家一线互联网公司,主导过多个大型项目。"
+  },
+  "students": 978,
+  "rating": 4.7,
+  "description": "从首屏加载到运行时性能的系统优化。",
+  "tags": [
+    "性能",
+    "优化"
+  ],
+  "progress": 0,
+  "chapters": [
+    {
+      "id": 1,
+      "title": "课程介绍与学习目标",
+      "duration": 34,
+      "completed": false
+    },
+    {
+      "id": 2,
+      "title": "环境搭建与工程初始化",
+      "duration": 30,
+      "completed": false
+    },
+    {
+      "id": 3,
+      "title": "核心概念与原理",
+      "duration": 47,
+      "completed": true
+    },
+    {
+      "id": 4,
+      "title": "基础 API 与用法详解",
+      "duration": 43,
+      "completed": false
+    },
+    {
+      "id": 5,
+      "title": "进阶特性与最佳实践",
+      "duration": 50,
+      "completed": true
+    },
+    {
+      "id": 6,
+      "title": "性能优化与陷阱规避",
+      "duration": 50,
+      "completed": true
+    },
+    {
+      "id": 7,
+      "title": "测试与质量保障",
+      "duration": 53,
+      "completed": true
+    },
+    {
+      "id": 8,
+      "title": "工程化集成",
+      "duration": 35,
+      "completed": false
+    },
+    {
+      "id": 9,
+      "title": "实战项目:从零搭建应用",
+      "duration": 49,
+      "completed": true
+    },
+    {
+      "id": 10,
+      "title": "总结与拓展",
+      "duration": 37,
+      "completed": false
+    }
+  ],
+  "objectives": [
+    "掌握 性能 核心概念与原理",
+    "能够独立完成中等复杂度的实际项目",
+    "理解常见性能优化手段与最佳实践",
+    "培养工程化思维与团队协作能力"
+  ],
+  "requirements": [
+    "具备基本的编程基础",
+    "熟悉 JavaScript / TypeScript 语法",
+    "对 性能 / 优化 有基本了解"
+  ],
+  "reviews": 293
+}

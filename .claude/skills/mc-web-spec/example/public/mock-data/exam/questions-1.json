@@ -1,0 +1,5 @@
+[
+  { "id": 1, "type": "single", "title": "Vue 3 中用于响应式数据声明的 API 是?", "options": ["ref", "reactive", "computed", "以上都是"], "answer": 3 },
+  { "id": 2, "type": "multiple", "title": "以下哪些是 Vue 3 的新特性?", "options": ["Composition API", "Teleport", "Suspense", "Mixins"], "answer": [0, 1, 2] },
+  { "id": 3, "type": "judge", "title": "Vue 3 的 Composition API 完全替代了 Options API。", "answer": false }
+]

@@ -12,7 +12,10 @@
 
 ## Source Layout
 
-Bootstrapped from the MMagiX `backend/gateway-webflux` module (design doc §9 reuse list), package `fun.commons.tokengateway`:
+Maven multi-module (see design doc §9; M0 delivered `gateway-spi`):
+
+- `gateway-spi` — capability-face SPI (M0 frozen): BackendAdapter + Capability + 7 face interfaces + task delegate + contract DTOs + config model + startup capability validation
+- `app` — assembly application (LLM face bootstrapped from MMagiX `backend/gateway-webflux`), package `fun.commons.tokengateway`:
 
 | Package | Responsibility |
 |---|---|
@@ -31,11 +34,11 @@ Bootstrapped from the MMagiX `backend/gateway-webflux` module (design doc §9 re
 Prerequisites: backend capability services reachable (e.g. MMagiX monolith on :9400); Redis reachable (default localhost:6379).
 
 ```bash
-mvn package                                        # 194 tests
-java -jar target/token-gateway-0.0.1-SNAPSHOT.jar  # listens on :9401
+mvn package                                                   # 194 tests
+java -jar app/target/token-gateway-app-0.0.1-SNAPSHOT.jar     # listens on :9401
 ```
 
-Key configuration (`src/main/resources/application.yml`): `gateway.backend.url` (backend RPC target), `gateway.backend.internal-token` (`dev-` prefix skips the signed header), `gateway.health-report.enabled` (channel health reporting, default on), `gateway.thmp.*` (TokenHub shadow/cutover, default off).
+Key configuration (`app/src/main/resources/application.yml`): `gateway.backend.url` (backend RPC target), `gateway.backend.internal-token` (`dev-` prefix skips the signed header), `gateway.health-report.enabled` (channel health reporting, default on), `gateway.thmp.*` (TokenHub shadow/cutover, default off).
 
 ## Documentation
 

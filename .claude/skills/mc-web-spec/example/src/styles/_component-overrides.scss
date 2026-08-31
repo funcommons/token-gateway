@@ -1,0 +1,24 @@
+// styles/_component-overrides.scss
+// Brand-specific overrides for common components (Header, Sidebar, Button,
+// Card, etc.) Activated via html[data-brand="..."] on the root element.
+//
+// The `brand-overrides` mixin in _mixins.scss reads --brand-* tokens
+// and emits a single structural override block — shared by all brands.
+// No per-brand config map: differences live in token values, not in
+// 35-field maps.
+
+@use 'mixins' as *;
+
+html[data-brand] {
+  @include brand-overrides;
+}
+
+// Brand-aware loading spinner: SVG content from
+// src/assets/loadings/_loading_<brand>.svg uses `currentColor`, so the
+// spinner stroke/fill follows whatever `color` the wrapping `.circular`
+// inherits. EP doesn't set a color here by default, so we tie it to the
+// active primary — this makes the spinner adopt the brand accent and
+// re-color automatically when brand / theme switches.
+.el-loading-spinner .circular {
+  color: var(--el-color-primary);
+}

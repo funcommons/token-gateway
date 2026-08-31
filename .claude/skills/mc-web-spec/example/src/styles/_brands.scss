@@ -1,0 +1,25 @@
+// _brands.scss
+// Brand styles applied via html[data-brand="..."] on the root element.
+//
+// One file per brand lives in ./brands/_*.scss. Each file calls the
+// `define-brand` mixin (see _mixins.scss) which emits a single block:
+//
+//   html[data-brand='apple'] {
+//     --brand-primary: #007aff;
+//     --brand-radius-card: 16px;
+//     ... (all tokens)
+//     /* auto: --brand-primary-light/lighter/lightest/dark */
+//   }
+//
+// To add a new brand:
+//   1. Create src/styles/brands/_<name>.scss
+//   2. @use it below
+//   3. Add the brand to src/config/brands.ts (for the UI)
+
+@use 'brands/apple';
+@use 'brands/microsoft';
+@use 'brands/google';
+@use 'brands/ldx2';
+@use 'brands/vonnex';
+@use 'brands/mchuan';
+@use 'brands/manyun';

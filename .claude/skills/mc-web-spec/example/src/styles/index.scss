@@ -1,0 +1,324 @@
+// styles/index.scss
+// Main stylesheet entry. Order matters:
+// 1. Element Plus base
+// 2. Reset
+// 3. Brand tokens (base --app-primary, font, radius, shadow)
+// 4. Theme tokens (bg, text, border) - imported AFTER brands so that
+//    themes can override the brand default (e.g. orange-black forces primary to orange)
+// 5. EP token overrides (color-mix variants, popper/dialog backgrounds)
+// 6. Custom app styles
+
+@use 'reset';
+@use 'brands';
+@use 'themes';
+@use 'ep-overrides';
+@use 'component-overrides';
+
+// ---- App layout helpers ----
+// Prevent horizontal scroll on the workspace (mobile). Long demo content
+// (tables, code blocks, pre tags, wide images) can overflow the viewport
+// horizontally. We clip them at the body level and let each child use
+// min-width: 0 to shrink to fit.
+html,
+body {
+  overflow-x: hidden;
+  width: 100%;
+}
+
+// Responsive padding scale (mobile → tablet → desktop):
+//   mobile  (<768)  :  4px
+//   tablet  (768+)  :  8px
+//   desktop (1024+) : 16px
+// Applied uniformly to .app-page, .app-page-header, .app-grid (gap),
+// .app-stack / .app-row (gap), .app-mt / .app-mb, and to all common
+// block components below via the @media queries.
+
+$ws-pad: 4px;
+@media (min-width: 768px) {
+  $ws-pad: 8px;
+}
+@media (min-width: 1024px) {
+  $ws-pad: 16px;
+}
+
+.app-page {
+  padding: 4px;
+  min-height: 100%;
+  /* Workspace uses gap to space its children (功能块 + 布局组件) uniformly.
+     This way layout components inside the workspace can keep padding=0 and
+     margin=0 — they just sit between siblings and gap handles the gutter. */
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.app-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.app-page-title {
+  font-size: var(--app-font-size-header);
+  font-weight: 600;
+  color: var(--app-text);
+  margin: 0;
+}
+.app-page-subtitle {
+  font-size: var(--app-font-size-base);
+  color: var(--app-text-secondary);
+  margin-top: 4px;
+}
+
+@media (min-width: 768px) {
+  .app-page {
+    padding: 8px;
+    gap: 8px;
+  }
+  .app-page-header {
+    margin-bottom: 8px;
+  }
+}
+@media (min-width: 1024px) {
+  .app-page {
+    padding: 16px;
+    gap: 16px;
+  }
+  .app-page-header {
+    margin-bottom: 16px;
+  }
+}
+
+// Card grid used by most demo pages
+.app-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 4px;
+}
+
+.app-grid--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.app-grid--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.app-grid--4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* ---- Domain-named grid utilities (deduplicate per-page grids). ---- */
+/* KPI 行: 4 → 2 → 1 列 */
+.app-grid--kpi   { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+/* 主区+侧栏: 1.4fr 1fr → 1fr */
+.app-grid--aside { grid-template-columns: 1.4fr 1fr; align-items: start; }
+/* 2 主区: 2fr 1fr → 1fr (例如 Dashboard 主+侧) */
+.app-grid--main  { grid-template-columns: 2fr 1fr; align-items: start; }
+/* Hero + 右侧促销 */
+.app-grid--hero  { grid-template-columns: 1fr 280px; align-items: start; }
+/* 卡片瀑布流, 最小 260, auto-fill */
+.app-grid--cards { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+/* 分类入口 8 大类: 8 → 4 → 2 */
+.app-grid--cats  { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+/* 一行 3 卡: 3 → 2 → 1 */
+.app-grid--3to1  { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+@media (max-width: 1024px) {
+  .app-grid--kpi,
+  .app-grid--3to1 { grid-template-columns: repeat(2, 1fr); }
+  .app-grid--aside,
+  .app-grid--main,
+  .app-grid--hero { grid-template-columns: 1fr; }
+  .app-grid--cats { grid-template-columns: repeat(4, 1fr); }
+}
+/* 2026-06-08: 手机端单列化规范已取消 — .app-grid--kpi/--3to1/--cards 在手机端
+   保留 2 列 (与平板一致), 走 auto-fill / minmax 的响应式行为.
+   真正需要 1 列时, 页面作者显式覆盖. */
+@media (max-width: 768px) {
+  .app-grid--kpi,
+  .app-grid--3to1 { grid-template-columns: repeat(2, 1fr); }
+  .app-grid--cards { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .app-grid--cats  { grid-template-columns: repeat(4, 1fr); }
+}
+
+@media (min-width: 768px) {
+  .app-grid {
+    gap: 8px;
+  }
+}
+@media (min-width: 1024px) {
+  .app-grid {
+    gap: 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-grid--2,
+  .app-grid--3,
+  .app-grid--4 {
+    grid-template-columns: 1fr;
+  }
+  // Lock horizontal scrolling on the workspace. Demo content (tables,
+  // code blocks, images, drawer handles) can otherwise force the body
+  // to be wider than the viewport, causing accidental left/right swipe.
+  // NOTE: `.app-shell` is intentionally NOT in this list — applying
+  // `overflow-x: hidden` to the header's parent would create a scroll
+  // container and break `position: sticky` on the top bar. Horizontal
+  // overflow is already locked at the html/body level above.
+  .app-page,
+  .app-main,
+  .my-section,
+  .work-section,
+  .my-card,
+  .page-header,
+  .profile-card,
+  .profile-section {
+    overflow-x: hidden;
+  }
+  // Force all flex/grid children to allow shrinking below their content
+  // size (the default `min-width: auto` would otherwise let a single
+  // oversized child push the whole row past the viewport).
+  .app-page * {
+    min-width: 0;
+  }
+  // Cap cards to viewport width.
+  .app-page .el-card {
+    max-width: 100%;
+  }
+  // Tables can still scroll internally — keep the EP default behavior
+  // (table is already overflow-x: auto by default) but constrain its
+  // outer width to the viewport.
+  .app-page .el-table {
+    max-width: 100%;
+  }
+}
+
+// Spacing helpers
+.app-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.app-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.app-row--sm {
+  gap: 8px;
+}
+.app-row--end {
+  justify-content: flex-end;
+}
+.app-row--between {
+  justify-content: space-between;
+}
+.app-mt {
+  margin-top: 4px;
+}
+.app-mb {
+  margin-bottom: 4px;
+}
+@media (min-width: 768px) {
+  .app-stack {
+    gap: 8px;
+  }
+  .app-mt {
+    margin-top: 8px;
+  }
+  .app-mb {
+    margin-bottom: 8px;
+  }
+}
+@media (min-width: 1024px) {
+  .app-stack {
+    gap: 16px;
+  }
+  .app-mt {
+    margin-top: 16px;
+  }
+  .app-mb {
+    margin-bottom: 16px;
+  }
+}
+
+// Block components inside the work area (.app-main).
+// Responsive padding + margin-bottom (mobile 4 / tablet 8 / desktop 16).
+// All "block"-style classes — page header, demo card, section, anchor
+// section, settings card, profile card, welcome banner, etc. — inherit
+// this scale automatically by being listed in the selector group below.
+// New block classes can be added to the group to opt in.
+:root {
+  --app-block-pad: 4px;
+  --app-block-mb: 4px;
+}
+@media (min-width: 768px) {
+  :root {
+    --app-block-pad: 8px;
+    --app-block-mb: 8px;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --app-block-pad: 16px;
+    --app-block-mb: 16px;
+  }
+}
+
+.app-main .my-card,
+.app-main .page-header,
+.app-main .profile-card,
+.app-main .profile-section,
+.app-main .welcome,
+.app-main .my-section,
+.app-main .work-section,
+.app-main .entry-card,
+.app-main .stat-card,
+.app-main .home-card,
+.app-main .team-card,
+.app-main .brand-card,
+.app-main .theme-preview,
+.app-main .settings-tabs,
+.app-main .todo-list,
+.app-main .timeline-list,
+.app-main .infinite-list {
+  padding: var(--app-block-pad);
+  /* margin-bottom intentionally omitted — .app-page is now a flex column
+     with gap, so siblings (功能块 + layout components) auto-space without
+     each child needing its own margin. */
+}
+
+.my-section__header {
+  margin-bottom: var(--app-block-mb);
+  padding-bottom: var(--app-block-mb);
+}
+.my-section__title {
+  font-size: 14px;
+}
+.my-section__desc {
+  font-size: 12px;
+  margin-top: 2px;
+}
+.my-section__body {
+  gap: var(--app-block-mb);
+}
+@media (min-width: 768px) {
+  .my-section__title {
+    font-size: 15px;
+  }
+  .my-section__desc {
+    font-size: 12px;
+  }
+}
+@media (min-width: 1024px) {
+  .my-section__title {
+    font-size: 16px;
+  }
+  .my-section__desc {
+    font-size: 13px;
+    margin-top: 6px;
+  }
+}

@@ -1,0 +1,6 @@
+[
+  { "label": "本周学时", "value": 12, "unit": "小时", "trend": 18, "icon": "ri-time-line" },
+  { "label": "已完成课程", "value": 8, "trend": 2, "icon": "ri-checkbox-circle-line" },
+  { "label": "考试通过率", "value": 92, "unit": "%", "trend": 5, "icon": "ri-medal-line" },
+  { "label": "获得证书", "value": 5, "trend": 1, "icon": "ri-award-line" }
+]

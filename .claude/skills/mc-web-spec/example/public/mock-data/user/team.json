@@ -1,0 +1,10 @@
+[
+  { "id": "u001", "name": "陈晓宇", "avatar": "/images/avatars/1.png", "role": "前端工程师" },
+  { "id": "u002", "name": "王心怡", "avatar": "/images/avatars/2.png", "role": "UI 设计师" },
+  { "id": "u003", "name": "张明远", "avatar": "/images/avatars/3.png", "role": "后端工程师" },
+  { "id": "u004", "name": "李雪儿", "avatar": "/images/avatars/4.png", "role": "产品经理" },
+  { "id": "u005", "name": "赵建国", "avatar": "/images/avatars/5.png", "role": "测试工程师" },
+  { "id": "u006", "name": "孙悦", "avatar": "/images/avatars/6.png", "role": "前端工程师" },
+  { "id": "u007", "name": "周思源", "avatar": "/images/avatars/7.png", "role": "DevOps" },
+  { "id": "u008", "name": "吴婷婷", "avatar": "/images/avatars/8.png", "role": "数据分析师" }
+]

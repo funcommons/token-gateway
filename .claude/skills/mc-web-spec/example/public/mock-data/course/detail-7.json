@@ -1,0 +1,96 @@
+{
+  "id": 7,
+  "title": "Java 21 新特性与企业实践",
+  "cover": "/images/courses/7.jpg",
+  "category": "be-java",
+  "duration": 480,
+  "level": "advanced",
+  "instructor": {
+    "name": "刘志斌",
+    "title": "资深工程师 / 前 Java 专家",
+    "avatar": "/images/avatars/8.png",
+    "bio": "10 年以上开发经验,曾任职于多家一线互联网公司,主导过多个大型项目。"
+  },
+  "students": 1583,
+  "rating": 4.5,
+  "description": "虚拟线程、模式匹配、Record 模式实战。",
+  "tags": [
+    "Java",
+    "Spring"
+  ],
+  "progress": 0,
+  "chapters": [
+    {
+      "id": 1,
+      "title": "课程介绍与学习目标",
+      "duration": 38,
+      "completed": false
+    },
+    {
+      "id": 2,
+      "title": "环境搭建与工程初始化",
+      "duration": 34,
+      "completed": true
+    },
+    {
+      "id": 3,
+      "title": "核心概念与原理",
+      "duration": 58,
+      "completed": true
+    },
+    {
+      "id": 4,
+      "title": "基础 API 与用法详解",
+      "duration": 35,
+      "completed": false
+    },
+    {
+      "id": 5,
+      "title": "进阶特性与最佳实践",
+      "duration": 58,
+      "completed": true
+    },
+    {
+      "id": 6,
+      "title": "性能优化与陷阱规避",
+      "duration": 51,
+      "completed": false
+    },
+    {
+      "id": 7,
+      "title": "测试与质量保障",
+      "duration": 31,
+      "completed": false
+    },
+    {
+      "id": 8,
+      "title": "工程化集成",
+      "duration": 42,
+      "completed": false
+    },
+    {
+      "id": 9,
+      "title": "实战项目:从零搭建应用",
+      "duration": 58,
+      "completed": false
+    },
+    {
+      "id": 10,
+      "title": "总结与拓展",
+      "duration": 38,
+      "completed": true
+    }
+  ],
+  "objectives": [
+    "掌握 Java 核心概念与原理",
+    "能够独立完成中等复杂度的实际项目",
+    "理解常见性能优化手段与最佳实践",
+    "培养工程化思维与团队协作能力"
+  ],
+  "requirements": [
+    "具备基本的编程基础",
+    "熟悉 JavaScript / TypeScript 语法",
+    "对 Java / Spring 有基本了解"
+  ],
+  "reviews": 474
+}

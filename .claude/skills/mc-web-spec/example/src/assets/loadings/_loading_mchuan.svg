@@ -1,0 +1,42 @@
+<!--
+  _loading_mchuan.svg
+  Based on _loading_apple.svg (8-circle ring around center, opacity wave
+  rotates around the ring). Two enhancements:
+
+    1. Gradient color (蓝→紫, mchuan brand): each circle picks its color
+       from a userSpaceOnUse linearGradient (top-left blue → bottom-right
+       purple), so the ring visually cycles through the brand palette.
+    2. Breathing: outer <g> scales 1 → 1.15 → 1 over 2.5s (transform-origin
+       = 25 25, the ring center), giving a slow inhale/exhale on top of
+       the 1s rotation.
+
+  viewBox 0 0 50 50 matches EP's v-loading <svg class="circular">.
+-->
+<defs>
+  <linearGradient id="mchuanG" x1="6" y1="6" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+    <stop offset="0%"   stop-color="#2563eb"/>  <!-- blue  -->
+    <stop offset="50%"  stop-color="#7c3aed"/>  <!-- mid violet -->
+    <stop offset="100%" stop-color="#a855f7"/>  <!-- purple -->
+  </linearGradient>
+</defs>
+<g transform-origin="25 25">
+  <!-- 呼吸: 整体缩放 1 → 1.15 → 1, 2.5s 一轮 (跟 1s 旋转异步, 视觉更自然) -->
+  <animateTransform attributeName="transform" type="scale"
+    values="1;1.15;1" dur="2.5s" repeatCount="indefinite"/>
+  <g>
+    <!-- Apple-style 旋转: 8 步离散旋转 45°, 1s 一轮 -->
+    <animateTransform attributeName="transform" type="rotate"
+      values="0 25 25;45 25 25;90 25 25;135 25 25;180 25 25;225 25 25;270 25 25;315 25 25"
+      keyTimes="0;0.125;0.25;0.375;0.5;0.625;0.75;0.875"
+      calcMode="discrete" dur="1s" repeatCount="indefinite"/>
+    <!-- 8 圆, 颜色由 url(#mchuanG) 渐变按位置取 (蓝→紫) -->
+    <circle cx="25"   cy="6"    r="3" fill="url(#mchuanG)" opacity="0.15"/>
+    <circle cx="38.4" cy="11.6" r="3" fill="url(#mchuanG)" opacity="0.25"/>
+    <circle cx="44"   cy="25"   r="3" fill="url(#mchuanG)" opacity="0.375"/>
+    <circle cx="38.4" cy="38.4" r="3" fill="url(#mchuanG)" opacity="0.5"/>
+    <circle cx="25"   cy="44"   r="3" fill="url(#mchuanG)" opacity="0.625"/>
+    <circle cx="11.6" cy="38.4" r="3" fill="url(#mchuanG)" opacity="0.75"/>
+    <circle cx="6"    cy="25"   r="3" fill="url(#mchuanG)" opacity="0.875"/>
+    <circle cx="11.6" cy="11.6" r="3" fill="url(#mchuanG)" opacity="1.0"/>
+  </g>
+</g>

@@ -1,0 +1,48 @@
+[
+  {
+    "id": "fe",
+    "label": "前端开发",
+    "children": [
+      { "id": "fe-vue", "label": "Vue" },
+      { "id": "fe-react", "label": "React" },
+      { "id": "fe-ts", "label": "TypeScript" },
+      { "id": "fe-engineering", "label": "前端工程化" }
+    ]
+  },
+  {
+    "id": "be",
+    "label": "后端开发",
+    "children": [
+      { "id": "be-go", "label": "Go" },
+      { "id": "be-java", "label": "Java" },
+      { "id": "be-node", "label": "Node.js" },
+      { "id": "be-db", "label": "数据库" }
+    ]
+  },
+  {
+    "id": "mobile",
+    "label": "移动开发",
+    "children": [
+      { "id": "m-ios", "label": "iOS" },
+      { "id": "m-android", "label": "Android" },
+      { "id": "m-rn", "label": "React Native" }
+    ]
+  },
+  {
+    "id": "ai",
+    "label": "AI / 数据",
+    "children": [
+      { "id": "ai-ml", "label": "机器学习" },
+      { "id": "ai-llm", "label": "大模型" },
+      { "id": "ai-data", "label": "数据分析" }
+    ]
+  },
+  {
+    "id": "soft",
+    "label": "软技能",
+    "children": [
+      { "id": "soft-mgmt", "label": "管理能力" },
+      { "id": "soft-comm", "label": "沟通协作" }
+    ]
+  }
+]

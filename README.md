@@ -12,7 +12,17 @@
 
 ## 源码
 
-代码基底为 MMagiX 仓 `backend/gateway-webflux` 平移（设计方案 §9 复用清单），包名 `fun.commons.tokengateway`：
+Maven 多模块（分模块方案见设计方案 §9，M0 已落地 `gateway-spi`）：
+
+```
+token-gateway/
+  gateway-spi    # 能力面 SPI（M0 冻结）：BackendAdapter + Capability + 七面接口 +
+                 # task 委托面 + contract DTO + 能力面配置模型 + 启动期开关∩能力校验
+  app            # 装配应用（gateway-webflux 平移的 LLM 面全量代码，
+                 # M1 起拆 gateway-core / face-llm / adapter-mmagix）
+```
+
+`app` 包结构（`fun.commons.tokengateway`）：
 
 | 包 | 职责 |
 |---|---|
@@ -31,11 +41,11 @@
 前置：后端能力面服务（如 MMagiX 单体）已在 9400 端口启动；Redis 可达（默认 localhost:6379）。
 
 ```bash
-mvn package                                        # 175 个单测
-java -jar target/token-gateway-0.0.1-SNAPSHOT.jar  # 监听 9401
+mvn package                                                   # 194 个单测
+java -jar app/target/token-gateway-app-0.0.1-SNAPSHOT.jar     # 监听 9401
 ```
 
-关键配置（`src/main/resources/application.yml`）：`gateway.backend.url`（后端 RPC 目标）、`gateway.backend.internal-token`（`dev-` 开头跳过签名头）、`gateway.health-report.enabled`（渠道健康上报，默认开）、`gateway.thmp.*`（TokenHub 影子/切流，默认关闭）。
+关键配置（`app/src/main/resources/application.yml`）：`gateway.backend.url`（后端 RPC 目标）、`gateway.backend.internal-token`（`dev-` 开头跳过签名头）、`gateway.health-report.enabled`（渠道健康上报，默认开）、`gateway.thmp.*`（TokenHub 影子/切流，默认关闭）。
 
 ## 文档
 

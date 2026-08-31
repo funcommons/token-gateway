@@ -1,0 +1,5 @@
+[
+  { "id": 13, "title": "大语言模型应用开发", "cover": "/images/banners/1.jpg", "category": "ai-llm", "duration": 480, "level": "intermediate", "instructor": "李明华", "students": 1876, "rating": 4.8, "description": "前沿技术,值得投入。", "tags": ["LLM", "RAG"] },
+  { "id": 17, "title": "微前端架构实战", "cover": "/images/banners/2.jpg", "category": "fe-engineering", "duration": 360, "level": "advanced", "instructor": "周文博", "students": 543, "rating": 4.8, "description": "大型前端项目必经之路。", "tags": ["微前端", "架构"] },
+  { "id": 18, "title": "Web 性能优化全景", "cover": "/images/banners/3.jpg", "category": "fe-engineering", "duration": 420, "level": "intermediate", "instructor": "Gary Sun", "students": 978, "rating": 4.7, "description": "提升用户体验的关键。", "tags": ["性能", "优化"] }
+]

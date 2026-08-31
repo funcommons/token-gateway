@@ -14,112 +14,31 @@
     <groupId>fun.commons</groupId>
     <artifactId>token-gateway</artifactId>
     <version>0.0.1-SNAPSHOT</version>
+    <packaging>pom</packaging>
     <name>token-gateway</name>
     <description>
         token-gateway 通用模型能力网关 (LLM 同步面 + 任务四模态面).
-        代码基底为 MMagiX gateway-webflux 平移 (docs/开发文档/01_设计方案.md M1):
-        不依赖 backend/* 任何模块, 也不依赖 framework4j (避免 servlet 类加载冲突).
-        自含 ApiResponse/ApiCode + contract DTO, 通过 HTTP RPC (WebClient) 调后端能力面端点.
+        分模块方案见 docs/开发文档/01_设计方案.md §9:
+        gateway-spi (M0 接口先行) → gateway-core / face-llm / face-task / adapter-* (M1+).
     </description>
+
+    <modules>
+        <module>gateway-spi</module>
+        <module>app</module>
+    </modules>
 
     <properties>
         <java.version>17</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
-    <dependencies>
-        <!-- WebFlux + Netty (无 servlet 容器) -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webflux</artifactId>
-        </dependency>
-
-        <!-- Redis (限流 / 幂等 / 缓存, 共享单体 Redis 实例) -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-redis</artifactId>
-        </dependency>
-
-        <!-- 健康检查 -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-
-        <!-- Lombok -->
-        <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
-            <scope>provided</scope>
-        </dependency>
-
-        <!-- fastjson2 (FormatConverter / SseConverter 解析上游 chunk JSON) -->
-        <dependency>
-            <groupId>com.alibaba.fastjson2</groupId>
-            <artifactId>fastjson2</artifactId>
-            <version>2.0.41</version>
-        </dependency>
-
-        <!-- Test -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.projectreactor</groupId>
-            <artifactId>reactor-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.squareup.okhttp3</groupId>
-            <artifactId>mockwebserver</artifactId>
-            <version>4.12.0</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.assertj</groupId>
-            <artifactId>assertj-core</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <!-- Testcontainers (Redis 实现契约测试; 版本由 spring-boot-dependencies 管理,
-             Docker 不可用时 disabledWithoutDocker 自动跳过) -->
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration>
-                    <mainClass>fun.commons.tokengateway.TokenGatewayApplication</mainClass>
-                </configuration>
-            </plugin>
-            <!-- 覆盖率度量 (JaCoCo, mc-test 场景八): 报告落 target/site/jacoco -->
-            <plugin>
-                <groupId>org.jacoco</groupId>
-                <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.13</version>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>prepare-agent</goal>
-                        </goals>
-                    </execution>
-                    <execution>
-                        <id>report</id>
-                        <phase>test</phase>
-                        <goals>
-                            <goal>report</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-        </plugins>
-    </build>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>fun.commons</groupId>
+                <artifactId>gateway-spi</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 </project>

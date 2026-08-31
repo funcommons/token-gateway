@@ -1,0 +1,183 @@
+// _reset.scss
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--app-bg-page);
+  color: var(--app-text);
+  font-family: var(--app-font-family);
+  font-size: 14px;
+  line-height: 1.5;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  height: 100%;
+}
+
+a {
+  color: var(--app-primary);
+  text-decoration: none;
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  color: var(--app-text);
+}
+
+// Thin scrollbar that does not change content width.
+// `scrollbar-width: thin` for Firefox; `-webkit-scrollbar` is 6px with
+// `background-clip: padding-box` so the visible track is 2px and the
+// content area is unchanged (no layout shift on hover).
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.18);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.32);
+  background-clip: padding-box;
+}
+
+// =====================================================================
+// Apple-style: blur backdrop on all popups (drawer, dialog, message-box)
+// and zero padding inside drawer bodies (so sidebars/forms fill edge-to-edge).
+// =====================================================================
+
+// Drawer body should have no padding by default so its content fills
+// the entire panel (no inner white margin around a colored sidebar etc).
+.el-drawer__body {
+  padding: 0 !important;
+}
+
+// Drawer / dialog / message-box / loading backdrop with Apple-style
+// frosted glass blur. EP applies opacity to the overlay via a transition;
+// we layer a blur on top of a dimmed background. A small blur radius (8px)
+// is enough to soften the underlying content without obscuring it.
+.el-overlay,
+.el-drawer__overlay,
+.el-dialog__wrapper,
+.el-message-box__wrapper {
+  background-color: rgba(0, 0, 0, 0.22) !important;
+  backdrop-filter: blur(8px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(8px) saturate(180%) !important;
+}
+// EP uses a separate `.el-overlay-dialog` for nested overlays; keep that
+// transparent so the underlying wrapper's blur shows through.
+.el-overlay-dialog {
+  background-color: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+// =====================================================================
+// Sidebar menu items: long names wrap onto multiple lines instead of
+// being truncated. EP defaults to white-space: nowrap, which truncates
+// any label wider than the 240px sidebar. We override to allow wrap.
+// In icon mode (64px wide) labels are hidden anyway, so this only
+// affects the menu + drawer modes.
+//
+// EP 2.14.1 note: the title text is NOT wrapped in a div by the el-menu
+// component — it is rendered as a direct child (anonymous flex item) of
+// the <li>. An anonymous flex item never wraps, no matter what
+// `white-space` we set on the parent. The fix is to put the title text
+// inside a <span class="app-menu-item__label"> (see AppSidebar.vue
+// template) and then target that span with `flex: 1; min-width: 0` so
+// it can shrink to fit and the inner text wraps.
+//
+// Note: do NOT use :deep() here — this is a global stylesheet, not a
+// .vue <style scoped> block, so the Vue compiler does not process
+// :deep() and it would be emitted to the browser as a literal
+// (invalid) selector, silently breaking the entire rule.
+// =====================================================================
+.app-sidebar .el-menu-item,
+.app-sidebar .el-sub-menu__title {
+  white-space: normal !important;
+  height: auto !important;
+  min-height: 40px;
+  line-height: 1.4 !important;
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+  // Icon sits at the top of multi-line labels instead of vertically
+  // centering between two lines of text.
+  align-items: flex-start !important;
+}
+.app-sidebar .el-menu-item > .app-menu-item__label,
+.app-sidebar .el-sub-menu__title > .app-menu-item__label {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  width: 0;
+  white-space: normal !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+  line-height: 1.4;
+  // Optical alignment: shift the text down 2px so the first line of a
+  // wrapped label visually aligns with the icon's vertical center.
+  padding-top: 2px;
+}
+// Drawer-mode sidebar: same rule (drawer wraps the sidebar component).
+.el-drawer .app-sidebar .el-menu-item,
+.el-drawer .app-sidebar .el-sub-menu__title {
+  white-space: normal !important;
+  height: auto !important;
+  min-height: 40px;
+  line-height: 1.4 !important;
+  align-items: flex-start !important;
+}
+.el-drawer .app-sidebar .el-menu-item > .app-menu-item__label,
+.el-drawer .app-sidebar .el-sub-menu__title > .app-menu-item__label {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  width: 0;
+  white-space: normal !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+  line-height: 1.4;
+}
+// Icon mode (collapsed, 64px wide): labels are hidden by EP, so the
+// flex container holds only the icon. Revert align-items to center so
+// the icon centers vertically in the row instead of sticking to the
+// top (the multi-line-label fix above would otherwise leave a gap).
+.app-sidebar.is-collapsed .el-menu-item,
+.app-sidebar.is-collapsed .el-sub-menu__title,
+.el-drawer .app-sidebar.is-collapsed .el-menu-item,
+.el-drawer .app-sidebar.is-collapsed .el-sub-menu__title {
+  align-items: center !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+// Icon mode: hide the label spans inside EP's collapsed menu so the
+// 64px-wide icon-only sidebar shows no leftover text. Target the
+// three nested shapes EP emits (direct child menu-item, direct child
+// sub-menu, and a menu-item-group wrapping a sub-menu).
+.el-menu--collapse > .el-menu-item > span,
+.el-menu--collapse > .el-sub-menu > .el-sub-menu__title > span,
+.el-menu--collapse > .el-menu-item-group > ul > .el-sub-menu > .el-sub-menu__title > span {
+  visibility: hidden;
+  width: 0;
+  height: 0;
+  display: none;
+  overflow: hidden;
+}

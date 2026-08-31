@@ -1,0 +1,164 @@
+// brands/_microsoft.scss
+// Microsoft Fluent v2 brand style.
+// Reference: Fluent 2 (Microsoft Design System) — corners are 2-4px,
+// surfaces use Acrylic / Mica material (translucent + saturated blur),
+// inputs use a bottom-stroke accent on focus, tabs use a 2px primary
+// underline, and cards have visible 1px hairline strokes (no soft
+// shadow vignette). Type is Segoe UI Variable, density is compact.
+
+@use '../mixins' as *;
+
+@include define-brand(microsoft, (
+  // Primary (Fluent communication blue)
+  primary: #0078d4,
+  primary-dark: #005a9e,
+  on-primary: #ffffff,
+
+  // Text (Fluent neutral palette)
+  text-primary: #1f1f1f,
+  text-secondary: #605e5c,
+  text-tertiary: #8a8886,
+  text-quaternary: #b3b0ad,
+
+  // Background — Fluent uses subtle gray "Mica" pages
+  bg-page: #f5f5f5,
+  bg-card: #ffffff,
+  bg-elevated: #ffffff,
+  bg-muted: #f0f0f0,
+
+  // Sidebar — Acrylic translucent material (overlay over page bg)
+  sidebar-bg: rgba(243, 243, 243, 0.85),
+  sidebar-text-main: #1f1f1f,
+  sidebar-text-regular: #605e5c,
+  sidebar-text-secondary: #8a8886,
+  sidebar-hover-bg: rgba(0, 0, 0, 0.05),
+  sidebar-active-bg: #0078d4,
+  sidebar-active-text: #ffffff,
+
+  // Separator — Fluent hairline stroke
+  separator: #e1dfdd,
+
+  // Shadow (Fluent Depth tokens, sharp + crisp)
+  shadow-sm: (0 1px 2px rgba(0, 0, 0, 0.12)),
+  shadow-md: (0 2px 4px rgba(0, 0, 0, 0.14), 0 0 2px rgba(0, 0, 0, 0.10)),
+  shadow-lg: (0 8px 16px rgba(0, 0, 0, 0.14), 0 0 2px rgba(0, 0, 0, 0.12)),
+  shadow-xl: (0 16px 32px rgba(0, 0, 0, 0.18)),
+
+  // Radius — Fluent 2: 4px is the dominant value, 2px for tight controls,
+  // never round. Cards are 4px too (flat-feel).
+  radius-xs: 2px,
+  radius-sm: 2px,
+  radius-md: 4px,
+  radius-lg: 4px,
+  radius-xl: 6px,
+  radius-2xl: 8px,
+  radius-card: 4px,
+  radius-button: 4px,
+  radius-input: 4px,
+  radius-chip: 4px,
+
+  // Acrylic / Mica blur material
+  blur-sm: blur(20px) saturate(125%),
+  blur-md: blur(40px) saturate(125%),
+
+  // Font — Fluent uses Segoe UI Variable
+  font-family: ('Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', Arial, sans-serif,),
+
+  // Fluent type sizes: 14px body, 16px subhead, 24px title.
+  'font-size-base':   14px,
+  'font-size-large':  16px,
+  'font-size-header': 24px,
+));
+
+// =====================================================================
+// Fluent component touches.
+// - AppHeader uses Acrylic over page bg (translucent + heavy blur).
+// - Sidebar Mica: subtle gray translucent.
+// - Inputs use the Fluent bottom-stroke focus accent (2px primary
+//   bottom border that grows under the wrapper on focus).
+// - Tabs: 2px primary bottom underline on active item.
+// - Cards: visible 1px hairline stroke (always), minimal shadow.
+// - Buttons: 4px square corners, semi-bold weight.
+// =====================================================================
+html[data-brand='microsoft'] {
+  // === AppHeader (Acrylic) ===
+  --app-header-bg: rgba(255, 255, 255, 0.78);
+  --app-header-border-color: #e1dfdd;
+  --app-header-backdrop: blur(40px) saturate(125%);
+  --app-header-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+
+  // Section title: Fluent semi-bold, no tracking
+  .my-section__title {
+    font-weight: 600;
+  }
+  .page-header__title {
+    font-weight: 700;
+  }
+
+  // Fluent button — square 4px, semi-bold, no rounding
+  .el-button {
+    font-weight: 600;
+    border-radius: 4px;
+  }
+  .el-button--primary:not(.is-plain):not(.is-text):not(.is-link) {
+    border-radius: 4px;
+  }
+
+  // Fluent input — bottom accent on focus (signature Fluent text-field)
+  .el-input__wrapper {
+    border-radius: 4px;
+    box-shadow: inset 0 0 0 1px var(--brand-separator);
+    background-color: #ffffff;
+    position: relative;
+  }
+  .el-input__wrapper.is-focus,
+  .el-input__wrapper:focus-within {
+    box-shadow: inset 0 0 0 1px var(--brand-separator),
+                inset 0 -2px 0 0 var(--brand-primary);
+  }
+  // Suppress the brand-overrides mixin's gradient focus ring on Fluent
+  .el-input__wrapper.is-focus::before {
+    display: none;
+  }
+
+  // Fluent tab — 2px primary underline on active
+  .el-tabs__active-bar {
+    background-color: var(--brand-primary);
+    height: 2px;
+  }
+  .el-tabs__item.is-active {
+    font-weight: 600;
+  }
+
+  // Card hairline stroke (always visible, no soft vignette)
+  .my-section,
+  .page-header,
+  .my-card,
+  .el-card {
+    border: 1px solid var(--brand-separator);
+  }
+}
+
+// =====================================================================
+// Dark-mode overrides for microsoft. Uses shared brand-dark-surface mixin
+// then re-flips the Acrylic header to a dark translucent overlay.
+// =====================================================================
+html[data-brand='microsoft'][data-theme='dark'],
+html[data-brand='microsoft'][data-theme='orange-black'] {
+  @include brand-dark-surface;
+
+  // Acrylic over dark page bg
+  --app-header-bg: rgba(31, 41, 55, 0.78);
+  --app-header-border-color: #374151;
+
+  // Dark Fluent input: dark gray fill, white bottom stroke on focus
+  .el-input__wrapper {
+    background-color: #1f2937;
+    box-shadow: inset 0 0 0 1px #374151;
+  }
+  .el-input__wrapper.is-focus,
+  .el-input__wrapper:focus-within {
+    box-shadow: inset 0 0 0 1px #374151,
+                inset 0 -2px 0 0 var(--brand-primary);
+  }
+}

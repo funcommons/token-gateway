@@ -1,0 +1,141 @@
+.fc-sidebar {
+  background: var(--app-sidebar-bg, var(--el-bg-color));
+  border-right: 1px solid var(--app-separator, var(--el-border-color-extra-light));
+  height: calc(100vh - 56px);
+  overflow: hidden;
+  position: sticky;
+  top: 56px;
+  transition: width 0.2s ease;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 64px;
+  max-width: 400px;
+}
+
+.fc-sidebar__nav {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+  padding: 6px 0 56px;
+}
+
+/* scrollbar */
+.fc-sidebar__nav :deep(.el-menu::-webkit-scrollbar) { width: 6px; height: 6px; }
+.fc-sidebar__nav :deep(.el-menu::-webkit-scrollbar-track) { background: transparent; }
+.fc-sidebar__nav :deep(.el-menu::-webkit-scrollbar-thumb) {
+  background-color: rgba(0, 0, 0, 0.18);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.fc-sidebar__nav :deep(.el-menu::-webkit-scrollbar-thumb:hover) {
+  background-color: rgba(0, 0, 0, 0.32);
+  background-clip: padding-box;
+}
+
+/* 菜单项 */
+.fc-sidebar__nav :deep(.el-menu-item),
+.fc-sidebar__nav :deep(.el-sub-menu__title) {
+  border-radius: 8px;
+  margin: 2px 8px;
+  height: 40px;
+  line-height: 40px;
+}
+.fc-sidebar__nav :deep(.el-menu-item.is-active) {
+  font-weight: 600;
+}
+.fc-sidebar__nav :deep(.el-sub-menu .el-menu-item) {
+  border-radius: 6px;
+  height: 36px;
+  line-height: 36px;
+}
+
+/* 折叠态 */
+.fc-sidebar.is-collapsed :deep(.el-menu-item),
+.fc-sidebar.is-collapsed :deep(.el-sub-menu__title) {
+  border-radius: 0;
+  margin: 2px 0;
+  padding-left: 0;
+  padding-right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fc-sidebar.is-collapsed :deep(.el-sub-menu__title .el-icon),
+.fc-sidebar.is-collapsed :deep(.el-menu-item .el-icon) {
+  margin-right: 0;
+}
+.fc-sidebar.is-collapsed :deep(.app-menu-item__label) {
+  max-width: 0;
+  min-width: 0;
+  width: 0;
+  flex-shrink: 0;
+  height: 0;
+  visibility: hidden;
+  overflow: hidden;
+  padding: 0;
+  margin: 0;
+}
+
+/* Drag handle */
+.fc-sidebar__resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 4px;
+  height: calc(100% - 48px);
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+  z-index: 3;
+}
+.fc-sidebar__resize:hover,
+.fc-sidebar.is-dragging .fc-sidebar__resize {
+  background: var(--app-primary);
+}
+.fc-sidebar.is-dragging {
+  transition: none;
+}
+
+/* Toggle button — 颜色 / hover 由 brand-overrides mixin 接管 (brand-sidebar-text-regular),
+   这里只放布局 / 位置 / 几何. */
+.fc-sidebar__toggle {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: background 0.15s, color 0.15s;
+  z-index: 4;
+}
+.fc-sidebar.is-collapsed .fc-sidebar__toggle {
+  right: 50%;
+  transform: translateX(50%);
+  bottom: 12px;
+}
+
+/* Mobile: fill the drawer */
+@media (max-width: 768px) {
+  .fc-sidebar {
+    width: 100% !important;
+    height: 100% !important;
+    position: static;
+    top: auto;
+    border-right: none;
+  }
+  .fc-sidebar__resize,
+  .fc-sidebar__toggle {
+    display: none;
+  }
+}

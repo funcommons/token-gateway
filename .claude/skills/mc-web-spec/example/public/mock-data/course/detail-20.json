@@ -1,0 +1,96 @@
+{
+  "id": 20,
+  "title": "代码质量与测试驱动开发",
+  "cover": "/images/courses/20.jpg",
+  "category": "fe-engineering",
+  "duration": 300,
+  "level": "intermediate",
+  "instructor": {
+    "name": "蔡明辉",
+    "title": "资深工程师 / 前 测试 专家",
+    "avatar": "/images/avatars/5.png",
+    "bio": "10 年以上开发经验,曾任职于多家一线互联网公司,主导过多个大型项目。"
+  },
+  "students": 612,
+  "rating": 4.6,
+  "description": "单元测试、集成测试、TDD/BDD 实战。",
+  "tags": [
+    "测试",
+    "TDD"
+  ],
+  "progress": 0,
+  "chapters": [
+    {
+      "id": 1,
+      "title": "课程介绍与学习目标",
+      "duration": 41,
+      "completed": true
+    },
+    {
+      "id": 2,
+      "title": "环境搭建与工程初始化",
+      "duration": 50,
+      "completed": false
+    },
+    {
+      "id": 3,
+      "title": "核心概念与原理",
+      "duration": 37,
+      "completed": false
+    },
+    {
+      "id": 4,
+      "title": "基础 API 与用法详解",
+      "duration": 36,
+      "completed": true
+    },
+    {
+      "id": 5,
+      "title": "进阶特性与最佳实践",
+      "duration": 46,
+      "completed": true
+    },
+    {
+      "id": 6,
+      "title": "性能优化与陷阱规避",
+      "duration": 53,
+      "completed": true
+    },
+    {
+      "id": 7,
+      "title": "测试与质量保障",
+      "duration": 36,
+      "completed": false
+    },
+    {
+      "id": 8,
+      "title": "工程化集成",
+      "duration": 49,
+      "completed": false
+    },
+    {
+      "id": 9,
+      "title": "实战项目:从零搭建应用",
+      "duration": 53,
+      "completed": true
+    },
+    {
+      "id": 10,
+      "title": "总结与拓展",
+      "duration": 38,
+      "completed": true
+    }
+  ],
+  "objectives": [
+    "掌握 测试 核心概念与原理",
+    "能够独立完成中等复杂度的实际项目",
+    "理解常见性能优化手段与最佳实践",
+    "培养工程化思维与团队协作能力"
+  ],
+  "requirements": [
+    "具备基本的编程基础",
+    "熟悉 JavaScript / TypeScript 语法",
+    "对 测试 / TDD 有基本了解"
+  ],
+  "reviews": 183
+}

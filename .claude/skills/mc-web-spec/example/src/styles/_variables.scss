@@ -1,0 +1,97 @@
+// _variables.scss
+// Build-time SCSS variables. Runtime theming uses CSS custom properties.
+//
+// Brand tokens live in src/styles/brands/_*.scss (one file per brand),
+// each emitting `html[data-brand='name'] { --brand-*: value }` via the
+// `define-brand` mixin in _mixins.scss. No alias layer.
+//
+// Theme tokens live in $themes below and are emitted in _themes.scss.
+// The 4-step border palette is derived from `--app-border` via
+// `color-mix()` — no need to hand-write it per theme.
+
+// Special-case: orange-black theme always uses this primary
+$brand-orange-primary: #ff7d00;
+
+// =====================================================================
+// Theme config map — drives _themes.scss data-driven loop.
+// Each entry maps to a html[data-theme="..."] block that emits the
+// corresponding --app-* CSS variables. The keys become the variable
+// suffix (e.g., `bg` → `--app-bg`). border-light/-lighter/-extra-light
+// are derived at runtime in _themes.scss.
+// =====================================================================
+$themes: (
+  light: (
+    bg: #ffffff,
+    bg-elevated: #ffffff,
+    bg-muted: #f5f7fa,
+    bg-page: #f0f2f5,
+    text: #1f1f1f,
+    text-secondary: #5e5e5e,
+    text-tertiary: #909399,
+    border: #dcdfe6,
+    mask: rgba(0, 0, 0, 0.5),
+  ),
+  dark: (
+    bg: #1a1a1a,
+    bg-elevated: #242424,
+    bg-muted: #2a2a2a,
+    bg-page: #141414,
+    text: #e8e8e8,
+    text-secondary: #b0b0b0,
+    text-tertiary: #808080,
+    border: #3a3a3a,
+    mask: rgba(0, 0, 0, 0.7),
+  ),
+  orange-black: (
+    bg: #0e0e0e,
+    bg-elevated: #1a1a1a,
+    bg-muted: #1f1f1f,
+    bg-page: #050505,
+    text: #f5f5f5,
+    text-secondary: #c0c0c0,
+    text-tertiary: #888888,
+    border: #2a2a2a,
+    mask: rgba(0, 0, 0, 0.75),
+  ),
+);
+
+// ======================================================================
+// AppHeader 全局变量 (主题可覆盖, 默认 = 当前 DEMO 设计)
+// ----------------------------------------------------------------------
+// 常量 (不可改) 见 src/config/header-tokens.ts
+// 品牌覆写见 src/styles/brands/_*.scss 中的 html[data-brand] 段
+// ======================================================================
+
+:root {
+  /* 容器 */
+  --app-header-height: 56px;
+  --app-header-padding: 0 16px;
+  --app-header-gap: 16px;
+  --app-header-gap-left: 12px;
+  --app-header-gap-right: 4px;
+  --app-header-gap-logo: 8px;
+
+  /* 触控目标 (Apple HIG §1.4 ≥44px, 项目折中 40px) */
+  --app-header-touch-target: 40px;
+
+  /* Logo */
+  --app-header-logo-size: 24px;
+  --app-header-logo-subtitle-size: 11px;
+  --app-header-logo-line-height: 1.2;
+
+  /* Search */
+  --app-header-search-max-width: 480px;
+
+  /* User menu */
+  --app-header-user-padding: 4px;
+
+  /* 视觉 (主题可改) */
+  --app-header-bg: var(--el-bg-color);
+  --app-header-border-color: var(--el-border-color-extra-light);
+  --app-header-border-width: 1px;
+  --app-header-shadow: none;
+  --app-header-backdrop: none;
+
+  /* Hover */
+  --app-header-user-hover-bg: var(--el-fill-color-light);
+}

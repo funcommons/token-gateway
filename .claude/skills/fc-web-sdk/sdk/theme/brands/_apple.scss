@@ -1,0 +1,246 @@
+// brands/_apple.scss
+// Apple HIG brand style. Token values track Apple's iOS/macOS system
+// color and semantic-color specifications as closely as possible.
+//
+// Reference: Apple Human Interface Guidelines — Color, Typography, Layout
+//   • system colors (light):  blue #007AFF, green #34C759, indigo #5856D6,
+//     orange #FF9500, pink #FF2D55, purple #AF52DE, red #FF3B30,
+//     teal #5AC8FA, yellow #FFCC00, plus grey palette
+//   • semantic text:   label #000 / secondaryLabel 60% / tertiaryLabel 30%
+//                      / quaternaryLabel 18% (all #3C3C43 on light bg)
+//   • semantic bg:     systemBackground #FFFFFF
+//                      secondarySystemBackground #F2F2F7
+//                      tertiarySystemBackground #FFFFFF (elevated)
+//   • separator:       rgba(60,60,67,0.29) (light)
+//   • type scale:      body 17pt, callout 16, subhead 15, footnote 13,
+//                      caption 12, caption-2 11
+//   • corner radius:   button/input 6pt, card 14-16pt, sheet 14pt
+//   • sidebar:         vibrancy/.sidebar material (translucent over parent)
+//
+// The 4-step primary palette (light/lighter/lightest/dark) is auto-derived
+// from --brand-primary via the `primary-stairs` mixin in _mixins.scss.
+
+@use '../mixins' as *;
+
+@include define-brand(apple, (
+  // ---- System colors (HIG light) ----
+  // Stored as --brand-primary (the only one components read directly) plus
+  // --brand-<name> tokens for status/destructive use. Brand-specific
+  // extension (--brand-success / --brand-warning / --brand-error) is added
+  // below in the html[data-brand='apple'] block.
+  primary: #007aff,           // systemBlue
+  primary-dark: #0040dd,      // systemBlueDark (pressed/hover)
+  on-primary: #ffffff,
+
+  // ---- Semantic text (HIG label hierarchy) ----
+  // label is pure black; the 2nd/3rd/4th are the SAME black with
+  // progressively lower alpha (60 / 30 / 18%) per HIG. We pre-multiply
+  // against the typical page bg so the rendered color matches what HIG
+  // shows in Xcode previews.
+  text-primary: #000000,                           // label
+  text-secondary: rgb(60 60 67 / 60%),             // secondaryLabel
+  text-tertiary: rgb(60 60 67 / 30%),              // tertiaryLabel
+  text-quaternary: rgb(60 60 67 / 18%),            // quaternaryLabel
+
+  // ---- Semantic backgrounds (HIG) ----
+  bg-page: #f2f2f7,            // systemGroupedBackground (light)
+  bg-card: #ffffff,            // systemBackground
+  bg-elevated: #ffffff,        // tertiarySystemBackground (elevated)
+  bg-muted: #f2f2f7,           // secondarySystemBackground
+
+  // ---- Sidebar (macOS .sidebar material) ----
+  // HIG: sidebars use a translucent material over the parent window
+  // background, with vibrancy and backdrop-filter. We approximate with
+  // rgba over a near-white base + blur. The active row uses the primary.
+  sidebar-bg: rgb(243 243 248 / 78%),       // .sidebar (light) ~ 78% alpha
+  sidebar-text-main: #000000,               // label on sidebar
+  sidebar-text-regular: rgb(60 60 67 / 60%),// secondaryLabel
+  sidebar-text-secondary: rgb(60 60 67 / 30%), // tertiaryLabel
+  sidebar-hover-bg: rgb(0 0 0 / 5%),        // hover fill
+  sidebar-active-bg: #007aff,               // active row = primary
+  sidebar-active-text: #ffffff,
+
+  // ---- Separator (HIG opaque separator) ----
+  separator: rgb(60 60 67 / 29%),
+
+  // ---- Shadow (HIG multi-layer soft) ----
+  // HIG shadow recipe: 1-2 stacked layers with 0.04-0.08 alpha, no offset
+  // > 4px on cards. Matches Apple's Settings / Notes / Mail cards.
+  shadow-sm: (0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.04)),
+  shadow-md: (0 4px 12px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.04)),
+  shadow-lg: (0 8px 24px rgba(0, 0, 0, 0.08), 0 4px 8px rgba(0, 0, 0, 0.04)),
+  shadow-xl: (0 12px 40px rgba(0, 0, 0, 0.12)),
+
+  // ---- Corner radius (HIG continuous / squircle values) ----
+  // Apple uses "continuous" corner radius (superellipse) but plain
+  // border-radius approximates it well at small sizes. The HIG values
+  // for controls are tighter than the previous tokens.
+  radius-xs: 4px,             // chips, badges
+  radius-sm: 6px,             // small controls
+  radius-md: 8px,             // inputs, secondary buttons
+  radius-lg: 10px,            // sheets, larger cards
+  radius-xl: 14px,            // cards (HIG card = 14-16)
+  radius-2xl: 18px,           // large surfaces
+  radius-card: 14px,          // primary card radius (HIG)
+  radius-button: 6px,         // iOS button
+  radius-input: 6px,          // iOS text field
+  radius-chip: 6px,           // iOS tag
+
+  // ---- Font (HIG: SF Pro Display/Text system stack) ----
+  font-family: (-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', '微软雅黑', sans-serif,)
+));
+
+// =====================================================================
+// HIG-correct brand-specific extensions (only valid in mchuan... no wait,
+// in `apple` scope). These tokens are HIG-derived and only used by
+// components that opt into them (status badges, destructive buttons,
+// system color icons, etc.). They DON'T override the generic --brand-*
+// tokens used by common components, so the base HIG look stays intact.
+// =====================================================================
+html[data-brand='apple'] {
+  // System status colors (HIG light)
+  --brand-success: #34c759;          // systemGreen
+  --brand-success-bg: #e8f5e9;
+  --brand-success-text: #1b5e20;
+  --brand-warning: #ff9500;          // systemOrange
+  --brand-warning-bg: #fff3e0;
+  --brand-warning-text: #bf360c;
+  --brand-error: #ff3b30;            // systemRed (destructive)
+  --brand-error-bg: #ffebee;
+  --brand-error-text: #c62828;
+  --brand-info: #5ac8fa;             // systemTeal
+  --brand-info-bg: #e3f2fd;
+  --brand-info-text: #0d47a1;
+
+  // iOS type scale (pt values kept as numbers; components multiply by
+  // 1px/pt at the consumer site if needed)
+  --brand-type-body: 17px;
+  --brand-type-callout: 16px;
+  --brand-type-subhead: 15px;
+  --brand-type-footnote: 13px;
+  --brand-type-caption: 12px;
+  --brand-type-caption-2: 11px;
+  --brand-type-headline-weight: 600;
+
+  // macOS sidebar item typography (13pt regular per HIG)
+  --brand-sidebar-font-size: 13px;
+  --brand-sidebar-line-height: 18px;
+
+  // 规格 7: Apple HIG 字号 偏小精致
+  --brand-font-size-base:   13px;
+  --brand-font-size-large:  15px;
+  --brand-font-size-header: 22px;
+
+  // Continuous / squircle corner radius (HIG uses superellipse; for
+  // most components plain border-radius is close enough, but for sheets
+  // and modals you can opt into the more accurate CSS values below).
+  // --brand-radius-continuous-card: 14px;  // equivalent to squircle at 14pt
+  // --brand-radius-continuous-sheet: 14px;
+
+  // Sidebar vibrancy (HIG .sidebar material) — only applied to .app-sidebar
+  // via the brand-overrides mixin; here we just set the token so the
+  // mixin's var(--brand-blur-md, none) fallback resolves correctly.
+  --brand-blur-md: blur(20px);
+  --brand-blur-lg: blur(40px);
+
+  // === FcHeader overrides (HIG: 半透明 + 强模糊) ===
+  --app-header-bg: rgba(255, 255, 255, 0.72);
+  --app-header-border-color: rgba(0, 0, 0, 0.08);
+  --app-header-backdrop: blur(20px);
+  --app-header-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+
+  // =====================================================================
+  // HIG signature component touches.
+  // - SF Pro is optically tighter than other system fonts: tighten letter
+  //   spacing on body & headers (Apple's "Display" optical sizing trick).
+  // - HIG cards have soft 2-layer shadow + hairline border (already set
+  //   via tokens). We also strip the brand-overrides mixin's `--brand-
+  //   primary-gradient` ring on inputs and replace with HIG focus blue
+  //   accent so it reads as iOS/macOS "selection" instead of a gradient.
+  // - HIG buttons: 32px min-height, slight letter-tracking, semi-bold.
+  // - HIG inputs: filled gray bg, no border (HIG default text-field).
+  // - HIG tabs: 2px primary underline on active (no pill / no card fill).
+  // - HIG list separator: inset hairline.
+  // Each rule prefixed with `html[data-brand='apple']` to beat scoped CSS.
+  // =====================================================================
+  letter-spacing: -0.01em;
+
+  // Section header: HIG group-label feel — bolder, slightly tracked
+  .my-section__title {
+    font-weight: 600;
+    letter-spacing: -0.012em;
+  }
+  .page-header__title {
+    font-weight: 700;
+    letter-spacing: -0.022em;  // HIG large title kerning
+  }
+
+  // HIG button: 32px touch target, semi-bold, tracking
+  .el-button {
+    min-height: 32px;
+    padding-inline: 14px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+  // HIG capsule for filled primary (iOS-style)
+  .el-button--primary:not(.is-plain):not(.is-text):not(.is-link) {
+    border-radius: 999px;
+    padding-inline: 18px;
+  }
+
+  // HIG fill-style text field: subtle gray fill, no border, focus = soft
+  // primary tint (no gradient ring).
+  .el-input__wrapper {
+    background-color: rgba(120, 120, 128, 0.12);
+    box-shadow: none !important;
+    border: none;
+  }
+  .el-input__wrapper.is-focus,
+  .el-input__wrapper:focus-within {
+    background-color: rgba(0, 122, 255, 0.08);
+  }
+  .el-input__wrapper.is-focus::before {
+    display: none;  // suppress brand-overrides gradient ring on Apple
+  }
+
+  // HIG segmented underline tabs
+  .el-tabs__active-bar {
+    background-color: var(--brand-primary);
+    height: 2px;
+    border-radius: 1px;
+  }
+  .el-tabs__item.is-active {
+    font-weight: 600;
+  }
+
+  // HIG dropdown / popper: rounded 10px corners (HIG menu)
+  .el-dropdown-menu,
+  .el-popper {
+    border-radius: 10px;
+  }
+}
+
+// =====================================================================
+// Dark-mode overrides for apple. Uses shared brand-dark-surface mixin
+// for the standard 19-token palette, then re-flips the translucent
+// FcHeader bg/border so the title bar stays glass-on-dark (HIG dark
+// vibrancy) instead of glass-on-white.
+// =====================================================================
+html[data-brand='apple'][data-theme='dark'],
+html[data-brand='apple'][data-theme='orange-black'] {
+  @include brand-dark-surface;
+
+  // Header: translucent dark (HIG dark sidebar material)
+  --app-header-bg: rgba(31, 41, 55, 0.72);
+  --app-header-border-color: rgba(255, 255, 255, 0.08);
+  --app-header-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+
+  // Dark-mode HIG input fill (lighter gray on dark)
+  .el-input__wrapper {
+    background-color: rgba(120, 120, 128, 0.24);
+  }
+  .el-input__wrapper.is-focus,
+  .el-input__wrapper:focus-within {
+    background-color: rgba(10, 132, 255, 0.18);  // iOS dark blue
+  }
+}

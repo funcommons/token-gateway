@@ -1,0 +1,8 @@
+<g>
+  <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4, 6" opacity="0.85">
+    <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="3s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="25" cy="25" r="12" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3, 4" opacity="0.55">
+    <animateTransform attributeName="transform" type="rotate" from="360 25 25" to="0 25 25" dur="2s" repeatCount="indefinite"/>
+  </circle>
+</g>

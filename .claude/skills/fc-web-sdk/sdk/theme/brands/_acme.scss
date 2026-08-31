@@ -1,0 +1,466 @@
+// brands/_acme.scss
+// Acme — 基于 manyun 工程化基调, 主色改蓝 (#0070e0), Header 改纯白.
+//
+// 跟 manyun 区别:
+//   - primary  #0070e0 (亮蓝, 替换 manyun 的海洋青绿 #2E8B57)
+//   - mint     #4A8FE0  (浅蓝二档)
+//   - sage     #8AB4EE  (淡蓝三档)
+//   - 文字 / 背景 / 中性色 / 卡片描边 / sidebar 工程化布局 → 全部沿用 manyun
+//   - Header: 纯白底 + 深色文字 + 底部细描边 (manyun 是 3 段渐变绿 + 圆角)
+
+@use '../mixins' as *;
+
+@include define-brand(acme, (
+  // ========== Primary: 亮蓝 (Acme Blue) ==========
+  primary: #0070e0,
+  primary-dark: #0058b0,
+  primary-light: #DDEBFA,
+  primary-lighter: #EEF5FD,
+  on-primary: #ffffff,
+  on-primary-container: #0a1c2e,
+
+  // ========== Mint: 浅蓝 (Mint secondary) — KPI/sensor 二档 ==========
+  mint: #4A8FE0,
+  mint-dark: #3070C7,
+  mint-light: #E5F0FB,
+  on-mint: #ffffff,
+
+  // ========== Sage: 淡蓝 (Sage accent) — KPI/sensor 三档 ==========
+  sage: #8AB4EE,
+  sage-dark: #6A95D5,
+  sage-light: #EEF5FD,
+  on-sage: #ffffff,
+
+  // ========== Text — 深蓝黑 (沿用 manyun 的墨色基调, 略偏冷) ==========
+  text-primary: #1A2530,
+  text-secondary: #2D3845,
+  text-tertiary: #5A6675,
+  text-quaternary: #8A95A4,
+
+  // ========== Background — 浅蓝灰底 (跟 manyun 的青绿底对应, 改偏冷蓝) ==========
+  bg-page: #EEF2F7,
+  bg-card: #FFFFFF,
+  bg-elevated: #FAFCFE,
+  bg-muted: #E5EBF2,
+
+  // ========== Sidebar — 白色 + 细蓝描边 ==========
+  sidebar-bg: #FFFFFF,
+  sidebar-text-main: #1A2530,
+  sidebar-text-regular: #5A6675,
+  sidebar-text-secondary: #8A95A4,
+  sidebar-hover-bg: #EEF5FD,
+  sidebar-active-bg: #DDEBFA,
+  sidebar-active-text: #0058b0,
+
+  // ========== Separator — 浅蓝描边 ==========
+  separator: #DCE3EB,
+
+  // ========== Shadow — 蓝调极轻 ==========
+  shadow-sm: (0 1px 3px rgba(20, 60, 120, 0.04)),
+  shadow-md: (0 1px 3px rgba(20, 60, 120, 0.04), 0 4px 12px rgba(20, 60, 120, 0.08)),
+  shadow-lg: (0 4px 12px rgba(20, 60, 120, 0.08), 0 8px 24px rgba(20, 60, 120, 0.10)),
+  shadow-xl: (0 8px 24px rgba(20, 60, 120, 0.12), 0 16px 40px rgba(20, 60, 120, 0.14)),
+
+  // ========== Radius — 12px 卡 + 8px 按钮 (沿用 manyun) ==========
+  radius-xs: 2px,
+  radius-sm: 6px,
+  radius-md: 10px,
+  radius-lg: 14px,
+  radius-xl: 18px,
+  radius-2xl: 24px,
+  radius-card: 12px,
+  radius-button: 8px,
+  radius-input: 8px,
+  radius-chip: 999px,
+
+  blur-sm: blur(8px),
+  blur-md: blur(16px),
+  blur-lg: blur(32px),
+
+  // ========== Scrollbar — 浅蓝调 ==========
+  scrollbar-thumb: #B8C9DC,
+  scrollbar-thumb-hover: #8AB4EE,
+
+  // ========== Font ==========
+  font-family: ('PingFang SC', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Sans GB', sans-serif,),
+
+  'font-size-base':   14px,
+  'font-size-large':  15px,
+  'font-size-header': 22px,
+));
+
+// =====================================================================
+// 品牌特有 token + 组件覆写
+// =====================================================================
+html[data-brand='acme'] {
+  // ========== 渐变 token (Logo / 装饰用, header 不用) ==========
+  --brand-acme-gradient: linear-gradient(90deg, #0058b0 0%, #0070e0 50%, #4A8FE0 100%);
+  --brand-acme-gradient-diag: linear-gradient(135deg, #0058b0 0%, #0070e0 100%);
+
+  // ========== Sidebar 底部插画 token ==========
+  --brand-acme-hill: linear-gradient(to top, #E5F0FB 0%, transparent 100%);
+  --brand-acme-fade: linear-gradient(180deg, transparent 0%, #EEF5FD 100%);
+
+  // ========== Status 配色 — 标准 red/yellow + 蓝调 info ==========
+  --brand-danger: #DC2626;
+  --brand-danger-bg: #FEE2E2;
+  --brand-danger-text: #B91C1C;
+
+  --brand-warning: #CA8A04;
+  --brand-warning-bg: #FEF9C3;
+  --brand-warning-text: #A16207;
+
+  --brand-caution: #0070e0;
+  --brand-caution-bg: #DDEBFA;
+  --brand-caution-text: #0058b0;
+
+  --brand-info: #4A8FE0;
+  --brand-info-bg: #E5F0FB;
+  --brand-info-text: #3070C7;
+
+  // ========== KPI / Card 三档蓝色变体 ==========
+  --brand-kpi-card-bg-green: #ffffff;
+  --brand-kpi-card-border-green: #DCE3EB;
+  --brand-kpi-icon-bg-green: #DDEBFA;
+  --brand-kpi-icon-color-green: #0070e0;
+  --brand-kpi-trend-bg-green: #DDEBFA;
+  --brand-kpi-trend-color-green: #0058b0;
+
+  --brand-kpi-card-bg-gold: #ffffff;
+  --brand-kpi-card-border-gold: #DCE3EB;
+  --brand-kpi-icon-bg-gold: #E5F0FB;
+  --brand-kpi-icon-color-gold: #4A8FE0;
+  --brand-kpi-trend-bg-gold: #E5F0FB;
+  --brand-kpi-trend-color-gold: #3070C7;
+
+  --brand-kpi-card-bg-brown: #ffffff;
+  --brand-kpi-card-border-brown: #DCE3EB;
+  --brand-kpi-icon-bg-brown: #EEF5FD;
+  --brand-kpi-icon-color-brown: #8AB4EE;
+  --brand-kpi-trend-bg-brown: #EEF5FD;
+  --brand-kpi-trend-color-brown: #6A95D5;
+
+  --brand-kpi-icon-size: 56px;
+  --brand-kpi-icon-radius: 50%;
+
+  --brand-card-radius: 12px;
+  --brand-card-border: 1px solid #DCE3EB;
+  --brand-card-shadow: 0 1px 3px rgba(20, 60, 120, 0.04);
+  --brand-card-shadow-hover: 0 4px 12px rgba(20, 60, 120, 0.08);
+
+  // ========== Sidebar nav hover 三档蓝色变体 ==========
+  --brand-nav-hover-green-bg: #EEF5FD;
+  --brand-nav-hover-green-color: #0058b0;
+  --brand-nav-hover-gold-bg: #EEF5FD;
+  --brand-nav-hover-gold-color: #3070C7;
+  --brand-nav-hover-brown-bg: #EEF5FD;
+  --brand-nav-hover-brown-color: #6A95D5;
+
+  // ========== 区块标题 ==========
+  --brand-section-title-border: 4px solid #0070e0;
+  --brand-section-title-pad-left: 8px;
+  --brand-section-title-color: #1A2530;
+  --brand-section-title-weight: 700;
+  --brand-section-title-size: 16px;
+
+  // ========== FcHeader overrides — 纯白底 + 深色文字 + 底部细描边 ==========
+  --brand-header-height: 64px;
+  --app-header-bg: #ffffff;
+  --app-header-backdrop: none;
+  --app-header-border-color: #DCE3EB;
+
+  // ============================================================
+  // Header 强制覆写 — 纯白底, 但圆角/阴影/border 跟 manyun 对齐
+  // (manyun: 圆角 0 0 16px 16px + 重阴影 + 无 border-bottom)
+  // 文字用 text-primary, 不用白色.
+  // ============================================================
+  .fc-header {
+    background: #ffffff !important;
+    color: var(--brand-text-primary) !important;
+    border-bottom: none !important;
+    border-radius: 0 0 16px 16px !important;       /* 跟 manyun 一致: 底部两角圆角 */
+    box-shadow: 0 8px 32px rgba(20, 60, 120, 0.12),
+                0 2px 8px rgba(0, 0, 0, 0.06) !important;
+  }
+  .fc-header .el-button.is-text,
+  .fc-header .app-logo strong,
+  .fc-header .app-logo__subtitle {
+    color: var(--brand-text-primary) !important;
+  }
+  .fc-header .app-logo__icon {
+    background: transparent !important;
+  }
+  .fc-header .app-logo-mark {
+    background: var(--brand-primary) !important;
+    color: #ffffff !important;
+  }
+  .fc-header .fc-header__search,
+  .fc-header .el-input__wrapper {
+    background: var(--brand-bg-muted) !important;
+    box-shadow: none !important;
+    border-radius: 8px !important;
+  }
+  .fc-header .fc-header__search:hover,
+  .fc-header .el-input__wrapper:hover {
+    background: var(--brand-primary-lighter) !important;
+  }
+  .fc-header .fc-header__search input,
+  .fc-header .el-input__inner {
+    color: var(--brand-text-primary) !important;
+    &::placeholder { color: var(--brand-text-tertiary) !important; }
+  }
+  .fc-header .el-button.is-text:hover,
+  .fc-header .fc-header__action:hover {
+    background: var(--brand-primary-lighter) !important;
+    color: var(--brand-primary) !important;
+  }
+
+  // ============================================================
+  // Sidebar — 白底 + 细描边 (沿用 manyun 工程化布局)
+  // ============================================================
+  .fc-sidebar {
+    background: var(--brand-sidebar-bg) !important;
+    border-right: none !important;
+    position: sticky;
+    top: 56px;
+    box-shadow: 4px 0 20px rgba(20, 60, 120, 0.10),
+                0 1px 3px rgba(20, 60, 120, 0.06) !important;
+  }
+
+  .fc-sidebar .el-menu-item:not(.is-active),
+  .fc-sidebar .el-sub-menu__title:not(.is-active) {
+    color: var(--brand-sidebar-text-tertiary, var(--brand-sidebar-text-regular)) !important;
+  }
+  .fc-sidebar .el-menu-item:not(.is-active) .el-icon,
+  .fc-sidebar .el-menu-item:not(.is-active) .ri-icon,
+  .fc-sidebar .el-sub-menu__title:not(.is-active) .el-icon,
+  .fc-sidebar .el-sub-menu__title:not(.is-active) .ri-icon {
+    color: var(--brand-sidebar-text-tertiary, var(--brand-sidebar-text-regular)) !important;
+  }
+
+  // Active: 浅蓝底 + 主色文字
+  .fc-sidebar .el-menu-item.is-active {
+    background: var(--brand-sidebar-active-bg) !important;
+    color: var(--brand-sidebar-active-text) !important;
+    font-weight: 700 !important;
+    border-radius: 8px !important;
+    margin: 2px 8px !important;
+  }
+  .fc-sidebar.is-collapsed .el-menu-item.is-active {
+    margin: 2px 0 !important;
+  }
+  .fc-sidebar .el-menu-item.is-active::before {
+    content: none;
+  }
+  .fc-sidebar .el-menu-item.is-active .el-icon,
+  .fc-sidebar .el-menu-item.is-active .ri-icon {
+    color: var(--brand-sidebar-active-text) !important;
+  }
+  .fc-sidebar .el-menu-item,
+  .fc-sidebar .el-sub-menu__title {
+    font-weight: 500 !important;
+  }
+  .fc-sidebar .el-menu-item:not(.is-active):hover {
+    background: var(--brand-sidebar-hover-bg);
+    color: var(--brand-primary-dark);
+    border-radius: 8px;
+  }
+  .fc-sidebar .el-menu-item.nav-item--green:not(.is-active):hover {
+    background: var(--brand-nav-hover-green-bg);
+    color: var(--brand-nav-hover-green-color);
+  }
+  .fc-sidebar .el-menu-item.nav-item--gold:not(.is-active):hover {
+    background: var(--brand-nav-hover-gold-bg);
+    color: var(--brand-nav-hover-gold-color);
+  }
+  .fc-sidebar .el-menu-item.nav-item--brown:not(.is-active):hover {
+    background: var(--brand-nav-hover-brown-bg);
+    color: var(--brand-nav-hover-brown-color);
+  }
+
+  // ============================================================
+  // Sidebar 底部装饰 — 淡化插画 (沿用 manyun, 改蓝色调)
+  // ============================================================
+  .fc-sidebar .fc-sidebar__nav {
+    position: relative;
+  }
+  .fc-sidebar::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 110px;
+    background:
+      radial-gradient(ellipse 220px 56px at 30% 100%, rgba(74, 143, 224, 0.18) 0%, rgba(74, 143, 224, 0.18) 60%, transparent 62%),
+      radial-gradient(ellipse 180px 50px at 75% 100%, rgba(0, 112, 224, 0.14) 0%, rgba(0, 112, 224, 0.14) 60%, transparent 62%),
+      linear-gradient(180deg, transparent 0%, rgba(238, 245, 253, 0.85) 100%);
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.55;
+  }
+  .fc-sidebar .fc-sidebar__nav::before {
+    content: '💧';
+    position: absolute;
+    bottom: 20px;
+    left: 24px;
+    font-size: 16px;
+    opacity: 0.22;
+    color: var(--brand-primary);
+    animation: acme-float 6s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 1;
+    text-shadow: 0 1px 2px rgba(255, 255, 255, 0.6);
+  }
+  .fc-sidebar .fc-sidebar__nav::after {
+    content: none;
+  }
+  .fc-sidebar .fc-sidebar__toggle {
+    z-index: 2;
+    color: var(--brand-primary-dark) !important;
+    background: transparent;
+    &:hover {
+      color: var(--brand-primary) !important;
+      background: var(--brand-primary-light) !important;
+    }
+  }
+  @keyframes acme-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-3px); }
+  }
+
+  // ============================================================
+  // Welcome 横幅 — 隐藏 (沿用 manyun)
+  // ============================================================
+  .fc-section-header__welcome {
+    display: none !important;
+  }
+
+  // ============================================================
+  // 区块标题 — border-l-4 pl-2
+  // ============================================================
+  .my-section__title,
+  .page-header__title,
+  .fc-section__title,
+  .kpi-head__label {
+    border-left: 4px solid var(--brand-primary) !important;
+    padding-left: 8px !important;
+    line-height: 1.2 !important;
+    color: var(--brand-text-primary) !important;
+    font-weight: 700 !important;
+  }
+  .my-section--gold .my-section__title,
+  .my-section--gold .fc-section__title { border-left-color: var(--brand-mint) !important; }
+  .my-section--brown .my-section__title,
+  .my-section--brown .fc-section__title { border-left-color: var(--brand-sage) !important; }
+
+  // ============================================================
+  // KPI 卡 — 细描边 + hover 加深
+  // ============================================================
+  .kpi-layout .fc-section {
+    border: 1px solid #DCE3EB;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(20, 60, 120, 0.04);
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  }
+  .kpi-layout .fc-section:hover {
+    border-color: #B8D4F0;
+    box-shadow: 0 4px 12px rgba(20, 60, 120, 0.08);
+    transform: translateY(-1px);
+  }
+  .kpi-layout .fc-section.kpi--green {
+    box-shadow: 0 1px 3px rgba(0, 112, 224, 0.06);
+  }
+  .kpi-layout .fc-section.kpi--green:hover {
+    border-color: #0070e0;
+    box-shadow: 0 4px 12px rgba(0, 112, 224, 0.15);
+  }
+  .kpi-layout .fc-section.kpi--gold {
+    box-shadow: 0 1px 3px rgba(74, 143, 224, 0.06);
+  }
+  .kpi-layout .fc-section.kpi--gold:hover {
+    border-color: #4A8FE0;
+    box-shadow: 0 4px 12px rgba(74, 143, 224, 0.15);
+  }
+  .kpi-layout .fc-section.kpi--brown {
+    box-shadow: 0 1px 3px rgba(138, 180, 238, 0.06);
+  }
+  .kpi-layout .fc-section.kpi--brown:hover {
+    border-color: #8AB4EE;
+    box-shadow: 0 4px 12px rgba(138, 180, 238, 0.18);
+  }
+
+  // ============================================================
+  // 表单元素 — focus 只换 border 颜色, 无阴影
+  // ============================================================
+  .el-input__inner,
+  .el-textarea__inner,
+  .el-select__input {
+    &:focus {
+      border-color: var(--brand-primary) !important;
+      box-shadow: none !important;
+    }
+  }
+  .el-input.is-focus .el-input__wrapper,
+  .el-select .el-input.is-focus .el-input__wrapper {
+    box-shadow: none !important;
+  }
+
+  // ============================================================
+  // 通知小红点 — 蓝调深色边
+  // ============================================================
+  .fc-header .el-badge__content,
+  .fc-header .el-badge.is-dot .el-badge__content {
+    background-color: #FDE047 !important;
+    border: 2px solid var(--brand-primary-dark) !important;
+  }
+
+  // ============================================================
+  // 用户头像 — 主色边
+  // ============================================================
+  .fc-header .fc-header__user img,
+  .fc-header .el-avatar > img {
+    border: 2px solid var(--brand-primary) !important;
+  }
+}
+
+// =====================================================================
+// Dark-mode overrides — 夜色蓝
+// =====================================================================
+html[data-brand='acme'][data-theme='dark'],
+html[data-brand='acme'][data-theme='orange-black'] {
+  @include brand-dark-surface;
+
+  --brand-bg-page: #0d141c;
+  --brand-bg-card: #161F2A;
+  --brand-bg-elevated: #1A2430;
+  --brand-bg-muted: #131B25;
+
+  --brand-text-primary: #dce4ee;
+  --brand-text-secondary: #a8b4c2;
+  --brand-text-tertiary: #7a8593;
+  --brand-text-quaternary: #4f5862;
+
+  --brand-sidebar-bg: #161F2A;
+  --brand-sidebar-text-main: #dce4ee;
+  --brand-sidebar-text-regular: #a8b4c2;
+  --brand-sidebar-text-secondary: #7a8593;
+  --brand-sidebar-hover-bg: rgba(0, 112, 224, 0.10);
+  --brand-sidebar-active-bg: rgba(0, 112, 224, 0.20);
+  --brand-sidebar-active-text: #6eb0ff;
+  --brand-separator: #2a3442;
+
+  --brand-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --brand-shadow-md: 0 1px 3px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.55);
+  --brand-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.55), 0 8px 24px rgba(0, 0, 0, 0.60);
+  --brand-shadow-xl: 0 8px 24px rgba(0, 0, 0, 0.65), 0 16px 40px rgba(0, 0, 0, 0.70);
+
+  --brand-kpi-icon-bg-green: rgba(0, 112, 224, 0.18);
+  --brand-kpi-icon-bg-gold: rgba(74, 143, 224, 0.18);
+  --brand-kpi-icon-bg-brown: rgba(138, 180, 238, 0.18);
+  --brand-kpi-trend-bg-green: rgba(0, 112, 224, 0.20);
+  --brand-kpi-trend-bg-gold: rgba(74, 143, 224, 0.20);
+  --brand-kpi-trend-bg-brown: rgba(138, 180, 238, 0.20);
+
+  --app-header-bg: #161F2A;
+}

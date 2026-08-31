@@ -1,0 +1,203 @@
+// brands/_google.scss
+// Google Material 3 brand style.
+// Reference: Material Design 3 — surfaces use TONAL elevation (subtle
+// primary tint instead of drop shadow), components are pill-shaped
+// (button radius = 9999px), hover/focus adds a primary STATE LAYER
+// (8% / 12% / 16% primary overlay), and corners are large (16-28px
+// on cards). Type stack is Roboto/Inter with the M3 type scale.
+
+@use '../mixins' as *;
+
+@include define-brand(google, (
+  // Primary (M3 default — Material Theme Builder seed #6750a4)
+  primary: #6750a4,
+  primary-dark: #4f378b,
+  on-primary: #ffffff,
+
+  // Text — M3 on-surface palette
+  text-primary: #1c1b1f,         // on-surface
+  text-secondary: #49454f,       // on-surface-variant
+  text-tertiary: #79747e,        // outline
+  text-quaternary: #cac4d0,      // outline-variant
+
+  // Background — M3 surface (faintly primary-tinted)
+  bg-page: #fef7ff,              // M3 surface
+  bg-card: #fffbfe,              // surface-container (elevation 1, tonal)
+  bg-elevated: #f7f2fa,          // surface-container-high (elevation 2)
+  bg-muted: #f5f0f4,             // surface-container-low
+
+  // Sidebar — M3 surface-container (tonal, primary-tinted)
+  sidebar-bg: #f5f0f4,
+  sidebar-text-main: #1c1b1f,
+  sidebar-text-regular: #49454f,
+  sidebar-text-secondary: #79747e,
+  sidebar-hover-bg: rgba(103, 80, 164, 0.08),  // M3 state-layer hover @8%
+  sidebar-active-bg: #eaddff,                  // M3 secondary-container
+  sidebar-active-text: #21005d,                // on-secondary-container
+
+  // Separator — M3 outline-variant (subtle)
+  separator: #e7e0ec,
+
+  // Shadow — M3 uses TONAL ELEVATION, not drop shadow. Keep shadows
+  // minimal; tonal tint is achieved via the surface-container hues above.
+  shadow-sm: none,
+  shadow-md: (0 1px 2px rgba(0, 0, 0, 0.06)),
+  shadow-lg: (0 2px 6px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06)),
+  shadow-xl: (0 6px 12px rgba(0, 0, 0, 0.10), 0 2px 4px rgba(0, 0, 0, 0.06)),
+
+  // Radius — M3 shape system: small 4, medium 8/12, large 16, extra-large 28
+  radius-xs: 4px,
+  radius-sm: 8px,
+  radius-md: 12px,
+  radius-lg: 16px,
+  radius-xl: 24px,
+  radius-2xl: 28px,
+  radius-card: 16px,          // M3 medium component
+  radius-button: 9999px,      // M3 PILL button (signature)
+  radius-input: 4px,          // M3 filled text-field
+  radius-chip: 8px,           // M3 assist chip
+
+  // Font — Inter (Google's variable web font fallback for Roboto Flex)
+  font-family: ('Inter', 'Roboto', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif,),
+
+  // M3 type scale: body-large 16, title-medium 16, headline-small 24.
+  'font-size-base':   14px,
+  'font-size-large':  16px,
+  'font-size-header': 24px,
+));
+
+// =====================================================================
+// Material 3 component touches.
+// - Pill buttons (signature M3 shape) with state-layer hover.
+// - Tonal elevation surfaces: cards/sections use a primary-tinted surface
+//   (no drop shadow).
+// - M3 filled text-field: bottom underline, top-rounded fill.
+// - M3 tab: rounded primary indicator pill (not a thin underline).
+// - M3 chip: 8px corners with outline variant.
+// =====================================================================
+html[data-brand='google'] {
+  // Section title: M3 title-medium, medium-weight
+  .my-section__title {
+    font-weight: 500;
+  }
+  .page-header__title {
+    font-weight: 500;
+  }
+
+  // M3 button — PILL shape, no shadow, state-layer on hover
+  .el-button {
+    border-radius: 9999px;
+    padding-inline: 18px;
+    min-height: 36px;          // M3 default button height
+    font-weight: 500;
+    box-shadow: none;
+  }
+  .el-button--primary:not(.is-plain):not(.is-text):not(.is-link) {
+    border-radius: 9999px;
+    box-shadow: none;
+  }
+  .el-button--primary:not(.is-plain):not(.is-text):not(.is-link):hover {
+    // M3 hover elevation level 1: very subtle
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  }
+  // Outlined variant — M3 outline + pill
+  .el-button--default {
+    border-radius: 9999px;
+    border-color: var(--brand-separator);
+    background-color: transparent;
+  }
+  // State-layer hover for outlined / text buttons (M3 primary @ 8%)
+  .el-button--default:hover,
+  .el-button--primary.is-plain:hover,
+  .el-button--primary.is-text:hover {
+    background-color: rgba(103, 80, 164, 0.08);
+  }
+
+  // M3 filled text-field — bottom underline, top-rounded fill
+  .el-input__wrapper {
+    background-color: #f5f0f4;       // surface-container-low fill
+    box-shadow: inset 0 -1px 0 0 var(--brand-text-tertiary);
+    border-radius: 4px 4px 0 0;
+    border: none;
+  }
+  .el-input__wrapper.is-focus,
+  .el-input__wrapper:focus-within {
+    box-shadow: inset 0 -2px 0 0 var(--brand-primary);
+    background-color: rgba(103, 80, 164, 0.05);
+  }
+  // Suppress brand-overrides mixin's gradient ring on M3
+  .el-input__wrapper.is-focus::before {
+    display: none;
+  }
+
+  // M3 tab indicator — rounded pill (3px height)
+  .el-tabs__active-bar {
+    background-color: var(--brand-primary);
+    height: 3px;
+    border-radius: 3px 3px 0 0;
+  }
+  .el-tabs__item.is-active {
+    font-weight: 500;
+    color: var(--brand-primary);
+  }
+
+  // M3 cards: NO border, NO shadow — pure tonal elevation via bg only.
+  .my-section,
+  .page-header,
+  .my-card,
+  .el-card {
+    border: none;
+    box-shadow: var(--brand-shadow-md);  // very subtle
+  }
+
+  // M3 chip / tag: 8px rounded, outline-variant border
+  .el-tag {
+    border-radius: 8px;
+    border: 1px solid var(--brand-separator);
+  }
+
+  // M3 menu / dropdown: 8-12px rounded corners
+  .el-dropdown-menu,
+  .el-popper {
+    border-radius: 12px;
+  }
+}
+
+// =====================================================================
+// Dark-mode overrides for google. Uses shared brand-dark-surface mixin,
+// then re-tints surfaces with the M3 dark primary-tonal surface palette
+// (these are slightly different from the generic dark palette so the
+// "purple-tinted" M3 dark surface feel comes through).
+// =====================================================================
+html[data-brand='google'][data-theme='dark'],
+html[data-brand='google'][data-theme='orange-black'] {
+  @include brand-dark-surface;
+
+  // M3 dark surfaces (faint primary tint on dark)
+  --brand-bg-page: #141218;          // M3 surface (dark)
+  --brand-bg-card: #211f26;          // surface-container
+  --brand-bg-elevated: #2b2930;      // surface-container-high
+  --brand-bg-muted: #1d1b20;         // surface-container-low
+  --brand-sidebar-bg: #1d1b20;
+  --brand-sidebar-hover-bg: rgba(208, 188, 255, 0.08);  // M3 dark hover layer
+  --brand-sidebar-active-bg: #4f378b;   // dark secondary-container
+  --brand-sidebar-active-text: #eaddff; // on-secondary-container (dark)
+
+  // M3 dark filled text-field
+  .el-input__wrapper {
+    background-color: #2b2930;
+    box-shadow: inset 0 -1px 0 0 var(--brand-text-tertiary);
+  }
+  .el-input__wrapper.is-focus,
+  .el-input__wrapper:focus-within {
+    box-shadow: inset 0 -2px 0 0 var(--brand-primary);
+    background-color: rgba(208, 188, 255, 0.06);
+  }
+
+  // M3 dark state layer (primary-container @ 8%)
+  .el-button--default:hover,
+  .el-button--primary.is-plain:hover,
+  .el-button--primary.is-text:hover {
+    background-color: rgba(208, 188, 255, 0.08);
+  }
+}

@@ -1,0 +1,85 @@
+/* —— 桌面: FcSection 默认卡片视觉, 撑满父容器高度 —— */
+.fc-side-panel {
+  flex-shrink: 0;
+  align-self: stretch;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.fc-side-panel :deep(.fc-section__body) {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* —— 手机 FAB: 圆角主色按钮 (位置由 direction 决定) —— */
+.fc-side-panel-fab {
+  position: fixed;
+  right: 16px;
+  bottom: 80px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: var(--app-primary);
+  color: var(--app-on-primary, #fff);
+  font-size: 20px;
+  box-shadow: var(--app-shadow-md, 0 4px 16px rgba(0, 0, 0, 0.2));
+  z-index:2000;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+/* —— 抽屉内: fc-section 透明化, 让 el-drawer 当唯一外框 ——
+   FcSection.vue scoped style 直接用 .fc-section 类 + EP token (--el-bg-color
+   / --el-border-color-extra-light), 没走 --app-section-* 变量了, 所以这里
+   直接覆写 .fc-section 自身的 CSS 属性. */
+.fc-side-panel-drawer-body {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.fc-side-panel-drawer-body :deep(.fc-section) {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+.fc-side-panel-drawer-body :deep(.fc-section__header) {
+  border-bottom: none;
+}
+.fc-side-panel-drawer-body :deep(.fc-section__body) {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 抽屉自定义关闭按钮 */
+.fc-side-panel-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--app-text-tertiary);
+  font-size: 18px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.fc-side-panel-close:hover {
+  background: var(--app-bg-muted);
+  color: var(--app-text);
+}

@@ -1,0 +1,167 @@
+// brands/_ldx2.scss
+// Ldx2 AIGC brand style — Apple-inspired 旅划算 design language.
+// Dark sidebar (workspace stays light), Apple large radii, glass header,
+// orange primary accent.
+//
+// Tokens flow:
+//   1. `define-brand` emits common --brand-* tokens + auto-derived primary stairs
+//   2. Brand-specific extras (tile / credit / inspiration / asset) emit
+//      directly as --brand-tile-*, --brand-credit-*, etc. — no aliasing,
+//      no `--brand-ldx2-*` mirror.
+//
+// To override the runtime value of any token at this scope, set
+// `--brand-<key>` directly inside the html[data-brand='ldx2'] block.
+
+@use '../mixins' as *;
+
+@include define-brand(ldx2, (
+  // Primary
+  primary: #ff6b00,
+  primary-dark: #e55a00,
+  on-primary: #ffffff,
+  on-primary-container: #4d1e00,
+
+  // Text
+  text-primary: #1d1d1f,
+  text-secondary: #6e6e73,
+  text-tertiary: #86868b,
+  text-quaternary: #aeaeb2,
+  text-on-dark: rgba(255, 255, 255, 0.7),
+  text-on-dark-secondary: rgba(255, 255, 255, 0.5),
+
+  // Background
+  bg-page: #f5f5f7,
+  bg-card: #ffffff,
+  bg-elevated: #ffffff,
+  bg-muted: #f5f5f7,
+
+  // Sidebar (DARK per ldx2 reference; workspace stays LIGHT)
+  sidebar-bg: #1c1c1e,
+  sidebar-text-main: #ffffff,
+  sidebar-text-regular: rgba(255, 255, 255, 0.7),
+  sidebar-text-secondary: rgba(255, 255, 255, 0.5),
+  sidebar-hover-bg: rgba(255, 255, 255, 0.1),
+  sidebar-active-bg: #ff6b00,
+  sidebar-active-text: #ffffff,
+
+  // Separator & border
+  separator: rgba(0, 0, 0, 0.08),
+
+  // Shadow (Apple soft, multi-layer)
+  shadow-sm: (0 1px 2px rgba(0, 0, 0, 0.04)),
+  shadow-md: (0 2px 8px rgba(0, 0, 0, 0.06)),
+  shadow-lg: (0 8px 24px rgba(0, 0, 0, 0.08)),
+  shadow-xl: (0 12px 40px rgba(0, 0, 0, 0.12)),
+
+  // Radius (Apple large)
+  radius-xs: 4px,
+  radius-sm: 8px,
+  radius-md: 12px,
+  radius-lg: 16px,
+  radius-xl: 20px,
+  radius-2xl: 24px,
+  radius-card: 16px,
+  radius-button: 8px,
+  radius-input: 8px,
+  radius-chip: 8px,
+
+  // Frosted glass (header backdrop)
+  blur-sm: blur(10px),
+  blur-md: blur(20px),
+  blur-lg: blur(40px),
+
+  // Lighter scrollbar thumb for dark sidebar
+  scrollbar-thumb: rgba(255, 255, 255, 0.18),
+  scrollbar-thumb-hover: rgba(255, 255, 255, 0.32),
+
+  // Font
+  font-family: (-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', '微软雅黑', 'Helvetica Neue', Helvetica, Arial, sans-serif,),
+
+  // 规格 7: ldx2 字号 偏大
+  'font-size-base':   14px,
+  'font-size-large':  16px,
+  'font-size-header': 24px,
+));
+
+// Brand-specific extras (tile / credit / inspiration / asset). These are
+// only read by ldx2-specific components, so they live in this file with
+// no alias layer. The `define-brand` call above already opened
+// html[data-brand='ldx2'], so we extend that scope here directly.
+html[data-brand='ldx2'] {
+  // === Tile (ldx2 homepage) ===
+  --brand-tile-bg: #ffffff;
+  --brand-tile-dark-bg: #1d1d1f;
+  --brand-tile-radius: 16px;
+  --brand-tile-padding: 24px;
+  --brand-tile-height: 180px;
+  --brand-tile-icon-bg: #f5f5f7;
+  --brand-tile-icon-color: #007aff;
+  --brand-tile-icon-radius: 12px;
+  --brand-tile-icon-size: 40px;
+  --brand-tile-arrow-bg: #1d1d1f;
+  --brand-tile-arrow-light-bg: #ffffff;
+  --brand-tile-arrow-size: 36px;
+  --brand-tile-title-size: 20px;
+  --brand-tile-desc-size: 13px;
+  --brand-tile-title-color: #1d1d1f;
+  --brand-tile-dark-title-color: #ffffff;
+  --brand-tile-desc-color: #86868b;
+  --brand-tile-dark-desc-color: rgba(255, 255, 255, 0.5);
+  --brand-tile-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --brand-tile-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.08);
+
+  // === Credit Card (ldx2 specific) ===
+  --brand-credit-bg: #fff0e5;
+  --brand-credit-border: 1px solid #ffd4b0;
+  --brand-credit-radius: 16px;
+  --brand-credit-label-color: #86868b;
+  --brand-credit-amount-color: #ff6b00;
+  --brand-credit-icon-bg: rgba(255, 107, 0, 0.12);
+  --brand-credit-icon-color: #ff6b00;
+
+  // === Asset thumbnail ===
+  --brand-asset-radius: 12px;
+  --brand-asset-overlay-bg: rgba(0, 0, 0, 0.6);
+  --brand-asset-tag-bg: rgba(255, 255, 255, 0.95);
+  --brand-asset-tag-color: #1d1d1f;
+  --brand-asset-tag-radius: 6px;
+
+  // === Inspiration card ===
+  --brand-inspiration-bg: #ffffff;
+  --brand-inspiration-radius: 16px;
+  --brand-inspiration-icon-bg: #fff0e5;
+  --brand-inspiration-icon-color: #ff6b00;
+  --brand-inspiration-link-color: #ff6b00;
+
+  // === Spacing / layout (ldx2-specific 8px grid) ===
+  --brand-header-height: 60px;
+  --brand-sidebar-width-default: 240px;
+  --brand-sidebar-width-collapsed: 64px;
+  --brand-space-tile: 24px;
+  --brand-grid-main: 1fr 360px;
+  --brand-grid-tiles: 1fr 1fr;
+
+  // === FcHeader overrides (ldx2 专属: 60px 高 + 跟 sidebar 同色 + 强模糊) ===
+  // 其它 --app-header-* / --app-sidebar-* / --app-main-* 走全局 _app-aliases.scss
+  --app-header-height: 60px;
+  --app-header-bg: var(--brand-sidebar-bg);
+  --app-header-backdrop: blur(20px);
+  --app-header-border-color: var(--brand-separator);
+  --app-header-shadow: none;
+}
+
+// =====================================================================
+// Dark-mode overrides for ldx2. The sidebar is ALREADY dark in light
+// mode (per ldx2 reference design) — workspace stays light, sidebar dark.
+// In dark mode the workspace flips dark too; we re-pin sidebar-bg to
+// ldx2's preferred #1c1c1e (slightly darker than the shared #1f2937)
+// so the brand identity stays consistent.
+// =====================================================================
+html[data-brand='ldx2'][data-theme='dark'],
+html[data-brand='ldx2'][data-theme='orange-black'] {
+  @include brand-dark-surface;
+
+  // Pin sidebar to ldx2's signature dark shade (overrides the shared
+  // mixin's #1f2937).
+  --brand-sidebar-bg: #1c1c1e;
+}

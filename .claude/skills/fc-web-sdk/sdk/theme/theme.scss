@@ -1,0 +1,18 @@
+// sdk/theme/theme.scss
+// SDK 主题/品牌统一入口 - SDK 用户只需 import 一次:
+//   import '@/components/sdk/theme/theme.scss'
+//
+// 包含:
+//   1. brand 相关 mixin (define-brand / primary-stairs / brand-dark-surface / brand-overrides)
+//   2. 8 个 brand scss (token + CSS 规则)
+//   3. _themes.scss (light/dark 非 brand token + EP token 映射)
+//   4. _app-aliases.scss (--app-* 别名)
+//
+// 业务侧原 styles/brands/, styles/_brands.scss, styles/_mixins.scss 中的 brand 部分
+// 全部聚合到此, 不再需要 copy.
+
+@use 'mixins' as *;
+@use 'brands';
+
+@use '@/styles/themes' as *;
+@use '@/styles/app-aliases' as *;

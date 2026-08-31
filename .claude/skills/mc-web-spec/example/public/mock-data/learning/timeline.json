@@ -1,0 +1,7 @@
+[
+  { "id": "t1", "title": "完成《Vue 3 进阶开发实战》第 5 章", "description": "深入学习 Pinia 状态管理", "timestamp": "2026-05-30T10:30:00", "type": "primary" },
+  { "id": "t2", "title": "通过《前端工程化综合考试》", "description": "得分 88,获得认证证书", "timestamp": "2026-05-28T16:45:00", "type": "success" },
+  { "id": "t3", "title": "报名《大语言模型应用开发》", "description": "热门 AI 课程,立即开始学习", "timestamp": "2026-05-26T09:15:00", "type": "info" },
+  { "id": "t4", "title": "提交《TypeScript 高级类型系统》作业", "description": "已收到讲师点评", "timestamp": "2026-05-24T14:20:00", "type": "success" },
+  { "id": "t5", "title": "距离《MySQL 性能调优》考试还有 3 天", "description": "请抓紧时间复习", "timestamp": "2026-05-22T08:00:00", "type": "warning" }
+]

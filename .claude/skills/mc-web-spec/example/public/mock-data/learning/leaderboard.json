@@ -1,0 +1,10 @@
+[
+  { "id": 1, "name": "陈晓宇", "avatar": "/images/avatars/1.png", "hours": 36.5 },
+  { "id": 2, "name": "王心怡", "avatar": "/images/avatars/2.png", "hours": 32.0 },
+  { "id": 3, "name": "张明远", "avatar": "/images/avatars/3.png", "hours": 28.5 },
+  { "id": 4, "name": "李雪儿", "avatar": "/images/avatars/4.png", "hours": 25.0 },
+  { "id": 5, "name": "赵建国", "avatar": "/images/avatars/5.png", "hours": 22.5 },
+  { "id": 6, "name": "孙悦", "avatar": "/images/avatars/6.png", "hours": 20.0 },
+  { "id": 7, "name": "周思源", "avatar": "/images/avatars/7.png", "hours": 18.5 },
+  { "id": 8, "name": "吴婷婷", "avatar": "/images/avatars/8.png", "hours": 15.0 }
+]

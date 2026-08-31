@@ -1,0 +1,498 @@
+// brands/_manyun.scss
+// 漫云 (Manyun / 漫云科技) — 智慧农业 SaaS, 单一青绿色系.
+//
+// 参考: 用户提供的"漫云科技"HTML 源码 (Tailwind 写法).
+//
+// 设计语言 — 跟 manyun (3 色生态) 完全不同的方向:
+//   - 单一色系 3 档 tint, 不像 manyun 用 3 个对比色 (绿/金/褐):
+//       primary  #2E8B57 (海洋青绿) — 主色, 比 manyun 的 #2D6A4F 更亮更饱和
+//       mint     #5BA88E (薄荷青) — 二档, 偏蓝绿
+//       sage     #8FB89E (鼠尾草) — 三档, 偏灰绿
+//     3 档都是绿, 用明度差形成层次, 整体更轻盈通透 (manyun 的金/褐是冷暖混搭).
+//   - 卡片有 border (manyun 没有), 用细描边 + 极轻阴影, 视觉更"工程化".
+//   - 背景是青绿底色 #EEF3F0 (不是 manyun 的暖中性 #F7F6F3), 整体偏冷.
+//   - 文字是墨绿黑 #1A2520 (不是 manyun 的暖深棕 #2C2520).
+//   - active 左条 3px (manyun 是 4px).
+//   - Header 3 段渐变 #1F6B43 → #2E8B57 → #3A9B68 (manyun 是 2 段).
+//   - Sidebar 底部装饰: 单一 hill + 漂浮 leaf/fan/seedling (manyun 是 3 色山丘).
+
+@use '../mixins' as *;
+
+@include define-brand(manyun, (
+  // ========== Primary: 海洋青绿 (Sea Green) ==========
+  primary: #2E8B57,
+  primary-dark: #1F6B43,
+  primary-light: #E3EFE8,
+  primary-lighter: #F0F6F2,
+  on-primary: #ffffff,
+  on-primary-container: #0a1c12,
+
+  // ========== Mint: 薄荷青 (Mint secondary) — KPI/sensor 二档 ==========
+  mint: #5BA88E,
+  mint-dark: #468773,
+  mint-light: #E5F0EC,
+  on-mint: #ffffff,
+
+  // ========== Sage: 鼠尾草 (Sage accent) — KPI/sensor 三档 ==========
+  sage: #8FB89E,
+  sage-dark: #6E9580,
+  sage-light: #EEF4F0,
+  on-sage: #ffffff,
+
+  // ========== Text — 墨绿黑 (绿调深, 不是 manyun 的暖深棕) ==========
+  text-primary: #1A2520,
+  text-secondary: #2D3833,
+  text-tertiary: #5A6661,
+  text-quaternary: #8A9590,
+
+  // ========== Background — 青绿底色 (绿调冷底) ==========
+  bg-page: #EEF3F0,
+  bg-card: #FFFFFF,
+  bg-elevated: #FAFCFB,
+  bg-muted: #E5ECE8,
+
+  // ========== Sidebar — 白色 + 细绿描边 ==========
+  sidebar-bg: #FFFFFF,
+  sidebar-text-main: #1A2520,
+  sidebar-text-regular: #5A6661,
+  sidebar-text-secondary: #8A9590,
+  sidebar-hover-bg: #F0F6F2,
+  sidebar-active-bg: #E3EFE8,
+  sidebar-active-text: #1F6B43,
+
+  // ========== Separator — 浅绿描边 ==========
+  separator: #DCE6E0,
+
+  // ========== Shadow — 绿调极轻 ==========
+  shadow-sm: (0 1px 3px rgba(30, 70, 50, 0.04)),
+  shadow-md: (0 1px 3px rgba(30, 70, 50, 0.04), 0 4px 12px rgba(30, 70, 50, 0.08)),
+  shadow-lg: (0 4px 12px rgba(30, 70, 50, 0.08), 0 8px 24px rgba(30, 70, 50, 0.10)),
+  shadow-xl: (0 8px 24px rgba(30, 70, 50, 0.12), 0 16px 40px rgba(30, 70, 50, 0.14)),
+
+  // ========== Radius — 12px 卡 + 8px 按钮 ==========
+  radius-xs: 2px,
+  radius-sm: 6px,
+  radius-md: 10px,
+  radius-lg: 14px,
+  radius-xl: 18px,
+  radius-2xl: 24px,
+  radius-card: 12px,
+  radius-button: 8px,
+  radius-input: 8px,
+  radius-chip: 999px,
+
+  blur-sm: blur(8px),
+  blur-md: blur(16px),
+  blur-lg: blur(32px),
+
+  // ========== Scrollbar — 浅绿调 ==========
+  scrollbar-thumb: #B8C9C0,
+  scrollbar-thumb-hover: #8FB89E,
+
+  // ========== Font ==========
+  font-family: ('PingFang SC', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Sans GB', sans-serif,),
+
+  'font-size-base':   14px,
+  'font-size-large':  15px,
+  'font-size-header': 22px,
+));
+
+// =====================================================================
+// 品牌特有 token + 组件覆写
+// =====================================================================
+html[data-brand='manyun'] {
+  // ========== 横向 3 段渐变 (Header / Logo) ==========
+  --brand-manyun-gradient: linear-gradient(90deg, #1F6B43 0%, #2E8B57 50%, #3A9B68 100%);
+  --brand-manyun-gradient-diag: linear-gradient(135deg, #1F6B43 0%, #2E8B57 100%);
+
+  // ========== Sidebar 底部插画 token ==========
+  --brand-manyun-hill: linear-gradient(to top, #E5F0EC 0%, transparent 100%);
+  --brand-manyun-fade: linear-gradient(180deg, transparent 0%, #F0F6F2 100%);
+
+  // ========== Status 配色 — 用三档绿 + 标准 red/yellow ==========
+  --brand-danger: #DC2626;
+  --brand-danger-bg: #FEE2E2;
+  --brand-danger-text: #B91C1C;
+
+  --brand-warning: #CA8A04;
+  --brand-warning-bg: #FEF9C3;
+  --brand-warning-text: #A16207;
+
+  --brand-caution: #2E8B57;
+  --brand-caution-bg: #E3EFE8;
+  --brand-caution-text: #1F6B43;
+
+  --brand-info: #5BA88E;
+  --brand-info-bg: #E5F0EC;
+  --brand-info-text: #468773;
+
+  // ========== KPI / Card 三档绿色变体 ==========
+  // manyun 的 'green' / 'gold' / 'brown' 主题 prop 都映射到 3 档绿.
+  --brand-kpi-card-bg-green: #ffffff;
+  --brand-kpi-card-border-green: #DCE6E0;
+  --brand-kpi-icon-bg-green: #E3EFE8;
+  --brand-kpi-icon-color-green: #2E8B57;
+  --brand-kpi-trend-bg-green: #E3EFE8;
+  --brand-kpi-trend-color-green: #1F6B43;
+
+  --brand-kpi-card-bg-gold: #ffffff;
+  --brand-kpi-card-border-gold: #DCE6E0;
+  --brand-kpi-icon-bg-gold: #E5F0EC;
+  --brand-kpi-icon-color-gold: #5BA88E;
+  --brand-kpi-trend-bg-gold: #E5F0EC;
+  --brand-kpi-trend-color-gold: #468773;
+
+  --brand-kpi-card-bg-brown: #ffffff;
+  --brand-kpi-card-border-brown: #DCE6E0;
+  --brand-kpi-icon-bg-brown: #EEF4F0;
+  --brand-kpi-icon-color-brown: #8FB89E;
+  --brand-kpi-trend-bg-brown: #EEF4F0;
+  --brand-kpi-trend-color-brown: #6E9580;
+
+  --brand-kpi-icon-size: 56px;
+  --brand-kpi-icon-radius: 50%;
+
+  --brand-card-radius: 12px;
+  // 卡片有细描边 (跟参考 .card-white border 一致), manyun 没有
+  --brand-card-border: 1px solid #DCE6E0;
+  --brand-card-shadow: 0 1px 3px rgba(30, 70, 50, 0.04);
+  --brand-card-shadow-hover: 0 4px 12px rgba(30, 70, 50, 0.08);
+
+  // ========== Sidebar nav hover 三档变体 ==========
+  --brand-nav-hover-green-bg: #F0F6F2;
+  --brand-nav-hover-green-color: #1F6B43;
+  --brand-nav-hover-gold-bg: #F0F6F2;
+  --brand-nav-hover-gold-color: #468773;
+  --brand-nav-hover-brown-bg: #F0F6F2;
+  --brand-nav-hover-brown-color: #6E9580;
+
+  // ========== 区块标题 ==========
+  --brand-section-title-border: 4px solid #2E8B57;
+  --brand-section-title-pad-left: 8px;
+  --brand-section-title-color: #1A2520;
+  --brand-section-title-weight: 700;
+  --brand-section-title-size: 16px;
+
+  // ========== AppHeader overrides — 3 段渐变 + box-shadow ==========
+  --brand-header-height: 64px;
+  --app-header-bg: var(--brand-manyun-gradient);
+  --app-header-backdrop: none;
+  --app-header-border-color: transparent;
+
+  // ============================================================
+  // Header 强制覆写
+  // 左侧 400px 纯深绿 (跟 sidebar 顶部贴合条对接), 右侧渐变到浅绿.
+  // 底部圆角 + 加重阴影, 让 header 视觉上"浮"在内容之上.
+  // ============================================================
+  .app-header {
+    background: linear-gradient(
+      to right,
+      #1F6B43 0,
+      #1F6B43 400px,             /* 左 400px 纯深绿 */
+      #3A9B68 100%               /* 右侧渐变到浅绿 */
+    ) !important;
+    color: #ffffff !important;
+    border-bottom: none !important;
+    border-radius: 0 0 16px 16px !important;       /* 底部两角圆角 */
+    box-shadow: 0 8px 32px rgba(30, 107, 67, 0.35),
+                0 2px 8px rgba(0, 0, 0, 0.15) !important;
+  }
+  .app-header .el-button.is-text,
+  .app-header .app-logo strong,
+  .app-header .app-logo__subtitle {
+    color: #ffffff !important;
+  }
+  .app-header .app-logo__icon,
+  .app-header .app-logo-mark {
+    background: #ffffff !important;
+    color: var(--brand-primary-dark) !important;
+  }
+  .app-header .app-header__search,
+  .app-header .el-input__wrapper {
+    background: rgba(255, 255, 255, 0.15) !important;
+    box-shadow: none !important;
+    border-radius: 8px !important;
+  }
+  .app-header .app-header__search:hover,
+  .app-header .el-input__wrapper:hover {
+    background: rgba(255, 255, 255, 0.25) !important;
+  }
+  .app-header .app-header__search input,
+  .app-header .el-input__inner {
+    color: #ffffff !important;
+    &::placeholder { color: rgba(255, 255, 255, 0.7) !important; }
+  }
+  .app-header .el-button.is-text:hover,
+  .app-header .app-header__action:hover {
+    background: rgba(255, 255, 255, 0.15) !important;
+    color: #ffffff !important;
+  }
+
+  // ============================================================
+  // Sidebar — 白底 + 细描边 + inactive 用 text-tertiary
+  // ============================================================
+  .app-sidebar {
+    background: var(--brand-sidebar-bg) !important;
+    border-right: none !important;       /* 改用阴影分隔, 去掉实线 */
+    position: sticky;                    /* 吸附: 滚动时钉在 viewport top */
+    top: 56px;                           /* 跟 header 底部对齐, 无间隙 */
+    box-shadow: 4px 0 20px rgba(30, 70, 50, 0.10),
+                0 1px 3px rgba(30, 70, 50, 0.06) !important;
+  }
+  // 顶部绿条已取消 — 用户不需要
+
+  .app-sidebar .el-menu-item:not(.is-active),
+  .app-sidebar .el-sub-menu__title:not(.is-active) {
+    color: var(--brand-sidebar-text-tertiary, var(--brand-sidebar-text-regular)) !important;
+  }
+  .app-sidebar .el-menu-item:not(.is-active) .el-icon,
+  .app-sidebar .el-menu-item:not(.is-active) .ri-icon,
+  .app-sidebar .el-sub-menu__title:not(.is-active) .el-icon,
+  .app-sidebar .el-sub-menu__title:not(.is-active) .ri-icon {
+    color: var(--brand-sidebar-text-tertiary, var(--brand-sidebar-text-regular)) !important;
+  }
+
+  // Active: 浅绿底 + 主色文字 (无左侧粗线, 跟参考 .nav-active 简化版)
+  .app-sidebar .el-menu-item.is-active {
+    background: var(--brand-sidebar-active-bg) !important;
+    color: var(--brand-sidebar-active-text) !important;
+    font-weight: 700 !important;
+    border-radius: 8px !important;
+    margin: 2px 8px !important;
+  }
+  // 折叠态 (icon 模式): 覆盖展开态的 8px margin, 让图标在 64px 宽里居中
+  .app-sidebar.is-collapsed .el-menu-item.is-active {
+    margin: 2px 0 !important;
+  }
+  // 左侧粗条已移除 — 用户要求不要
+  .app-sidebar .el-menu-item.is-active::before {
+    content: none;
+  }
+  .app-sidebar .el-menu-item.is-active .el-icon,
+  .app-sidebar .el-menu-item.is-active .ri-icon {
+    color: var(--brand-sidebar-active-text) !important;
+  }
+  // 所有菜单项字体加粗 (inactive 500, active 700)
+  .app-sidebar .el-menu-item,
+  .app-sidebar .el-sub-menu__title {
+    font-weight: 500 !important;
+  }
+  // 非 active 默认 hover (浅绿底)
+  .app-sidebar .el-menu-item:not(.is-active):hover {
+    background: var(--brand-sidebar-hover-bg);
+    color: var(--brand-primary-dark);
+    border-radius: 8px;
+  }
+  // 三档绿色 hover 变体
+  .app-sidebar .el-menu-item.nav-item--green:not(.is-active):hover {
+    background: var(--brand-nav-hover-green-bg);
+    color: var(--brand-nav-hover-green-color);
+  }
+  .app-sidebar .el-menu-item.nav-item--gold:not(.is-active):hover {
+    background: var(--brand-nav-hover-gold-bg);
+    color: var(--brand-nav-hover-gold-color);
+  }
+  .app-sidebar .el-menu-item.nav-item--brown:not(.is-active):hover {
+    background: var(--brand-nav-hover-brown-bg);
+    color: var(--brand-nav-hover-brown-color);
+  }
+
+  // ============================================================
+  // Sidebar 底部装饰 — 纯背景, 淡, 不挤占 nav 空间
+  // 之前用 padding-bottom: 120px 给插画留位会影响 nav 滚动高度, 改成
+  // 绝对定位 + opacity: 0.35 让插画"沉"到底层, nav 满高使用, 视觉上
+  // 插画在底部透出.
+  // ============================================================
+  .app-sidebar .app-sidebar__nav {
+    position: relative;
+    // 不加 padding-bottom, nav 满高使用, 插画是背景层
+  }
+  .app-sidebar::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 110px;
+    background:
+      radial-gradient(ellipse 220px 56px at 30% 100%, rgba(91, 168, 142, 0.22) 0%, rgba(91, 168, 142, 0.22) 60%, transparent 62%),
+      radial-gradient(ellipse 180px 50px at 75% 100%, rgba(46, 139, 87, 0.18) 0%, rgba(46, 139, 87, 0.18) 60%, transparent 62%),
+      linear-gradient(180deg, transparent 0%, rgba(240, 246, 242, 0.85) 100%);
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.55;        // 整体淡化, 不抢眼
+  }
+  // 漂浮叶子 (左下角, 上下浮动) — 用 nav ::before 因为 sidebar ::after 已占
+  .app-sidebar .app-sidebar__nav::before {
+    content: '🌿';
+    position: absolute;
+    bottom: 20px;
+    left: 24px;
+    font-size: 16px;
+    opacity: 0.22;                  // 再淡一点 (原 0.45 → 0.22)
+    color: var(--brand-primary);
+    animation: manyun-float 6s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 1;
+    text-shadow: 0 1px 2px rgba(255, 255, 255, 0.6);
+  }
+  // 旋转风扇 — 已移除 (用户不要)
+  .app-sidebar .app-sidebar__nav::after {
+    content: none;
+  }
+  // 折叠按钮 (左下角) — 改深绿色 (跟参考 fas fa-bars 一致)
+  .app-sidebar .app-sidebar__toggle {
+    z-index: 2;
+    color: var(--brand-primary-dark) !important;
+    background: transparent;
+    &:hover {
+      color: var(--brand-primary) !important;
+      background: var(--brand-primary-light) !important;
+    }
+  }
+  @keyframes manyun-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-3px); }
+  }
+  @keyframes manyun-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  // ============================================================
+  // Welcome 横幅 — 参考图没有, 隐藏
+  // ============================================================
+  .header-section__welcome {
+    display: none !important;
+  }
+
+  // ============================================================
+  // 区块标题 — border-l-4 pl-2 (跟参考 h2 一致)
+  // ============================================================
+  .my-section__title,
+  .page-header__title,
+  .work-section__title,
+  .kpi-head__label {
+    border-left: 4px solid var(--brand-primary) !important;
+    padding-left: 8px !important;
+    line-height: 1.2 !important;
+    color: var(--brand-text-primary) !important;
+    font-weight: 700 !important;
+  }
+  .my-section--gold .my-section__title,
+  .my-section--gold .work-section__title { border-left-color: var(--brand-mint) !important; }
+  .my-section--brown .my-section__title,
+  .my-section--brown .work-section__title { border-left-color: var(--brand-sage) !important; }
+
+  // ============================================================
+  // KPI 卡 — 细描边 + hover 加深描边 + 主题色阴影
+  // 跟 manyun 不同: manyun 卡片始终有 border, hover 是 border 加深 + 阴影
+  // ============================================================
+  .kpi-layout .work-section {
+    border: 1px solid #DCE6E0;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(30, 70, 50, 0.04);
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  }
+  .kpi-layout .work-section:hover {
+    border-color: #B8D4C4;
+    box-shadow: 0 4px 12px rgba(30, 70, 50, 0.08);
+    transform: translateY(-1px);
+  }
+  // 主题色顶条 (复用 KpiSection 的 .kpi--{green,gold,brown})
+  .kpi-layout .work-section.kpi--green {
+    box-shadow: 0 1px 3px rgba(46, 139, 87, 0.06);
+  }
+  .kpi-layout .work-section.kpi--green:hover {
+    border-color: #2E8B57;
+    box-shadow: 0 4px 12px rgba(46, 139, 87, 0.15);
+  }
+  .kpi-layout .work-section.kpi--gold {
+    box-shadow: 0 1px 3px rgba(91, 168, 142, 0.06);
+  }
+  .kpi-layout .work-section.kpi--gold:hover {
+    border-color: #5BA88E;
+    box-shadow: 0 4px 12px rgba(91, 168, 142, 0.15);
+  }
+  .kpi-layout .work-section.kpi--brown {
+    box-shadow: 0 1px 3px rgba(143, 184, 158, 0.06);
+  }
+  .kpi-layout .work-section.kpi--brown:hover {
+    border-color: #8FB89E;
+    box-shadow: 0 4px 12px rgba(143, 184, 158, 0.18);
+  }
+
+  // ============================================================
+  // 表单元素 — focus 只换 border 颜色, 不要浅绿方框 (无 box-shadow 阴影)
+  // ============================================================
+  .el-input__inner,
+  .el-textarea__inner,
+  .el-select__input {
+    &:focus {
+      border-color: var(--brand-primary) !important;
+      box-shadow: none !important;
+    }
+  }
+  .el-input.is-focus .el-input__wrapper,
+  .el-select .el-input.is-focus .el-input__wrapper {
+    box-shadow: none !important;
+  }
+
+  // ============================================================
+  // 通知小红点 — 用 yellow-300 (跟参考一致)
+  // ============================================================
+  .app-header .el-badge__content,
+  .app-header .el-badge.is-dot .el-badge__content {
+    background-color: #FDE047 !important;            // yellow-300
+    border: 2px solid var(--brand-primary-dark) !important;
+  }
+
+  // ============================================================
+  // 用户头像 — 白色边 (跟参考 border border-white/25 一致)
+  // ============================================================
+  .app-header .app-header__user img,
+  .app-header .el-avatar > img {
+    border: 2px solid rgba(255, 255, 255, 0.25) !important;
+  }
+}
+
+// =====================================================================
+// Dark-mode overrides — 夜色青绿
+// =====================================================================
+html[data-brand='manyun'][data-theme='dark'],
+html[data-brand='manyun'][data-theme='orange-black'] {
+  @include brand-dark-surface;
+
+  --brand-bg-page: #0d1714;
+  --brand-bg-card: #16221c;
+  --brand-bg-elevated: #1a2820;
+  --brand-bg-muted: #131c18;
+
+  --brand-text-primary: #dce8e3;
+  --brand-text-secondary: #a8b8b0;
+  --brand-text-tertiary: #7a8a82;
+  --brand-text-quaternary: #4f5a54;
+
+  --brand-sidebar-bg: #16221c;
+  --brand-sidebar-text-main: #dce8e3;
+  --brand-sidebar-text-regular: #a8b8b0;
+  --brand-sidebar-text-secondary: #7a8a82;
+  --brand-sidebar-hover-bg: rgba(46, 139, 87, 0.10);
+  --brand-sidebar-active-bg: rgba(46, 139, 87, 0.20);
+  --brand-sidebar-active-text: #6ee7a0;
+  --brand-separator: #2a3a32;
+
+  --brand-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --brand-shadow-md: 0 1px 3px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.55);
+  --brand-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.55), 0 8px 24px rgba(0, 0, 0, 0.60);
+  --brand-shadow-xl: 0 8px 24px rgba(0, 0, 0, 0.65), 0 16px 40px rgba(0, 0, 0, 0.70);
+
+  --brand-kpi-icon-bg-green: rgba(46, 139, 87, 0.18);
+  --brand-kpi-icon-bg-gold: rgba(91, 168, 142, 0.18);
+  --brand-kpi-icon-bg-brown: rgba(143, 184, 158, 0.18);
+  --brand-kpi-trend-bg-green: rgba(46, 139, 87, 0.20);
+  --brand-kpi-trend-bg-gold: rgba(91, 168, 142, 0.20);
+  --brand-kpi-trend-bg-brown: rgba(143, 184, 158, 0.20);
+
+  --app-header-bg: var(--brand-primary-dark);
+}

@@ -1,0 +1,11 @@
+<g>
+  <circle cx="10" cy="25" r="4" fill="currentColor">
+    <animate attributeName="cy" values="25;17;25" dur="0.9s" repeatCount="indefinite" begin="0s"/>
+  </circle>
+  <circle cx="25" cy="25" r="4" fill="currentColor">
+    <animate attributeName="cy" values="25;17;25" dur="0.9s" repeatCount="indefinite" begin="0.15s"/>
+  </circle>
+  <circle cx="40" cy="25" r="4" fill="currentColor">
+    <animate attributeName="cy" values="25;17;25" dur="0.9s" repeatCount="indefinite" begin="0.3s"/>
+  </circle>
+</g>

@@ -1,0 +1,69 @@
+<!--
+  _empty_mchuan.svg
+  Per-brand empty-state icon for the "mchuan" brand. Same structural
+  pattern as _empty_default.svg (viewBox 0 0 79 86, <defs> with 2
+  linearGradients, 6+ shapes via g/transform, uses --el-empty-fill-color-*
+  tokens defined by Element Plus) — but the metaphor is an EMPTY PAPER
+  BAG with two rope handles, slumping slightly to convey "nothing inside".
+  This fits mchuan's "modern B-end, flat, 8px-radius" feel and pairs well
+  with the EP-default's "overlapping papers" composition (both are paper
+  metaphors, but mchuan is a bag, default is loose sheets).
+
+  Per project spec: single color via EP's --el-empty-fill-color-* vars
+  (theme-driven, brand-agnostic). No brand color, no extra accent.
+
+  Picked by useBrandEmpty when preference.brand === 'mchuan', otherwise
+  _empty_default.svg is used.
+-->
+<svg viewBox="0 0 79 86" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <defs>
+    <!-- Front bag body gradient: light (fill-1) → mid (fill-4) -->
+    <linearGradient id="mchuanGrad-1" x1="38.8503086%" y1="0%" x2="61.1496914%" y2="100%">
+      <stop stop-color="var(--el-empty-fill-color-1)" offset="0%"/>
+      <stop stop-color="var(--el-empty-fill-color-4)" offset="100%"/>
+    </linearGradient>
+    <!-- Back bag / rim gradient: light (fill-1) → deeper (fill-6) -->
+    <linearGradient id="mchuanGrad-2" x1="0%" y1="9.5%" x2="100%" y2="90.5%">
+      <stop stop-color="var(--el-empty-fill-color-1)" offset="0%"/>
+      <stop stop-color="var(--el-empty-fill-color-6)" offset="100%"/>
+    </linearGradient>
+  </defs>
+  <g stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+    <!-- 1. Ground shadow (mirrors default's structure) -->
+    <path d="M39.5,86 C61.3,86 79,83.9 79,81.3 C79,78.8 57.3,78 35.5,78 C13.7,78 0,78.8 0,81.3 C0,83.9 17.7,86 39.5,86 Z"
+          fill="var(--el-empty-fill-color-3)"/>
+
+    <!-- 2. Back of bag (peeks behind front, slight rotation = depth) -->
+    <g transform="translate(40 34) rotate(-3)">
+      <path d="M-26 -2 L 26 -2 L 24 36 L -24 36 Z"
+            fill="var(--el-empty-fill-color-7)" opacity="0.4"/>
+      <!-- small back-rim line -->
+      <path d="M-26 -2 L 26 -2"
+            stroke="var(--el-empty-fill-color-5)" stroke-width="1"
+            stroke-linecap="round" fill="none" opacity="0.6"/>
+    </g>
+
+    <!-- 3. Front of bag body (trapezoid: slightly wider at top to read as "slumping/empty") -->
+    <path d="M14 32 L 65 32 L 62 70 L 17 70 Z"
+          fill="url(#mchuanGrad-1)"/>
+
+    <!-- 4. Top opening rim (ellipse — the bag is OPEN, nothing inside) -->
+    <ellipse cx="39.5" cy="32" rx="25.5" ry="2.5"
+             fill="url(#mchuanGrad-2)"/>
+
+    <!-- 5. Left handle (rope arc) -->
+    <path d="M22 32 Q 22 14, 32 14 Q 42 14, 42 32"
+          stroke="var(--el-empty-fill-color-5)" stroke-width="2"
+          stroke-linecap="round" fill="none"/>
+
+    <!-- 6. Right handle (rope arc) -->
+    <path d="M37 32 Q 37 14, 47 14 Q 57 14, 57 32"
+          stroke="var(--el-empty-fill-color-5)" stroke-width="2"
+          stroke-linecap="round" fill="none"/>
+
+    <!-- 7. Front fold/crease (subtle vertical line down the center, gives 3D) -->
+    <path d="M39.5 35 L 39.5 68"
+          stroke="var(--el-empty-fill-color-7)" stroke-width="0.8"
+          stroke-linecap="round" fill="none" opacity="0.4"/>
+  </g>
+</svg>

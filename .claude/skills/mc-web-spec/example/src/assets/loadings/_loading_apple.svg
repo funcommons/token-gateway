@@ -1,0 +1,14 @@
+<g>
+  <circle cx="25" cy="6" r="3" fill="currentColor" opacity="1.0"/>
+  <circle cx="38.4" cy="11.6" r="3" fill="currentColor" opacity="0.875"/>
+  <circle cx="44" cy="25" r="3" fill="currentColor" opacity="0.75"/>
+  <circle cx="38.4" cy="38.4" r="3" fill="currentColor" opacity="0.625"/>
+  <circle cx="25" cy="44" r="3" fill="currentColor" opacity="0.5"/>
+  <circle cx="11.6" cy="38.4" r="3" fill="currentColor" opacity="0.375"/>
+  <circle cx="6" cy="25" r="3" fill="currentColor" opacity="0.25"/>
+  <circle cx="11.6" cy="11.6" r="3" fill="currentColor" opacity="0.15"/>
+  <animateTransform attributeName="transform" type="rotate"
+    values="0 25 25;45 25 25;90 25 25;135 25 25;180 25 25;225 25 25;270 25 25;315 25 25"
+    keyTimes="0;0.125;0.25;0.375;0.5;0.625;0.75;0.875"
+    calcMode="discrete" dur="1s" repeatCount="indefinite"/>
+</g>

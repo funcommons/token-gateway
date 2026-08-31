@@ -1,0 +1,127 @@
+// brands/_mchuan.scss
+// mchuan brand style — modern B-end admin dashboard (Element Admin /
+// Ant Pro / Tailwind look). Distinct from the Apple clone it inherited:
+// white sidebar (not gray), tighter 8px radii (not 16px), near-flat shadows.
+// All tokens map to existing --brand-* slots — no new variables needed.
+//
+// Brand-specific accent palette (purple / pink / cyan) is declared below as
+// --brand-accent-* tokens and used in a few targeted spots (welcome
+// gradient, section icon, stat-card numerals) to echo the reference image's
+// coral-pink / indigo-purple highlights without overriding the blue base.
+
+@use '../mixins' as *;
+
+@include define-brand(mchuan, (
+  // Primary (Tailwind blue-600, typical admin)
+  primary: #2563eb,
+  primary-dark: #1d4ed8,
+  on-primary: #ffffff,
+
+  // Text (Tailwind gray scale)
+  text-primary: #1f2937,
+  text-secondary: #6b7280,
+  text-tertiary: #9ca3af,
+  text-quaternary: #d1d5db,
+
+  // Background
+  bg-page: #f0f2f5,
+  bg-card: #ffffff,
+  bg-elevated: #ffffff,
+  bg-muted: #f5f7fa,
+
+  // Sidebar (WHITE in admin style, not gray)
+  sidebar-bg: #ffffff,
+  sidebar-text-main: #374151,
+  sidebar-text-regular: #6b7280,
+  sidebar-text-secondary: #9ca3af,
+  sidebar-hover-bg: #f3f4f6,
+  sidebar-active-bg: #2563eb,
+  sidebar-active-text: #ffffff,
+
+  // Separator (light hairline, no shadow feel)
+  separator: #e5e7eb,
+
+  // Shadow (very subtle, near-flat — admin style)
+  shadow-sm: (0 1px 2px rgba(0, 0, 0, 0.03)),
+  shadow-md: (0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03)),
+  shadow-lg: (0 4px 12px rgba(0, 0, 0, 0.06)),
+  shadow-xl: (0 8px 24px rgba(0, 0, 0, 0.08)),
+
+  // Radius (TIGHTER than Apple — admin style)
+  radius-xs: 2px,
+  radius-sm: 4px,
+  radius-md: 6px,
+  radius-lg: 8px,
+  radius-xl: 12px,
+  radius-2xl: 16px,
+  radius-card: 8px,
+  radius-button: 8px,
+  radius-input: 8px,
+  radius-chip: 4px,
+
+  // Font (system stack, not SF Pro)
+  font-family: (-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif,),
+
+  // 规格 7: mchuan 字号 偏小 (近 Apple)
+  'font-size-base':   13px,
+  'font-size-large':  15px,
+  'font-size-header': 22px,
+));
+
+// Accent palette + selective overrides — the mchuan flavor of the
+// reference image (coral-pink + indigo-purple highlights on a blue base).
+// The base mchuan SCSS above is unchanged; this block only ADDS decoration
+// in a few chosen places, so other brands are unaffected.
+html[data-brand='mchuan'] {
+  --brand-accent-pink: #ec4899;      // Tailwind pink-500 (coral)
+  --brand-accent-purple: #a855f7;    // Tailwind purple-500 (indigo-purple)
+  --brand-accent-cyan: #06b6d4;      // Tailwind cyan-500
+  --brand-welcome-bg: linear-gradient(135deg, #4f46e5 0%, #a855f7 50%, #ec4899 100%);
+
+  // Primary gradient: 90% blue, last 10% blends to purple. Used wherever
+  // --brand-primary appears as a background/badge/active-state fill.
+  // Other brands don't define this — they fall back to a solid --brand-primary
+  // via the var(--x, fallback) pattern in _mixins.scss.
+  --brand-primary-gradient: linear-gradient(
+    90deg,
+    #2563eb 0%,
+    #2563eb 90%,
+    #a855f7 100%
+  );
+
+  // Welcome / hero card: indigo → purple → pink gradient (echoes the
+  // 10K TPS / API / SMS nodes in the reference image). The mixin already
+  // reads --brand-welcome-bg with a blue fallback, so other brands are
+  // unaffected.
+  .welcome {
+    background: var(--brand-welcome-bg);
+  }
+
+  // Section title icons: purple instead of pure primary — gives the
+  // workspace a subtle warm/cool rhythm without changing body text.
+  .my-section__title i,
+  .page-header__title-prefix {
+    color: var(--brand-accent-purple);
+  }
+
+  // Brand card active state: gradient ring instead of solid blue — the
+  // only spot in the picker that visually flags the chosen brand.
+  .brand-card.active {
+    background: var(--el-bg-color);
+    box-shadow: 0 0 0 2px var(--brand-primary),
+                0 0 0 6px color-mix(in srgb, var(--brand-accent-pink) 30%, transparent);
+  }
+}
+
+// =====================================================================
+// Dark-mode overrides for mchuan.
+// Uses the shared `brand-dark-surface` mixin from _mixins.scss for the
+// standard 19-token dark palette. Only color tokens flip — radius /
+// shadow recipe / font / accent palette (pink/purple) stay so the
+// brand still feels like mchuan, just on a dark surface.
+// =====================================================================
+html[data-brand='mchuan'][data-theme='dark'],
+html[data-brand='mchuan'][data-theme='orange-black'] {
+  @include brand-dark-surface;
+}
+

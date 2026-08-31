@@ -1,0 +1,4 @@
+<circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="90, 150" stroke-dashoffset="0">
+  <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="1.5s" repeatCount="indefinite"/>
+  <animate attributeName="stroke-dashoffset" values="0;-40;-120" keyTimes="0;0.5;1" dur="1.5s" repeatCount="indefinite"/>
+</circle>

@@ -1,0 +1,10 @@
+[
+  { "id": "n1", "title": "考试提醒", "message": "您报名的《Vue 3 期末考试》将于明天 14:00 开始", "read": false, "type": "warning", "date": "2026-05-31" },
+  { "id": "n2", "title": "课程更新", "message": "您关注的《TypeScript 高级类型系统》新增了 3 个章节", "read": false, "type": "info", "date": "2026-05-30" },
+  { "id": "n3", "title": "证书颁发", "message": "恭喜!您获得了《前端工程化综合》认证证书", "read": false, "type": "success", "date": "2026-05-28" },
+  { "id": "n4", "title": "作业批改", "message": "您的《TS 类型体操》第 3 章作业已批改完成,得分 92", "read": true, "type": "info", "date": "2026-05-25" },
+  { "id": "n5", "title": "系统通知", "message": "学习平台 v2.5 上线,新增 AI 推荐功能", "read": true, "type": "info", "date": "2026-05-20" },
+  { "id": "n6", "title": "作业逾期", "message": "《Node.js 实战》第 2 章作业已逾期,请尽快补交", "read": true, "type": "error", "date": "2026-05-15" },
+  { "id": "n7", "title": "讲师回复", "message": "李文豪 讲师回复了您在《Vue 3 进阶》的提问", "read": true, "type": "success", "date": "2026-05-12" },
+  { "id": "n8", "title": "活动提醒", "message": "技术大会早鸟票仅剩 50 张", "read": true, "type": "warning", "date": "2026-05-10" }
+]
