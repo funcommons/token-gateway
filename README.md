@@ -8,7 +8,7 @@
 [![CI](https://github.com/funcommons/token-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/funcommons/token-gateway/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/Docs-online-purple.svg)](https://funcommons.github.io/token-gateway/)
 
-**在线文档**：https://funcommons.github.io/token-gateway/
+**在线文档**：https://funcommons.github.io/token-gateway/ | [English README](./README_EN.md)
 
 ## 源码
 
