@@ -1,0 +1,26 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+      - name: Build (ubuntu 自带 Docker, Testcontainers 测试照常运行)
+        run: mvn -B package
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/token-gateway-*-SNAPSHOT.jar
+          generate_release_notes: true
