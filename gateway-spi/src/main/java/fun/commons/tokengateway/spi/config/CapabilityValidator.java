@@ -47,7 +47,29 @@ public final class CapabilityValidator {
         if (props.getFace() == Face.TASK && props.getTask().getResourceSignKey() == null) {
             warnings.add("face=task 但 task.resource-sign-key 未配置, 资源代理签名不可用");
         }
+        // 安全契约 §3.3: auth=none 仅限 localhost/sidecar 同机隔离
+        checkNoneAuth(warnings, "route", props.getRoute());
+        checkNoneAuth(warnings, "token-validate", props.getTokenValidate());
+        checkNoneAuth(warnings, "billing", props.getBilling());
+        checkNoneAuth(warnings, "moderation", props.getModeration());
+        if (props.getAccessLog().getTransport() == LogTransport.RPC) {
+            checkNoneAuth(warnings, "access-log", props.getAccessLog());
+        }
+        checkNoneAuth(warnings, "audit", props.getAudit());
+        checkNoneAuth(warnings, "model-catalog", props.getModelCatalog());
         return List.copyOf(warnings);
+    }
+
+    /** auth=none + 非 localhost url → 启动告警 (安全契约 §3.3: 白名单不构成认证). */
+    private static void checkNoneAuth(List<String> warnings, String face, EndpointConfig cfg) {
+        if (cfg.getAuth() == AuthType.NONE && cfg.getUrl() != null && !isLocalhost(cfg.getUrl())) {
+            warnings.add(face + " 面 auth=none 但 url 非 localhost (" + cfg.getUrl()
+                    + "): none 仅限同机隔离, 跨主机请改用 jwt/key (安全契约 §3)");
+        }
+    }
+
+    private static boolean isLocalhost(String url) {
+        return url.contains("localhost") || url.contains("127.0.0.1") || url.contains("[::1]");
     }
 
     /** 由配置开关推导所需能力集. */

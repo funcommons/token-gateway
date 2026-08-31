@@ -235,14 +235,14 @@ token-gateway:
   adapter: mmagix
   route:                    # 路由/分发
     url: http://localhost:9400
-    auth: token
-    token: ${GW_ROUTE_TOKEN}
+    auth: jwt
+    jwt-secret: ${GW_JWT_SECRET}
     routes:
       - models: ["gpt-*", "*"]
   token-validate:           # 凭证校验（可与 route 同址）
     url: http://localhost:9400
-    auth: token
-    token: ${GW_ROUTE_TOKEN}
+    auth: jwt
+    jwt-secret: ${GW_JWT_SECRET}
   billing:                  # 计费服务（独立部署示例）
     url: http://billing-svc:9410
     auth: jwt
@@ -269,22 +269,23 @@ token-gateway:
     jwt-secret: ${GW_AUDIT_JWT_SECRET}
   model-catalog:
     url: http://localhost:9400
-    auth: token
-    token: ${GW_ROUTE_TOKEN}
+    auth: jwt
+    jwt-secret: ${GW_JWT_SECRET}
 ```
 
 七类全部指向同一地址 = **单体模式**（如 MMagiX 9400 一址七面共用）；不同 host = **分离模式**。部署拓扑变化不改代码，只改 yml。
 
-### 8.3 后端鉴权四式
+### 8.3 后端鉴权三式
 
-| auth | 发送方式 | 适用 |
-|---|---|---|
-| `none` | 不发鉴权头 | 内网信任/白名单 |
-| `key` | `X-API-Key: <静态key>` | 简单共享密钥 |
-| `jwt` | HS256 签名 JWT（`Authorization: Bearer`，claims 含 iss/caller/tenant_id） | 需要身份语义——**现网 internal-token 即此形态**；换 secret 须网关同步重铸 |
-| `token` | `X-Internal-Token: <静态令牌>` | 既有静态令牌兼容 |
+> 权威定义见《后端服务对接安全契约方案》（`../开发文档/04_后端服务对接安全契约方案.md`）。
 
-凭证一律环境变量注入禁入仓；日志只出现掩码。
+| auth | 发送方式 | 推荐级别 | 适用 |
+|---|---|---|---|
+| `jwt` | HS256 签名 JWT（`Authorization: Bearer`，claims 含 iss/caller/tenant_id） | **推荐（默认）** | 需要身份语义——**现网 internal-token 即此形态**；换 secret 须网关同步重铸；跨网段叠加逐请求签名 |
+| `key` | `X-API-Key: <静态key>` | 可用（内网限定） | 简单共享密钥（恒定时间比较） |
+| `none` | 不发鉴权头 | 受限可用 | 仅 localhost/sidecar 同机隔离；白名单作纵深不作替代 |
+
+凭证一律环境变量注入禁入仓；日志只出现掩码。`token` 静态令牌式已移除（既有系统按 jwt 重铸）。
 
 ### 8.4 关键开关与 billing 三值
 

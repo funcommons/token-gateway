@@ -57,4 +57,5 @@ Key configuration (`app/src/main/resources/application.yml`): `gateway.backend.u
 |---|---|
 | [Design Proposal (en)](https://funcommons.github.io/token-gateway/en/dev/design) · [中文](docs/开发文档/01_设计方案.md) | Capability-face SPI · yml config model · adapter matrix · milestones |
 | [Backend Onboarding (en)](https://funcommons.github.io/token-gateway/en/dev/backend-onboarding) · [中文](docs/开发文档/02_后端接入开发手册.md) | Implement the capability contract in any language to onboard |
+| [Backend Security Contract (en)](https://funcommons.github.io/token-gateway/en/dev/backend-security-contract) · [中文](docs/开发文档/04_后端服务对接安全契约方案.md) | Auth three modes (jwt/key/none) · scenario tiers · per-request signing · credential rotation |
 | [Capability-Face Contract](docs/开发文档/03_能力面接口契约.yaml) | OpenAPI contract for backend endpoints + MQ log messages |

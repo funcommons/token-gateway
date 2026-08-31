@@ -235,14 +235,14 @@ token-gateway:
   adapter: mmagix
   route:                    # routing / dispatch
     url: http://localhost:9400
-    auth: token
-    token: ${GW_ROUTE_TOKEN}
+    auth: jwt
+    jwt-secret: ${GW_JWT_SECRET}
     routes:
       - models: ["gpt-*", "*"]
   token-validate:           # credential validation (may share the address with route)
     url: http://localhost:9400
-    auth: token
-    token: ${GW_ROUTE_TOKEN}
+    auth: jwt
+    jwt-secret: ${GW_JWT_SECRET}
   billing:                  # billing service (independent deployment example)
     url: http://billing-svc:9410
     auth: jwt
@@ -269,22 +269,23 @@ token-gateway:
     jwt-secret: ${GW_AUDIT_JWT_SECRET}
   model-catalog:
     url: http://localhost:9400
-    auth: token
-    token: ${GW_ROUTE_TOKEN}
+    auth: jwt
+    jwt-secret: ${GW_JWT_SECRET}
 ```
 
 All seven pointing to the same address = **monolith mode** (e.g., MMagiX 9400, one address shared by seven faces); different hosts = **separated mode**. Deployment topology changes require no code changes — only yml changes.
 
-### 8.3 Four Backend Auth Modes
+### 8.3 Three Backend Auth Modes
 
-| auth | How it is sent | Applicability |
-|---|---|---|
-| `none` | No auth header sent | Trusted intranet / whitelist |
-| `key` | `X-API-Key: <static key>` | Simple shared secret |
-| `jwt` | HS256-signed JWT (`Authorization: Bearer`, claims include iss/caller/tenant_id) | When identity semantics are needed — **the production internal-token is exactly this form**; changing the secret requires synchronized re-minting on the gateway |
-| `token` | `X-Internal-Token: <static token>` | Compatibility with existing static tokens |
+> Authoritative definition: Backend Integration Security Contract (`../en/dev/backend-security-contract.md`).
 
-Credentials must always be injected via environment variables and never committed to the repo; logs only ever show masked values.
+| auth | How it is sent | Recommendation | Applicability |
+|---|---|---|---|
+| `jwt` | HS256-signed JWT (`Authorization: Bearer`, claims include iss/caller/tenant_id) | **Recommended (default)** | When identity semantics are needed — **the production internal-token is exactly this form**; changing the secret requires synchronized re-minting on the gateway; add per-request signing for cross-segment calls |
+| `key` | `X-API-Key: <static key>` | Acceptable (intranet only) | Simple shared secret (constant-time comparison) |
+| `none` | No auth header sent | Restricted | localhost/sidecar same-host isolation only; whitelisting is defense-in-depth, not a substitute |
+
+Credentials must always be injected via environment variables and never committed to the repo; logs only ever show masked values. The `token` static-token mode was removed (existing systems re-mint as jwt).
 
 ### 8.4 Key Switches and the Three billing Values
 

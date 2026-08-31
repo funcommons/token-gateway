@@ -56,16 +56,17 @@ Do not enable faces you have not implemented in the gateway yml (the gateway val
 - **settle / refund / access-log / audit must be idempotent**: repeated requests with the same `pre_consume_id` / `(trace_id, ts)` return the first result; no double charge or double refund.
 - Timeout budgets (gateway-side; your service should be faster): route 3s / moderation 2s / billing 5s / log and audit are async with no limit.
 
-### 3.4 Authentication (four ways the gateway calls you, configured via gateway yml `auth:`)
+### 3.4 Authentication (three ways the gateway calls you, configured via gateway yml `auth:`)
 
-| auth | What the gateway sends | Your verification method |
-|---|---|---|
-| `none` | No header | Whitelist / intranet trust; skip |
-| `key` | `X-API-Key: <key>` | Constant-time comparison against a static key (do not use plain equals, to avoid timing side channels) |
-| `jwt` | `Authorization: Bearer <HS256 JWT>` | Three-step verification: ① verify the HS256 signature with the shared secret ② check `exp` is not expired ③ check `iss`/`caller` match the convention (production internal-token claims: `iss=mmagix, caller=gateway-webflux, tenant_id, user_id`); **if the backend rotates the secret, it must notify the gateway to re-mint in sync** |
-| `token` | `X-Internal-Token: <token>` | Constant-time comparison against a static token |
+> The authoritative security specification is the Backend Integration Security Contract (04 doc): scenario tiers / per-request signing / credential rotation / acceptance checklist. This section is the verification summary.
 
-On verification failure return HTTP 401 + envelope (code=10300); the gateway treats this as a configuration error alert rather than a caller error.
+| auth | What the gateway sends | Recommendation | Your verification method |
+|---|---|---|---|
+| `jwt` | `Authorization: Bearer <HS256 JWT>` | **Recommended (default)** | Three-step verification: ① verify the HS256 signature with the shared secret ② check `exp` is not expired ③ check `iss`/`caller` match the convention (production internal-token claims: `iss=mmagix, caller=gateway-webflux, tenant_id, user_id`); **if the backend rotates the secret, it must notify the gateway to re-mint in sync**. For cross-segment scenarios the gateway may upgrade to per-request signing (HMAC four-header, replay-proof) |
+| `key` | `X-API-Key: <key>` | Acceptable (intranet only) | Constant-time comparison against a static key (do not use plain equals, to avoid timing side channels) |
+| `none` | No header | Restricted | **localhost/sidecar same-host isolation only**; whitelist/network policy is defense-in-depth and cannot stop lateral movement within the segment — do not rely on it alone |
+
+On verification failure return HTTP 401 + envelope (code=10300); the gateway treats this as a configuration error alert rather than a caller error. The gateway warns at startup when `auth=none` is paired with a non-localhost url.
 
 ## 4. Capability-face contract, face by face
 

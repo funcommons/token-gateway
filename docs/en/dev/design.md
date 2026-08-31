@@ -197,16 +197,16 @@ token-gateway:
 
   route:                                 # Routing / distribution service (distribute / candidate resolution)
     url: http://localhost:9400
-    auth: token                          # none | key | jwt | token
-    token: ${GW_ROUTE_TOKEN}
+    auth: jwt                            # none | key | jwt (three modes; token mode removed)
+    jwt-secret: ${GW_JWT_SECRET}
     timeout: 3s
     routes:                              # Model bindings: first match wins, wildcards supported
       - models: ["gpt-*", "claude-*", "*"]
 
   token-validate:                        # Credential validation service
     url: http://localhost:9400
-    auth: token
-    token: ${GW_ROUTE_TOKEN}             # The same service may reuse the same credential
+    auth: jwt
+    jwt-secret: ${GW_JWT_SECRET}         # The same service may reuse the same credential
 
   billing:                               # Billing service (pre-consume / settle / refund)
     url: http://billing-svc:9410         # A different host from the route service = service separation
@@ -241,8 +241,8 @@ token-gateway:
 
   model-catalog:                         # Model catalog service
     url: http://localhost:9400
-    auth: token
-    token: ${GW_ROUTE_TOKEN}
+    auth: jwt
+    jwt-secret: ${GW_JWT_SECRET}
 
   task:                                  # Task-face parameters (effective when face=task/all; defaults = THMP port semantics)
     expire-scan: 24h                     # Task expiry window (timeout → EXPIRED + full refund)
@@ -254,17 +254,20 @@ token-gateway:
 **Monolith mode**: all seven surfaces point at the same address (as in the example above where route/token-validate/model-catalog all point at 9400) — from the gateway's perspective these are still seven capability calls, with zero code branches.
 **Separated mode**: billing/logging/moderation/audit each become independent services with independent credentials — deployment topology changes require no code changes, only yml edits (naturally aligned with the billing-svc / audit-svc slots split out in MMagiX repo No. 12 ms-split).
 
-### 5.2 Four Backend Auth Modes
+### 5.2 Three Backend Auth Modes
 
-| type | How it is sent | Applies to |
-|---|---|---|
-| `none` | No auth header sent | Trusted intranet / whitelisted networks |
-| `key` | Static key header `X-API-Key: <key>` | Simple shared-secret service-to-service calls |
-| `jwt` | HS256-signed JWT (`Authorization: Bearer`, claims include iss/caller/tenant_id) — **the production internal-token is exactly this form** (if the backend rotates its secret, the gateway must re-mint in sync) | Service-to-service calls needing identity semantics (caller/tenant) |
-| `token` | Static opaque token header `X-Internal-Token: <token>` | Compatibility with existing static tokens |
+> The authoritative security specification is 《Backend Integration Security Contract》(04 doc): scenario tiers / per-request signing / credential lifecycle / acceptance checklist. This section is the configuration summary.
+
+| type | How it is sent | Recommendation | Applies to |
+|---|---|---|---|
+| `jwt` | HS256-signed JWT (`Authorization: Bearer`, claims include iss/caller/tenant_id) — **the production internal-token is exactly this form** (if the backend rotates its secret, the gateway must re-mint in sync) | **Recommended (default)** | Service-to-service calls needing identity semantics (caller/tenant); intranet: fixed JWT + short exp + rotation discipline; **cross-segment/public: upgrade to per-request signing** (timestamp+nonce+body signature, i.e. the tokenhub adapter's HMAC four-header shape, replay-proof) |
+| `key` | Static key header `X-API-Key: <key>` (constant-time comparison + env injection) | Acceptable (intranet only) | Simple shared-secret service-to-service calls; no identity semantics, no expiry — not for cross-segment/cross-team use |
+| `none` | No auth header sent | Restricted | **localhost/sidecar same-host isolation only** (port unexposed + network policy as backstop); IP whitelisting is defense-in-depth, not a substitute — it cannot stop lateral movement within the segment |
 
 - Credentials are always injected via environment variables and must never be committed to the repo; only masked forms appear in logs/admin surfaces.
-- The TokenHub contract-surface HMAC four-header scheme (X-Access-Key/Timestamp/Nonce/Signature) does not use these four modes — it is **the protocol shape of adapter=tokenhub** (§6), configured under the `route:` surface.
+- **Startup check**: `auth=none` with a non-localhost url → startup warning (CapabilityValidator).
+- ~~The `token` static-token mode was removed (2026-08-31 decision)~~: existing systems re-mint as `jwt` during migration.
+- The TokenHub contract-surface HMAC four-header scheme (X-Access-Key/Timestamp/Nonce/Signature) does not use these three modes — it is **the protocol shape of adapter=tokenhub** (§6), configured under the `route:` surface.
 
 ### 5.3 Switch Semantics Matrix
 
@@ -285,7 +288,7 @@ token-gateway:
 
 | Adapter | Source of capability implementations | Protocol shape | Notes |
 |---|---|---|---|
-| `MmagixAdapter` | The 7 existing `rpc/*` clients migrated as-is (HttpTokenApi/HttpChannelApi/HttpBillingApi/HttpModerationApi/HttpAccessLogApi/HttpChatModelApi), with log/audit call points split to their capability surfaces | §5.2 four modes (jwt = production internal-token) | Full set of seven capabilities; zero behavior change in M1 |
+| `MmagixAdapter` | The 7 existing `rpc/*` clients migrated as-is (HttpTokenApi/HttpChannelApi/HttpBillingApi/HttpModerationApi/HttpAccessLogApi/HttpChatModelApi), with log/audit call points split to their capability surfaces | §5.2 three modes (jwt = production internal-token) | Full set of seven capabilities; zero behavior change in M1 |
 | `TokenHubAdapter` | `thmp/*` migration: ThmpContractClient (candidate resolution) + ThmpSignature + ThmpKeyCipher + ThmpCandidateCache(SWR)/negative cache | route surface HMAC four headers (fwk4j-signature semantics) | Two working modes, see §6.2 |
 | `TokenGoAdapter` | New: OpenAI-compatible passthrough + TokenGo-side credential validation / billing APIs | To be aligned (`~/codes/fork/new-api` API surface) | Heterogeneous Go stack; endpoint mapping to be aligned before M3, then coded |
 | `openapi` (generic) | **Built-in**; calls any backend per the Capability Interface Contract — **language-agnostic for third parties** (implement HTTP endpoints or MQ consumers in Go/Python/Node to integrate) | Capability Interface Contract (envelope + four auth modes) | Preferred path for third-party integration; no Java required |

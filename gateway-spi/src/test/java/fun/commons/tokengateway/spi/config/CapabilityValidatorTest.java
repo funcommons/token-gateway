@@ -81,6 +81,21 @@ class CapabilityValidatorTest {
     }
 
     @Test
+    @DisplayName("auth=none + 非 localhost url → 启动告警 (安全契约 §3.3); localhost 不告警")
+    void noneAuthNonLocalhostWarns() {
+        TokenGatewayProperties props = new TokenGatewayProperties();
+        props.getBilling().setMode(BillingMode.OFF);
+        props.getAccessLog().setEnabled(false);
+        props.getAccessLog().setTransport(LogTransport.MQ);
+        props.getRoute().setUrl("http://route-svc:9400");   // auth 默认 NONE → 应告警
+        props.getTokenValidate().setUrl("http://localhost:9400"); // localhost → 不告警
+        List<String> warnings = CapabilityValidator.validate(props,
+                Set.of(Capability.TOKEN_VALIDATE, Capability.ROUTE_RESOLVE));
+        assertThat(warnings).anyMatch(w -> w.contains("route 面 auth=none"));
+        assertThat(warnings).noneMatch(w -> w.contains("token-validate 面 auth=none"));
+    }
+
+    @Test
     @DisplayName("配置模型默认值对齐设计方案 §5.1 (face/adapter/超时/task 档位)")
     void configDefaults() {
         TokenGatewayProperties props = new TokenGatewayProperties();

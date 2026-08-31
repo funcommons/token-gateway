@@ -35,6 +35,7 @@ export default defineConfig({
             items: [
               { text: '设计方案', link: '/开发文档/01_设计方案' },
               { text: '后端接入开发手册', link: '/开发文档/02_后端接入开发手册' },
+              { text: '后端服务对接安全契约方案', link: '/开发文档/04_后端服务对接安全契约方案' },
               { text: '能力面接口契约（YAML）', link: `${githubBlob}/开发文档/03_能力面接口契约.yaml` },
             ]
           }
@@ -76,6 +77,7 @@ export default defineConfig({
             items: [
               { text: 'Design Proposal', link: '/en/dev/design' },
               { text: 'Backend Onboarding Manual', link: '/en/dev/backend-onboarding' },
+              { text: 'Backend Security Contract', link: '/en/dev/backend-security-contract' },
               { text: 'Capability-Face Contract (YAML)', link: `${githubBlob}/开发文档/03_能力面接口契约.yaml` },
             ]
           }
