@@ -44,8 +44,8 @@ public final class CapabilityValidator {
         if (!props.isHealthReport()) {
             warnings.add("health-report=off: 渠道健康信号缺失, 需在监控侧补偿 (设计方案 §5.3)");
         }
-        if (props.getFace() == Face.TASK && props.getTask().getResourceSignKey() == null) {
-            warnings.add("face=task 但 task.resource-sign-key 未配置, 资源代理签名不可用");
+        if (props.getFace() != Face.LLM) {
+            validateTaskFace(props, warnings);
         }
         // 安全契约 §3.3: auth=none 仅限 localhost/sidecar 同机隔离
         checkNoneAuth(warnings, "route", props.getRoute());
@@ -58,6 +58,39 @@ public final class CapabilityValidator {
         checkNoneAuth(warnings, "audit", props.getAudit());
         checkNoneAuth(warnings, "model-catalog", props.getModelCatalog());
         return List.copyOf(warnings);
+    }
+
+    /**
+     * 任务面配置校验 (《06_任务面face-task开发手册》§4).
+     *
+     * <p>face=task 时 lotask.url 缺失 → fail-fast (任务面唯一状态存储, 缺失即不可用);
+     * face=all 时降级 warning (LLM 面仍可服务). tenant-secret 缺失不阻断:
+     * webhook 走 verify-then-act 回查兜底 (《05》§8).
+     */
+    private static void validateTaskFace(TokenGatewayProperties props, List<String> warnings) {
+        TaskFaceConfig task = props.getTask();
+        LotaskFaceConfig lotask = task.getLotask();
+        boolean urlMissing = lotask == null || lotask.getUrl() == null || lotask.getUrl().isBlank();
+        if (urlMissing) {
+            if (props.getFace() == Face.TASK) {
+                throw new CapabilityMissingException(
+                        "face=task 但 task.lotask.url 未配置: lotask4j 是任务面唯一状态托管方"
+                                + " (《05》零改造接入, 平台前提 V4+)");
+            }
+            warnings.add("face=all 但 task.lotask.url 未配置, 任务面端点不可用 (LLM 面不受影响)");
+        }
+        if (task.getResourceSignKey() == null) {
+            warnings.add("task.resource-sign-key 未配置, 资源代理签名不可用 (M2.5c 资源代理需要)");
+        }
+        if (lotask != null && lotask.getTenantSecret() == null) {
+            warnings.add("task.lotask.tenant-secret 未配置, webhook 无法验签,"
+                    + " 终态事件全量走 verify-then-act 回查兜底 (《05》§8)");
+        }
+        if (lotask != null && lotask.getAuth() == AuthType.NONE && lotask.getUrl() != null
+                && !isLocalhost(lotask.getUrl())) {
+            warnings.add("task.lotask auth=none 但 url 非 localhost (" + lotask.getUrl()
+                    + "): none 仅限同机隔离, 跨主机请改用 jwt/key (安全契约 §3)");
+        }
     }
 
     /** auth=none + 非 localhost url → 启动告警 (安全契约 §3.3: 白名单不构成认证). */

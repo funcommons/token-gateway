@@ -10,8 +10,9 @@ import reactor.core.publisher.Mono;
  * 任务委托面 (TASK_CREATE / TASK_POLL, 设计方案 §4.2) — 可选.
  *
  * <p>仅当后端自持任务状态 (后端本身是任务平台) 时启用: 网关不做本地状态机,
- * create/poll 直委后端. 默认形态是网关本地状态机 (face-task, THMP 移植):
- * 走 route 面解析上游后由网关驱动 create/poll/notify/资源代理.
+ * create/poll 直委后端. 默认形态是 lotask4j 平台托管 (face-task, 2026-09-01 决议,
+ * 见《05_任务面lotask4j托管方案》): 任务状态单写 lotask4j, 自写 Worker 经 worker API
+ * 平台中转执行上游, 网关保留 caller 端点 + 计费 saga + notify + 资源代理.
  *
  * <p>幂等: 同 taskNo 重复 create 返回首次结果; poll 只读.
  */

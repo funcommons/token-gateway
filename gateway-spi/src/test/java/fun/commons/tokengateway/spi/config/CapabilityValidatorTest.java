@@ -31,6 +31,7 @@ class CapabilityValidatorTest {
     @DisplayName("开启的面均有能力 → 通过且无 warning")
     void allCapabilitiesPass() {
         TokenGatewayProperties props = new TokenGatewayProperties();
+        props.setFace(Face.LLM);   // 隔离任务面校验 (face=all 缺 lotask.url 会告警)
         props.getModeration().setEnabled(true);
         props.getModelCatalog().setUrl("http://localhost:9400");
         List<String> warnings = CapabilityValidator.validate(props, FULL);
@@ -76,8 +77,38 @@ class CapabilityValidatorTest {
     void taskFaceWithoutSignKeyWarns() {
         TokenGatewayProperties props = new TokenGatewayProperties();
         props.setFace(Face.TASK);
+        props.getTask().getLotask().setUrl("http://localhost:8080"); // 避开 lotask.url fail-fast
         List<String> warnings = CapabilityValidator.validate(props, FULL);
         assertThat(warnings).anyMatch(w -> w.contains("resource-sign-key"));
+    }
+
+    @Test
+    @DisplayName("face=task 但 lotask.url 缺失 → fail-fast (任务面唯一状态存储)")
+    void taskFaceWithoutLotaskUrlFailsFast() {
+        TokenGatewayProperties props = new TokenGatewayProperties();
+        props.setFace(Face.TASK);
+        assertThatThrownBy(() -> CapabilityValidator.validate(props, FULL))
+                .isInstanceOf(CapabilityValidator.CapabilityMissingException.class)
+                .hasMessageContaining("task.lotask.url");
+    }
+
+    @Test
+    @DisplayName("face=all 但 lotask.url 缺失 → warning 降级 (LLM 面仍可服务)")
+    void allFaceWithoutLotaskUrlWarns() {
+        TokenGatewayProperties props = new TokenGatewayProperties();
+        List<String> warnings = CapabilityValidator.validate(props, FULL);
+        assertThat(warnings).anyMatch(w -> w.contains("task.lotask.url"));
+    }
+
+    @Test
+    @DisplayName("face=task + tenant-secret 缺失 → warning (webhook 走回查兜底, 不阻断)")
+    void taskFaceWithoutTenantSecretWarns() {
+        TokenGatewayProperties props = new TokenGatewayProperties();
+        props.setFace(Face.TASK);
+        props.getTask().getLotask().setUrl("http://localhost:8080");
+        props.getTask().setResourceSignKey("test-sign-key");
+        List<String> warnings = CapabilityValidator.validate(props, FULL);
+        assertThat(warnings).anyMatch(w -> w.contains("tenant-secret"));
     }
 
     @Test

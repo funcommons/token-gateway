@@ -12,6 +12,21 @@ spring:
 # task=任务面(挂任务表库 + 资源缓存盘, M2.5) / all=单组合跑(默认, 小规模)
 token-gateway:
   face: all
+  # 任务面 (face=task/all 生效; 《05》零改造接入, 平台前提 lotask4j V4+; 凭证环境变量注入禁入仓)
+  task:
+    lotask:
+      url: ${LOTASK_URL:http://localhost:8080}
+      auth: jwt
+      jwt-secret: ${LOTASK_JWT_SECRET:}
+      access-key: ${LOTASK_ACCESS_KEY:}
+      sign-key: ${LOTASK_SIGN_KEY:}
+      tenant-secret: ${LOTASK_TENANT_SECRET:}
+      webhook-callback-url: ${LOTASK_WEBHOOK_CALLBACK_URL:}
+    snapshot-cipher-key: ${TGW_SNAPSHOT_CIPHER_KEY:}
+    resource-sign-key: ${TGW_RESOURCE_SIGN_KEY:}
+    timeouts:
+      video: 2h
+      image: 30m
   data:
     redis:
       host: localhost
