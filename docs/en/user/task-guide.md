@@ -3,9 +3,9 @@
 > **Status: partially available (2026-09-02).** Implemented gateway-side: four-modality
 > create/poll endpoints, billing saga (full pre-charge / terminal refund), terminal webhook
 > receiver with signature verification, notify callbacks, resource proxy, timeout clock and
-> reconciliation fallback (M2.5a/c). **Upstream task execution requires the self-written
-> Worker + Groovy adaptation scripts (M2.5b, in progress)** — until Workers are online,
-> create is accepted but tasks are not executed. Authentication, cross-cutting specifications
+> reconciliation fallback (M2.5a/c). **Upstream task execution runs on the self-written Worker
+> (task-worker module landed: sandbox / poll loop / sample script)** — until the first
+> real upstream's Groovy script ships, create is accepted but tasks are not executed. Authentication, cross-cutting specifications
 > (rate limiting / idempotency / trace), and error codes are identical to the LLM face —
 > see [LLM Face Onboarding Guide](./llm-guide.md) §3/§6/§7.
 
@@ -14,7 +14,7 @@
 | Document | Task Face Onboarding Guide (videos / images / audios / tts — four asynchronous-task modalities) |
 | Companion | LLM face [LLM Face Onboarding Guide](./llm-guide.md); API contract [Task Face API Contract](https://github.com/funcommons/token-gateway/blob/main/docs/用户文档/04_任务面API契约.yaml); design proposal [Design Document](../dev/design.md) §6.4; hosting plan [Task Face lotask4j Hosting](../dev/task-lotask4j-hosting.md) |
 | Version | V1.1 (2026-09-02, M2.5a/c landed; Worker execution M2.5b in progress) |
-| Implementation source | THMP task-domain port (TaskService / polling state machine / resource proxy / notify — no new code) |
+| Implementation source | Task state hosted by the lotask4j platform (zero-modification onboarding, V4+ prerequisite) + self-written Worker with Groovy adaptation |
 
 ---
 
@@ -22,7 +22,7 @@
 
 - Deployment group `face: task | all` (mounts a resource cache disk, scales independently); shares credential/billing/moderation/logging/audit infrastructure with the LLM face.
 - **Control-plane decisions**: key validation and the routing table are owned by the control plane (token-validate / route capability faces); the gateway data plane executes. Billing order = route-first pricing (different models, different prices), then full pre-deduction.
-- Two forms: **gateway-local state machine** (the default — the upstream is a "dumb" task API, and the gateway provides a unified task experience and terminal-state guarantees) and
+- Two forms: **lotask4j-hosted** (the default — task table / state machine / retry / zombie reaping hosted by the platform; a self-written Worker executes upstream via Groovy scripts; the upstream is a "dumb" task API) and
   **delegated face** (the backend owns task state itself and implements the `task/create` + `task/poll` capability face — see [Backend Onboarding Guide](../dev/backend-onboarding.md) §4.8).
 - Resource proxying and notify are gateway-inherent: **upstream raw URLs are never passed through**; proxy URLs carry an exp+sig capability credential valid for 24h.
 
@@ -78,4 +78,4 @@ token-gateway:
     notify-retry: 1m,10m,1h              # notify re-send backoff tiers
 ```
 
-Scheduling backstops (orphan pre-deduction release / expiry scanning / notify re-sends) are owned by the gateway itself (same as THMP MaintenanceScheduler).
+Scheduling backstops: the timeout clock (deadline → requery terminal state → EXPIRED + refund) and pre-charge–terminal reconciliation are owned by the gateway (TimeoutClockJob / ReconcileJob); the task state machine / retry / zombie reaping are hosted by lotask4j.

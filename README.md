@@ -25,6 +25,9 @@ token-gateway/
   face-task      # 任务面（M2.5a/c 已落地，Worker 执行 M2.5b 进行中）：任务状态由
                  # lotask4j 平台托管（无 DB），caller 端点 + 计费 saga + webhook 验签 +
                  # notify + 资源代理 + 超时钟/对账兜底，仅资源缓存盘
+  task-worker    # 自写任务执行 Worker（M2.5b）：lotask4j worker API 拉单/上报 +
+                 # Groovy 三钩子沙箱（AST 黑名单 + 出网白名单 + 超时硬上限），
+                 # 脚本真源在仓根 scripts/，独立进程独立扩缩
   app            # 装配：token-gateway.face = llm | task | all（同 jar 异配置部署分组）
 ```
 
@@ -49,7 +52,7 @@ token-gateway/
 前置：后端能力面服务（如 MMagiX 单体）已在 9400 端口启动；Redis 可达（默认 localhost:6379）。
 
 ```bash
-mvn package                                                   # 246 个单测
+mvn package                                                   # 256 个单测
 java -jar app/target/token-gateway-app-0.0.1-SNAPSHOT.jar     # 监听 9401
 ```
 

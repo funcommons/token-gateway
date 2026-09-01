@@ -1,0 +1,34 @@
+server:
+  port: 9411
+
+spring:
+  application:
+    name: token-gateway-task-worker
+
+# lotask4j 平台对接 (worker 域; 与网关共用租户凭证, 环境变量注入禁入仓)
+token-gateway:
+  task:
+    lotask:
+      url: ${LOTASK_URL:http://localhost:8080}
+      auth: jwt
+      jwt-secret: ${LOTASK_JWT_SECRET:}
+      access-key: ${LOTASK_ACCESS_KEY:}
+      sign-key: ${LOTASK_SIGN_KEY:}
+    snapshot-cipher-key: ${TGW_SNAPSHOT_CIPHER_KEY:}   # 与网关同钥 (路由快照解密)
+
+worker:
+  # id: wkr-xxx                       # 默认启动生成 wkr-<uuid8>
+  poll-interval: 5s                   # 拉单节拍
+  upstream-poll-interval: 5s          # 脚本 poll 钩子循环节拍
+  scripts-dir: ${WORKER_SCRIPTS_DIR:scripts}
+  concurrency: 8
+  status-check-every: 3               # 每 3 次上游轮询查一次取消信号
+  hook-timeout: 60s                   # 单钩子执行硬上限
+  max-task-duration: 3h               # 单任务最大时长 (网关超时钟另有兜底)
+  egress-allowlist: ${WORKER_EGRESS_ALLOWLIST:}   # 逗号分隔 url 前缀; 空 = 全禁 (fail-closed)
+
+logging:
+  level:
+    root: INFO
+    fun.commons.tokengateway: INFO
+    script: INFO

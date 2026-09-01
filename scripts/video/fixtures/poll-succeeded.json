@@ -1,0 +1,11 @@
+{
+  "code": 0,
+  "data": {
+    "status": "succeeded",
+    "progress": 100,
+    "outputs": [
+      {"url": "https://upstream-cdn/videos/up-123.mp4"}
+    ],
+    "usageSeconds": 5
+  }
+}

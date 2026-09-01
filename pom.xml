@@ -27,6 +27,7 @@
         <module>gateway-core</module>
         <module>face-llm</module>
         <module>face-task</module>
+        <module>task-worker</module>
         <module>app</module>
     </modules>
 

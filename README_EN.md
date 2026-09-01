@@ -18,6 +18,7 @@ Maven multi-module (design doc §9; faces independently deployable):
 - `gateway-core` — shared infrastructure (~70% across faces): envelope + cross-cutting (trace/rate-limit/idempotency/moderation) + backend RPC clients + THMP contract face; zero JDBC
 - `face-llm` — LLM sync face: 6 endpoints + relay pipeline + SSE passthrough + protocol conversion; no DB, no local disk
 - `face-task` — task face (M2.5a/c landed; Worker execution M2.5b in progress): task state hosted by the lotask4j platform (no DB); caller endpoints + billing saga + webhook verification + notify + resource proxy + timeout-clock/reconciliation fallback, only a resource cache disk
+- `task-worker` — self-written task execution Worker (M2.5b): pulls/reports via the lotask4j worker API + Groovy three-hook sandbox (AST blacklist + egress allowlist + hook timeout); script source of truth in repo-root `scripts/`; independent process
 - `app` — assembly: `token-gateway.face = llm | task | all` (same jar, different config per deployment group)
 
 **Independent face deployment**: `face=llm` loads only the LLM face (no DB/disk); `face=task` loads only the task face (DB + disk); `face=all` runs both (default). Gated by `FaceLlmAssembly` / `FaceTaskAssembly` + `@ConditionalOnFace` (invalid face value fails fast at startup).
@@ -41,7 +42,7 @@ Maven multi-module (design doc §9; faces independently deployable):
 Prerequisites: backend capability services reachable (e.g. MMagiX monolith on :9400); Redis reachable (default localhost:6379).
 
 ```bash
-mvn package                                                   # 246 tests
+mvn package                                                   # 256 tests
 java -jar app/target/token-gateway-app-0.0.1-SNAPSHOT.jar     # listens on :9401
 ```
 

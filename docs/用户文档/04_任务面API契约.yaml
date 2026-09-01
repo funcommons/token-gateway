@@ -6,8 +6,8 @@ info:
     通用模型能力网关 · 任务面（videos / images / audios / tts 异步任务四模态）。
 
     状态：M2.5a/c 已落地（create/poll/资源代理/webhook/notify 可用）；
-    上游任务执行依赖自写 Worker + Groovy 脚本（M2.5b 进行中），Worker 未上线前
-    create 可受理但任务不会被执行。协议权威 = THMP 18 号 §3.7；状态托管 = lotask4j 平台（V4+）。
+    上游任务执行由自写 Worker（task-worker）承载，首个真实上游 Groovy 脚本上线前
+create 可受理但任务不会被执行。协议权威 = THMP 18 号 §3.7；状态托管 = lotask4j 平台（V4+）。
 
     - 四段式：create（全额预扣）→ poll（3~5s 驱动，终态幂等）→ notify（HMAC 回调）
       → 资源代理（exp+sig 24h 能力凭证，上游原始 URL 永不透传）。
