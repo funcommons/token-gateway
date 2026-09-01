@@ -1,15 +1,19 @@
-# token-gateway Task Face Onboarding Guide (Planned)
+# token-gateway Task Face Onboarding Guide
 
-> **⚠️ Status: Planned (design proposal M2.5), NOT implemented in the current release.**
-> This document is a pre-release of the task-face contract (protocol authority = THMP No. 18 §3.7); implementation follows the THMP task-domain port.
-> Endpoints are unavailable before landing (calls return 404). Authentication, cross-cutting specifications (rate limiting / idempotency / trace), and error codes are
-> identical to the LLM face — see [LLM Face Onboarding Guide](./llm-guide.md) §3/§6/§7.
+> **Status: partially available (2026-09-02).** Implemented gateway-side: four-modality
+> create/poll endpoints, billing saga (full pre-charge / terminal refund), terminal webhook
+> receiver with signature verification, notify callbacks, resource proxy, timeout clock and
+> reconciliation fallback (M2.5a/c). **Upstream task execution requires the self-written
+> Worker + Groovy adaptation scripts (M2.5b, in progress)** — until Workers are online,
+> create is accepted but tasks are not executed. Authentication, cross-cutting specifications
+> (rate limiting / idempotency / trace), and error codes are identical to the LLM face —
+> see [LLM Face Onboarding Guide](./llm-guide.md) §3/§6/§7.
 
 | Item | Content |
 |---|---|
 | Document | Task Face Onboarding Guide (videos / images / audios / tts — four asynchronous-task modalities) |
-| Companion | LLM face [LLM Face Onboarding Guide](./llm-guide.md); API contract [Task Face API Contract](https://github.com/funcommons/token-gateway/blob/main/docs/用户文档/04_任务面API契约.yaml); design proposal [Design Document](../dev/design.md) §6.4 |
-| Version | V1.0 (2026-08-31, split by face from the original Caller Onboarding Guide §4.4) |
+| Companion | LLM face [LLM Face Onboarding Guide](./llm-guide.md); API contract [Task Face API Contract](https://github.com/funcommons/token-gateway/blob/main/docs/用户文档/04_任务面API契约.yaml); design proposal [Design Document](../dev/design.md) §6.4; hosting plan [Task Face lotask4j Hosting](../dev/task-lotask4j-hosting.md) |
+| Version | V1.1 (2026-09-02, M2.5a/c landed; Worker execution M2.5b in progress) |
 | Implementation source | THMP task-domain port (TaskService / polling state machine / resource proxy / notify — no new code) |
 
 ---

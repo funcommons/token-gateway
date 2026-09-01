@@ -1,12 +1,13 @@
 openapi: 3.0.3
 info:
-  title: token-gateway API · 任务面（规划中 M2.5，未实现）
+  title: token-gateway API · 任务面（M2.5a/c 已落地，Worker 执行 M2.5b 进行中）
   version: 1.0.0
   description: |
     通用模型能力网关 · 任务面（videos / images / audios / tts 异步任务四模态）。
 
-    ⚠️ 状态：规划中（设计方案 M2.5，THMP 任务域移植），当前版本未实现，
-    本文为契约预发布（协议权威 = THMP 18 号 §3.7），落地前端点不可用。
+    状态：M2.5a/c 已落地（create/poll/资源代理/webhook/notify 可用）；
+    上游任务执行依赖自写 Worker + Groovy 脚本（M2.5b 进行中），Worker 未上线前
+    create 可受理但任务不会被执行。协议权威 = THMP 18 号 §3.7；状态托管 = lotask4j 平台（V4+）。
 
     - 四段式：create（全额预扣）→ poll（3~5s 驱动，终态幂等）→ notify（HMAC 回调）
       → 资源代理（exp+sig 24h 能力凭证，上游原始 URL 永不透传）。

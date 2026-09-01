@@ -25,7 +25,7 @@ export default defineConfig({
             text: '用户文档（调用方）',
             items: [
               { text: 'LLM 面接入手册', link: '/用户文档/01_LLM面接入手册' },
-              { text: '任务面接入手册（规划中 M2.5）', link: '/用户文档/02_任务面接入手册' },
+              { text: '任务面接入手册（M2.5a/c 已落地）', link: '/用户文档/02_任务面接入手册' },
               { text: 'LLM 面 API 契约（YAML）', link: `${githubBlob}/用户文档/03_LLM面API契约.yaml` },
               { text: '任务面 API 契约（规划中）', link: `${githubBlob}/用户文档/04_任务面API契约.yaml` },
             ]
@@ -69,7 +69,7 @@ export default defineConfig({
             text: 'User Docs (Callers)',
             items: [
               { text: 'LLM Face Onboarding', link: '/en/user/llm-guide' },
-              { text: 'Task Face Onboarding (planned M2.5)', link: '/en/user/task-guide' },
+              { text: 'Task Face Onboarding (M2.5a/c landed)', link: '/en/user/task-guide' },
               { text: 'LLM API Contract (YAML)', link: `${githubBlob}/用户文档/03_LLM面API契约.yaml` },
               { text: 'Task API Contract (planned)', link: `${githubBlob}/用户文档/04_任务面API契约.yaml` },
             ]

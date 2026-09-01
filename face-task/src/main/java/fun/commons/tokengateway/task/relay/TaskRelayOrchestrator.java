@@ -15,6 +15,7 @@ import fun.commons.tokengateway.task.billing.TaskBillingSaga;
 import fun.commons.tokengateway.task.lotask.LotaskTaskClient;
 import fun.commons.tokengateway.task.lotask.LotaskTaskView;
 import fun.commons.tokengateway.task.lotask.RouteSnapshotCipher;
+import fun.commons.tokengateway.task.state.TaskMetaStore;
 import fun.commons.tokengateway.task.state.TaskNoMappingStore;
 import fun.commons.tokengateway.task.state.TaskStateMapper;
 import lombok.RequiredArgsConstructor;
@@ -53,6 +54,7 @@ public class TaskRelayOrchestrator {
     private final LotaskTaskClient lotaskClient;
     private final RouteSnapshotCipher snapshotCipher;
     private final TaskNoMappingStore mappingStore;
+    private final TaskMetaStore metaStore;
     private final TokenGatewayProperties props;
 
     /**
@@ -123,9 +125,20 @@ public class TaskRelayOrchestrator {
                     Map<String, Object> payload = buildPayload(model, body, channel);
                     String callbackUrl = props.getTask().getLotask().getWebhookCallbackUrl();
                     return lotaskClient.submit(modality, taskNo, payload, callbackUrl)
-                            .flatMap(lotaskId -> mappingStore.put(taskNo, lotaskId,
-                                            props.getTask().timeoutOf(modality).plus(Duration.ofHours(24)))
-                                    .thenReturn(createdView(modality, taskNo)))
+                            .flatMap(lotaskId -> {
+                                Duration ttl = props.getTask().timeoutOf(modality)
+                                        .plus(Duration.ofHours(24));
+                                long deadline = System.currentTimeMillis()
+                                        + props.getTask().timeoutOf(modality).toMillis();
+                                Object notifyUrl = body.get("notify_url");
+                                return mappingStore.put(taskNo, lotaskId, ttl)
+                                        .then(metaStore.onCreated(taskNo,
+                                                new TaskMetaStore.TaskMeta(lotaskId, preConsumeId,
+                                                        modality,
+                                                        notifyUrl == null ? null : notifyUrl.toString(),
+                                                        deadline), ttl))
+                                        .thenReturn(createdView(modality, taskNo));
+                            })
                             .onErrorResume(e -> {
                                 // submit 失败 → 全额退款, 不产生"扣了钱没任务" (《05》§11)
                                 if (e instanceof RelayException re) {
@@ -160,7 +173,8 @@ public class TaskRelayOrchestrator {
     }
 
     /**
-     * 轮询 (终态幂等; lotask 不可达 → 502, 调用方退避重试, 状态不变不触计费).
+     * 轮询 (终态幂等: 优先读终态条目——SUCCEEDED 返回 sig 代理 URL, EXPIRED 返回超时钟判定;
+     * 非终态走 lotask 查询; lotask 不可达 → 502, 调用方退避重试, 状态不变不触计费).
      */
     public Mono<Map<String, Object>> poll(String modality, String taskNo, String apiKey) {
         if (apiKey == null) {
@@ -176,9 +190,27 @@ public class TaskRelayOrchestrator {
                     return mappingStore.get(taskNo)
                             .switchIfEmpty(Mono.error(new RelayException(404,
                                     ApiCode.NOT_FOUND.getCode(), "任务不存在或映射已过期: " + taskNo)))
-                            .flatMap(lotaskClient::get)
-                            .map(view -> pollView(taskNo, view));
+                            .flatMap(lotaskId -> metaStore.getTerminalResult(taskNo)
+                                    .map(entry -> terminalPollView(taskNo, entry))
+                                    .switchIfEmpty(Mono.defer(() -> lotaskClient.get(lotaskId)
+                                            .map(view -> pollView(taskNo, view)))));
                 });
+    }
+
+    /** 终态条目视图 (终态幂等, 不触 lotask; resources 已是 sig 代理 URL). */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> terminalPollView(String taskNo,
+                                                 com.alibaba.fastjson2.JSONObject entry) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("task_no", taskNo);
+        out.put("status", entry.getString("status"));
+        if (entry.get("result") != null) {
+            out.put("result", entry.get("result"));
+        }
+        if (entry.get("error") != null) {
+            out.put("error", entry.get("error"));
+        }
+        return out;
     }
 
     /** 轮询视图: 终态返回存储结果; resources 转 sig 代理 URL 为 M2.5c 增量 (当前透传原文). */

@@ -13,6 +13,7 @@ import fun.commons.tokengateway.task.billing.TaskBillingSaga;
 import fun.commons.tokengateway.task.lotask.LotaskTaskClient;
 import fun.commons.tokengateway.task.lotask.LotaskTaskView;
 import fun.commons.tokengateway.task.lotask.RouteSnapshotCipher;
+import fun.commons.tokengateway.task.state.TaskMetaStore;
 import fun.commons.tokengateway.task.state.TaskNoMappingStore;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
@@ -54,6 +55,7 @@ class TaskRelayOrchestratorTest {
     private TaskRelayOrchestrator orchestrator;
     private LotaskTaskClient lotaskClient;
     private TaskNoMappingStore mappingStore;
+    private TaskMetaStore metaStore;
     private RouteSnapshotCipher cipher;
 
     private static final String CIPHER_KEY = Base64.getEncoder().encodeToString(new byte[32]);
@@ -83,6 +85,10 @@ class TaskRelayOrchestratorTest {
         mappingStore = mock(TaskNoMappingStore.class);
         cipher = new RouteSnapshotCipher(CIPHER_KEY);
 
+        TaskMetaStore metaStore = mock(TaskMetaStore.class);
+        when(metaStore.onCreated(anyString(), any(), any())).thenReturn(Mono.empty());
+        when(metaStore.getTerminalResult(anyString())).thenReturn(Mono.empty());
+
         TokenGatewayProperties props = new TokenGatewayProperties();
         props.getTask().getLotask().setWebhookCallbackUrl("http://gw/internal/lotask/webhook");
 
@@ -90,7 +96,8 @@ class TaskRelayOrchestratorTest {
                 new HttpTokenApi(b, gwProps, auth),
                 new HttpChannelApi(b, gwProps, auth),
                 new TaskBillingSaga(new HttpBillingApi(b, gwProps, auth), alwaysFirst),
-                lotaskClient, cipher, mappingStore, props);
+                lotaskClient, cipher, mappingStore, metaStore, props);
+        this.metaStore = metaStore;
     }
 
     @AfterEach
@@ -235,5 +242,25 @@ class TaskRelayOrchestratorTest {
                     assertThat(error.get("code")).isEqualTo("UPSTREAM_ERROR");
                 })
                 .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("poll: 终态条目存在 → 幂等返回 (不触 lotask, resources 已是代理 URL)")
+    void pollTerminalEntry() {
+        backend.enqueue(json("{\"code\":0,\"data\":{\"valid\":true}}"));
+        when(mappingStore.get("T-done")).thenReturn(Mono.just("YeirYkxHuQ"));
+        when(metaStore.getTerminalResult("T-done")).thenReturn(Mono.just(
+                com.alibaba.fastjson2.JSON.parseObject("{\"status\":\"SUCCEEDED\","
+                        + "\"result\":{\"resources\":[\"/v1/resources/T-done/0?exp=1&sig=x\"]}}")));
+
+        StepVerifier.create(orchestrator.poll("video", "T-done", "sk-caller"))
+                .assertNext(view -> {
+                    assertThat(view.get("status")).isEqualTo("SUCCEEDED");
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> result = (Map<String, Object>) view.get("result");
+                    assertThat(result.get("resources").toString()).contains("/v1/resources/T-done/0");
+                })
+                .verifyComplete();
+        verify(lotaskClient, never()).get(anyString());
     }
 }

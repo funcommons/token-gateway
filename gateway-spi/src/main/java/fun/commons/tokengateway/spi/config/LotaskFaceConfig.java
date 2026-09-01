@@ -34,6 +34,9 @@ public class LotaskFaceConfig {
     /** webhook 验签密钥 = 网关租户 tenant_secret (环境变量注入; 轮换期双钥见《05》§8). */
     private String tenantSecret;
 
+    /** webhook 验签旧密钥 (reset-secret 轮换 grace 期双钥验签, 环境变量注入, 可空). */
+    private String tenantSecretPrevious;
+
     /** 网关 webhook 接收地址 (submit.callbackUrl 下发, 如 https://gateway/internal/lotask/webhook). */
     private String webhookCallbackUrl;
 

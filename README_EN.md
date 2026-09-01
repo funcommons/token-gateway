@@ -17,7 +17,7 @@ Maven multi-module (design doc §9; faces independently deployable):
 - `gateway-spi` — capability-face SPI (M0 frozen): BackendAdapter + Capability + 7 face interfaces + task delegate + contract DTOs + config model + startup capability validation
 - `gateway-core` — shared infrastructure (~70% across faces): envelope + cross-cutting (trace/rate-limit/idempotency/moderation) + backend RPC clients + THMP contract face; zero JDBC
 - `face-llm` — LLM sync face: 6 endpoints + relay pipeline + SSE passthrough + protocol conversion; no DB, no local disk
-- `face-task` — task face (placeholder, M2.5): task state hosted by the lotask4j platform (no DB), only a resource cache disk; caller endpoints + billing saga + notify + resource proxy
+- `face-task` — task face (M2.5a/c landed; Worker execution M2.5b in progress): task state hosted by the lotask4j platform (no DB); caller endpoints + billing saga + webhook verification + notify + resource proxy + timeout-clock/reconciliation fallback, only a resource cache disk
 - `app` — assembly: `token-gateway.face = llm | task | all` (same jar, different config per deployment group)
 
 **Independent face deployment**: `face=llm` loads only the LLM face (no DB/disk); `face=task` loads only the task face (DB + disk); `face=all` runs both (default). Gated by `FaceLlmAssembly` / `FaceTaskAssembly` + `@ConditionalOnFace` (invalid face value fails fast at startup).
@@ -41,7 +41,7 @@ Maven multi-module (design doc §9; faces independently deployable):
 Prerequisites: backend capability services reachable (e.g. MMagiX monolith on :9400); Redis reachable (default localhost:6379).
 
 ```bash
-mvn package                                                   # 194 tests
+mvn package                                                   # 246 tests
 java -jar app/target/token-gateway-app-0.0.1-SNAPSHOT.jar     # listens on :9401
 ```
 
@@ -54,9 +54,9 @@ Key configuration (`app/src/main/resources/application.yml`): `gateway.backend.u
 | Doc | Description |
 |---|---|
 | [LLM Onboarding (en)](https://funcommons.github.io/token-gateway/en/user/llm-guide) · [中文](docs/用户文档/01_LLM面接入手册.md) | Caller integration (OpenAI/Anthropic SDK + error codes + backend config) |
-| [Task Onboarding (en)](https://funcommons.github.io/token-gateway/en/user/task-guide) · [中文](docs/用户文档/02_任务面接入手册.md) | Task face (create/poll/notify/resource proxy) — **planned M2.5, not implemented** |
+| [Task Onboarding (en)](https://funcommons.github.io/token-gateway/en/user/task-guide) · [中文](docs/用户文档/02_任务面接入手册.md) | Task face (create/poll/notify/resource proxy) — M2.5a/c landed; Worker execution M2.5b in progress |
 | [LLM API Contract](docs/用户文档/03_LLM面API契约.yaml) | OpenAPI contract (6 endpoints) |
-| [Task API Contract](docs/用户文档/04_任务面API契约.yaml) | **Planned M2.5, not implemented** |
+| [Task API Contract](docs/用户文档/04_任务面API契约.yaml) | M2.5a/c landed; Worker execution M2.5b in progress |
 
 ### Developer Docs (Gateway / Backend Integrators)
 

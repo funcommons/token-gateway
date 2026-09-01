@@ -1,6 +1,6 @@
 # token-gateway
 
-> 大模型网关服务（通用模型能力网关 · 当前实现 LLM 同步面；任务四模态面规划中 M2.5）
+> 大模型网关服务（通用模型能力网关 · LLM 同步面 + 任务四模态面（M2.5a/c 已落地，Worker 执行 M2.5b 进行中））
 
 [![Java](https://img.shields.io/badge/Java-17-orange.svg)](https://openjdk.java.net/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-green.svg)](https://spring.io/projects/spring-boot)
@@ -22,8 +22,9 @@ token-gateway/
                  # 后端 RPC 客户端 + THMP 契约面 + 配置装配；零 JDBC
   face-llm       # LLM 同步面：6 端点 + RelayOrchestrator 管线 + SSE 透传 + 协议转换；
                  # 无数据库无本地盘，弹性扩缩
-  face-task      # 任务面（占位，M2.5）：任务状态由 lotask4j 平台托管（无 DB），
-                 # 仅资源缓存盘；caller 端点 + 计费 saga + notify + 资源代理
+  face-task      # 任务面（M2.5a/c 已落地，Worker 执行 M2.5b 进行中）：任务状态由
+                 # lotask4j 平台托管（无 DB），caller 端点 + 计费 saga + webhook 验签 +
+                 # notify + 资源代理 + 超时钟/对账兜底，仅资源缓存盘
   app            # 装配：token-gateway.face = llm | task | all（同 jar 异配置部署分组）
 ```
 
@@ -48,7 +49,7 @@ token-gateway/
 前置：后端能力面服务（如 MMagiX 单体）已在 9400 端口启动；Redis 可达（默认 localhost:6379）。
 
 ```bash
-mvn package                                                   # 194 个单测
+mvn package                                                   # 246 个单测
 java -jar app/target/token-gateway-app-0.0.1-SNAPSHOT.jar     # 监听 9401
 ```
 
@@ -61,9 +62,9 @@ java -jar app/target/token-gateway-app-0.0.1-SNAPSHOT.jar     # 监听 9401
 | 文档 | 说明 |
 |---|---|
 | [docs/用户文档/01_LLM面接入手册.md](docs/用户文档/01_LLM面接入手册.md) | LLM 面调用方接入（OpenAI/Anthropic SDK + 错误码 + 后端配置） |
-| [docs/用户文档/02_任务面接入手册.md](docs/用户文档/02_任务面接入手册.md) | 任务面接入（四模态 create/poll/notify/资源代理）——**规划中 M2.5，未实现** |
+| [docs/用户文档/02_任务面接入手册.md](docs/用户文档/02_任务面接入手册.md) | 任务面接入（四模态 create/poll/notify/资源代理）——M2.5a/c 已落地，Worker 执行 M2.5b 进行中 |
 | [docs/用户文档/03_LLM面API契约.yaml](docs/用户文档/03_LLM面API契约.yaml) | LLM 面 OpenAPI 契约（6 端点） |
-| [docs/用户文档/04_任务面API契约.yaml](docs/用户文档/04_任务面API契约.yaml) | 任务面 OpenAPI 契约——**规划中 M2.5，未实现** |
+| [docs/用户文档/04_任务面API契约.yaml](docs/用户文档/04_任务面API契约.yaml) | 任务面 OpenAPI 契约——M2.5a/c 已落地，Worker 执行 M2.5b 进行中 |
 
 ### 开发文档（网关开发与后端接入方）
 

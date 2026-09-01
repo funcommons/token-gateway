@@ -25,6 +25,9 @@ public class TaskFaceConfig {
     private List<Duration> notifyRetry = List.of(
             Duration.ofMinutes(1), Duration.ofMinutes(10), Duration.ofHours(1));
 
+    /** notify 回调 X-THMP-Signature 签名密钥 (环境变量注入; 调用方以此验签). */
+    private String notifySignKey;
+
     /** lotask4j 平台对接 (任务状态托管方, 零改造接入). */
     private LotaskFaceConfig lotask = new LotaskFaceConfig();
 
