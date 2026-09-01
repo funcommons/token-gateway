@@ -12,10 +12,17 @@
 
 ## Source Layout
 
-Maven multi-module (see design doc §9; M0 delivered `gateway-spi`):
+Maven multi-module (design doc §9; faces independently deployable):
 
 - `gateway-spi` — capability-face SPI (M0 frozen): BackendAdapter + Capability + 7 face interfaces + task delegate + contract DTOs + config model + startup capability validation
-- `app` — assembly application (LLM face bootstrapped from MMagiX `backend/gateway-webflux`), package `fun.commons.tokengateway`:
+- `gateway-core` — shared infrastructure (~70% across faces): envelope + cross-cutting (trace/rate-limit/idempotency/moderation) + backend RPC clients + THMP contract face; zero JDBC
+- `face-llm` — LLM sync face: 6 endpoints + relay pipeline + SSE passthrough + protocol conversion; no DB, no local disk
+- `face-task` — task face (placeholder, M2.5 THMP port): exclusively owns the task-table DB and resource cache disk
+- `app` — assembly: `token-gateway.face = llm | task | all` (same jar, different config per deployment group)
+
+**Independent face deployment**: `face=llm` loads only the LLM face (no DB/disk); `face=task` loads only the task face (DB + disk); `face=all` runs both (default). Gated by `FaceLlmAssembly` / `FaceTaskAssembly` + `@ConditionalOnFace` (invalid face value fails fast at startup).
+
+`face-llm` package layout (`fun.commons.tokengateway`):
 
 | Package | Responsibility |
 |---|---|

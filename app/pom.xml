@@ -14,15 +14,19 @@
     <artifactId>token-gateway-app</artifactId>
     <name>token-gateway-app</name>
     <description>
-        token-gateway 装配应用 (当前为 gateway-webflux 平移的 LLM 面全量代码;
-        M1 起按设计方案 §9 拆分为 gateway-core / face-llm / adapter-mmagix 等模块).
+        token-gateway 装配应用: gateway-core + face-llm + face-task,
+        token-gateway.face = llm | task | all 部署分组 (同 jar 异配置, 设计方案 §9).
     </description>
 
     <dependencies>
-        <!-- 能力面 SPI (M0): 接口 + contract DTO -->
+        <!-- face 装配 (face 条件由 FaceLlmAssembly / FaceTaskAssembly 控制) -->
         <dependency>
             <groupId>fun.commons</groupId>
-            <artifactId>gateway-spi</artifactId>
+            <artifactId>face-llm</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.commons</groupId>
+            <artifactId>face-task</artifactId>
         </dependency>
 
         <!-- WebFlux + Netty (无 servlet 容器) -->
@@ -50,40 +54,10 @@
             <scope>provided</scope>
         </dependency>
 
-        <!-- fastjson2 (FormatConverter / SseConverter 解析上游 chunk JSON) -->
-        <dependency>
-            <groupId>com.alibaba.fastjson2</groupId>
-            <artifactId>fastjson2</artifactId>
-            <version>2.0.41</version>
-        </dependency>
-
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.projectreactor</groupId>
-            <artifactId>reactor-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.squareup.okhttp3</groupId>
-            <artifactId>mockwebserver</artifactId>
-            <version>4.12.0</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.assertj</groupId>
-            <artifactId>assertj-core</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <!-- Testcontainers (Redis 实现契约测试; 版本由 spring-boot-dependencies 管理,
-             Docker 不可用时 disabledWithoutDocker 自动跳过) -->
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -94,10 +68,10 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>fun.commons.tokengateway.TokenGatewayApplication</mainClass>
+                    <mainClass>fun.commons.tokengateway.app.TokenGatewayApplication</mainClass>
                 </configuration>
             </plugin>
-            <!-- 覆盖率度量 (JaCoCo, mc-test 场景八): 报告落 target/site/jacoco -->
+            <!-- 覆盖率度量 (JaCoCo): 报告落 target/site/jacoco -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>

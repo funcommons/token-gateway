@@ -12,17 +12,23 @@
 
 ## 源码
 
-Maven 多模块（分模块方案见设计方案 §9，M0 已落地 `gateway-spi`）：
+Maven 多模块（设计方案 §9 分模块方案，face 独立部署）：
 
 ```
 token-gateway/
   gateway-spi    # 能力面 SPI（M0 冻结）：BackendAdapter + Capability + 七面接口 +
                  # task 委托面 + contract DTO + 能力面配置模型 + 启动期开关∩能力校验
-  app            # 装配应用（gateway-webflux 平移的 LLM 面全量代码，
-                 # M1 起拆 gateway-core / face-llm / adapter-mmagix）
+  gateway-core   # 共享基建（两面同源 ~70%）：信封 framework + 横切(trace/限流/幂等/审核) +
+                 # 后端 RPC 客户端 + THMP 契约面 + 配置装配；零 JDBC
+  face-llm       # LLM 同步面：6 端点 + RelayOrchestrator 管线 + SSE 透传 + 协议转换；
+                 # 无数据库无本地盘，弹性扩缩
+  face-task      # 任务面（占位，M2.5 THMP 移植）：独占任务表数据库 + 资源缓存盘
+  app            # 装配：token-gateway.face = llm | task | all（同 jar 异配置部署分组）
 ```
 
-`app` 包结构（`fun.commons.tokengateway`）：
+**face 独立部署**：`token-gateway.face=llm` 只装 LLM 面（无 DB 无盘）；`=task` 只装任务面（挂库挂盘）；`=all` 单组合跑（默认）。由 `FaceLlmAssembly` / `FaceTaskAssembly` + `@ConditionalOnFace` 按 face 条件装配（face 值非法启动 fail-fast）。
+
+`face-llm` 包结构（`fun.commons.tokengateway`）：
 
 | 包 | 职责 |
 |---|---|

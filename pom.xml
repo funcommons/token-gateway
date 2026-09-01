@@ -24,6 +24,9 @@
 
     <modules>
         <module>gateway-spi</module>
+        <module>gateway-core</module>
+        <module>face-llm</module>
+        <module>face-task</module>
         <module>app</module>
     </modules>
 
@@ -37,6 +40,21 @@
             <dependency>
                 <groupId>fun.commons</groupId>
                 <artifactId>gateway-spi</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.commons</groupId>
+                <artifactId>gateway-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.commons</groupId>
+                <artifactId>face-llm</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.commons</groupId>
+                <artifactId>face-task</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

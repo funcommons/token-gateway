@@ -7,6 +7,11 @@ server:
 spring:
   application:
     name: token-gateway
+
+# face 部署分组 (设计方案 §9): llm=纯同步面(无数据库无本地盘, 弹性扩) /
+# task=任务面(挂任务表库 + 资源缓存盘, M2.5) / all=单组合跑(默认, 小规模)
+token-gateway:
+  face: all
   data:
     redis:
       host: localhost
