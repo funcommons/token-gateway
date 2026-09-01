@@ -14,10 +14,11 @@
     <artifactId>face-task</artifactId>
     <name>face-task</name>
     <description>
-        token-gateway 任务面 (face=task 部署分组, 规划中 M2.5 —— THMP 任务域移植):
-        四模态 create/poll/notify/资源代理 + 轮询状态机 + 调度兜底.
-        本模块独占数据库依赖 (任务表, THMP 17 号 DDL) 与资源缓存盘;
-        face=llm 部署不引入本模块任何存储依赖.
+        token-gateway 任务面 (face=task 部署分组, 规划中 M2.5):
+        四模态 caller 端点 + 计费 saga + notify + 资源代理 + LotaskTaskClient.
+        任务状态由 lotask4j 平台托管 (05_任务面lotask4j托管方案, 2026-09-01 决议) —
+        本模块无数据库依赖, 仅保留资源缓存盘;
+        状态机/重试/僵尸回收/调度兜底全部在 lotask4j 侧.
     </description>
 
     <dependencies>
@@ -26,8 +27,8 @@
             <artifactId>gateway-core</artifactId>
         </dependency>
 
-        <!-- M2.5: 任务表持久化 (PostgreSQL, THMP 17 号 DDL) 依赖在本模块引入,
-             gateway-core / face-llm 保持零 JDBC -->
+        <!-- M2.5: lotask4j 客户端 (WebClient, jwt + HMAC 签名) 在本模块实现;
+             无 JDBC —— 任务状态托管在 lotask4j 平台 -->
 
         <!-- Lombok -->
         <dependency>

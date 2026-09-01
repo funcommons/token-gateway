@@ -17,7 +17,7 @@ Maven multi-module (design doc §9; faces independently deployable):
 - `gateway-spi` — capability-face SPI (M0 frozen): BackendAdapter + Capability + 7 face interfaces + task delegate + contract DTOs + config model + startup capability validation
 - `gateway-core` — shared infrastructure (~70% across faces): envelope + cross-cutting (trace/rate-limit/idempotency/moderation) + backend RPC clients + THMP contract face; zero JDBC
 - `face-llm` — LLM sync face: 6 endpoints + relay pipeline + SSE passthrough + protocol conversion; no DB, no local disk
-- `face-task` — task face (placeholder, M2.5 THMP port): exclusively owns the task-table DB and resource cache disk
+- `face-task` — task face (placeholder, M2.5): task state hosted by the lotask4j platform (no DB), only a resource cache disk; caller endpoints + billing saga + notify + resource proxy
 - `app` — assembly: `token-gateway.face = llm | task | all` (same jar, different config per deployment group)
 
 **Independent face deployment**: `face=llm` loads only the LLM face (no DB/disk); `face=task` loads only the task face (DB + disk); `face=all` runs both (default). Gated by `FaceLlmAssembly` / `FaceTaskAssembly` + `@ConditionalOnFace` (invalid face value fails fast at startup).
@@ -65,4 +65,5 @@ Key configuration (`app/src/main/resources/application.yml`): `gateway.backend.u
 | [Design Proposal (en)](https://funcommons.github.io/token-gateway/en/dev/design) · [中文](docs/开发文档/01_设计方案.md) | Capability-face SPI · yml config model · adapter matrix · milestones |
 | [Backend Onboarding (en)](https://funcommons.github.io/token-gateway/en/dev/backend-onboarding) · [中文](docs/开发文档/02_后端接入开发手册.md) | Implement the capability contract in any language to onboard |
 | [Backend Security Contract (en)](https://funcommons.github.io/token-gateway/en/dev/backend-security-contract) · [中文](docs/开发文档/04_后端服务对接安全契约方案.md) | Auth three modes (jwt/key/none) · scenario tiers · per-request signing · credential rotation |
+| [Task Face lotask4j Hosting (en)](https://funcommons.github.io/token-gateway/en/dev/task-lotask4j-hosting) · [中文](docs/开发文档/05_任务面lotask4j托管方案.md) | Platform-mediated execution · Groovy script adaptation · lotask4j revamp list R1~R9 |
 | [Capability-Face Contract](docs/开发文档/03_能力面接口契约.yaml) | OpenAPI contract for backend endpoints + MQ log messages |

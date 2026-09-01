@@ -22,7 +22,8 @@ token-gateway/
                  # 后端 RPC 客户端 + THMP 契约面 + 配置装配；零 JDBC
   face-llm       # LLM 同步面：6 端点 + RelayOrchestrator 管线 + SSE 透传 + 协议转换；
                  # 无数据库无本地盘，弹性扩缩
-  face-task      # 任务面（占位，M2.5 THMP 移植）：独占任务表数据库 + 资源缓存盘
+  face-task      # 任务面（占位，M2.5）：任务状态由 lotask4j 平台托管（无 DB），
+                 # 仅资源缓存盘；caller 端点 + 计费 saga + notify + 资源代理
   app            # 装配：token-gateway.face = llm | task | all（同 jar 异配置部署分组）
 ```
 
@@ -71,4 +72,5 @@ java -jar app/target/token-gateway-app-0.0.1-SNAPSHOT.jar     # 监听 9401
 | [docs/开发文档/01_设计方案.md](docs/开发文档/01_设计方案.md) | 设计方案（能力面 SPI · yml 能力面配置 · 适配器矩阵 · 分模块与部署分组 · 分期路线） |
 | [docs/开发文档/02_后端接入开发手册.md](docs/开发文档/02_后端接入开发手册.md) | 后端接入开发手册（实现能力面契约即接入，不限语言） |
 | [docs/开发文档/04_后端服务对接安全契约方案.md](docs/开发文档/04_后端服务对接安全契约方案.md) | 后端对接安全契约（鉴权三式 jwt/key/none · 场景分级 · 逐请求签名 · 凭证轮换） |
+| [docs/开发文档/05_任务面lotask4j托管方案.md](docs/开发文档/05_任务面lotask4j托管方案.md) | 任务面 lotask4j 托管方案（平台中转执行 · Groovy 脚本适配 · lotask4j 改造清单 R1~R9） |
 | [docs/开发文档/03_能力面接口契约.yaml](docs/开发文档/03_能力面接口契约.yaml) | 能力面 OpenAPI 契约（后端需实现的端点 + MQ 日志消息） |
