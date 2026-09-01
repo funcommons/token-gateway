@@ -17,6 +17,7 @@
 ## 1. Task Face Positioning
 
 - Deployment group `face: task | all` (mounts a resource cache disk, scales independently); shares credential/billing/moderation/logging/audit infrastructure with the LLM face.
+- **Control-plane decisions**: key validation and the routing table are owned by the control plane (token-validate / route capability faces); the gateway data plane executes. Billing order = route-first pricing (different models, different prices), then full pre-deduction.
 - Two forms: **gateway-local state machine** (the default — the upstream is a "dumb" task API, and the gateway provides a unified task experience and terminal-state guarantees) and
   **delegated face** (the backend owns task state itself and implements the `task/create` + `task/poll` capability face — see [Backend Onboarding Guide](../dev/backend-onboarding.md) §4.8).
 - Resource proxying and notify are gateway-inherent: **upstream raw URLs are never passed through**; proxy URLs carry an exp+sig capability credential valid for 24h.
@@ -34,7 +35,8 @@
 ## 3. Call Flow (Four Steps, Video as Example)
 
 ```bash
-# ① Create (synchronously returns task_no; full amount is pre-deducted at creation; insufficient balance → 10617 and no task is created)
+# ① Create (synchronously returns task_no: control-plane key validation → routing-table resolve
+#    for pricing → full pre-deduction per the routed model; insufficient balance → 10617, no task created)
 curl -s http://localhost:9401/v1/videos \
   -H "Authorization: Bearer <credential>" -H "Content-Type: application/json" \
   -d '{"model":"vid-1.5","params":{"duration":5,"resolution":"720p"},"notify_url":"https://you/callback"}'
@@ -52,7 +54,7 @@ curl -sL "<proxy URL>" -o out.mp4
 
 | Item | Semantics |
 |---|---|
-| Billing | The full amount is **pre-deducted at creation**; FAILED / EXPIRED automatically receive a **full refund**; SUCCEEDED is not refunded (pre-deduction is the payment) — there is no usage settlement step |
+| Billing | Route-first pricing (priced per the resolved model), full amount **pre-deducted at creation**; FAILED / EXPIRED automatically receive a **full refund**; SUCCEEDED is not refunded (pre-deduction is the payment) — there is no usage settlement step |
 | State machine | `PENDING → RUNNING → SUCCEEDED / FAILED / EXPIRED`; no terminal state after 24h → EXPIRED + full refund |
 | Polling | After a terminal state, returns the stored result idempotently (`POLL_HITS=0`, upstream not touched); upstream query errors leave the status unchanged — just retry with backoff |
 | notify | If `notify_url` is provided at creation, a terminal-state callback is sent; `X-THMP-Signature` (HMAC) can be used to verify it; failures are re-sent by the gateway with backoff (1m/10m/1h tiers) — callers need no fallback |

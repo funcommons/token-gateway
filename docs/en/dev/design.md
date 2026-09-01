@@ -314,10 +314,12 @@ The same adapter selects its mode from the §5 configuration (`billing` three-va
 
 | Form | Routing | State machine location | Applies to |
 |---|---|---|---|
-| **Local state machine** (default) | route surface resolve → upstream base_url + outbound credential | Gateway face-task (THMP port): full pre-consume on creation → outbound → polling state machine (SUCCEEDED/FAILED/EXPIRED) → notify (HMAC signature + backoff redelivery) → resource proxy (sig capability credential, upstream URL never passed through) | The upstream is a "dumb" task API (create/poll); the gateway unifies the task experience and terminal-state guarantees |
+| **Local state machine** (default) | route surface resolve → upstream base_url + outbound credential | Gateway face-task (THMP port): route-first pricing then full pre-consume → outbound → polling state machine (SUCCEEDED/FAILED/EXPIRED) → notify (HMAC signature + backoff redelivery) → resource proxy (sig capability credential, upstream URL never passed through) | The upstream is a "dumb" task API (create/poll); the gateway unifies the task experience and terminal-state guarantees |
 | **Delegation surface** | TASK_CREATE/TASK_POLL (task delegation surface) | Backend-owned (the backend is itself a task platform) | The backend has its own task state machine; the gateway only proxies and bills |
 
 Resource proxy and notify are gateway-inherent (sig signing, 24h expiry, upstream URL never passed through) and identical across both forms; task billing = full pre-consume at creation → refund on terminal state (full RELEASE on FAILED/EXPIRED), reusing the billing surface with no usage-settlement step.
+
+**Control plane (decision 2026-09-01)**: For the task face (as for the LLM face), **key validation and the routing table belong to the control plane** — the token-validate and route capability faces are the control-plane interfaces. The control plane decides "is the credential valid, which upstream does the model route to, and at which price"; the gateway data plane only executes (pre-consume / outbound / state machine / notify / resource proxy). Routing-table changes touch the control plane only, never the gateway. Billing-order rule: **resolve route for pricing first, then pre-consume the full amount** — different models have different prices, so the pre-consume amount must be computed from the routed model (same order as the LLM face: validate → resolve → preConsume).
 
 ---
 
@@ -354,7 +356,7 @@ sequenceDiagram
 
 **Inter-backend canary** (the generalization of S2's THMP cutover): the route capability config gains `shadow-to` and `cutover-percent` (the production `gateway.thmp.cutover-models/percent` is the yml landing of this form) — the primary path serves traffic while a shadow performs parallel resolution for comparison instrumentation (`[THMP-SHADOW]` single-line logs + `shadow-report.py` reused directly, markers unchanged from production); after the shadow converges to zero, traffic is cut over by bucket percentage, with a whitelist enabling second-level rollback.
 
-**Task-face pipeline** (face=task, local state machine form): create (metering → full billing pre-consume → route resolve → outbound POST tasks) → caller polling (driven at 3~5s, terminal states are idempotent and never touch the upstream) → notify callback (HMAC + backoff redelivery) → resource proxy (GET signed URL, streaming origin fetch + local cache). Reuses the route/billing/moderation/log/audit surfaces; scheduling fallback = orphan pre-consume release / expiry scan / notify redelivery (same as THMP MaintenanceScheduler).
+**Task-face pipeline** (face=task, local state machine form; **control plane decides, data plane executes**): create (**control-plane key validation → control-plane routing-table resolve (route-first pricing: different models, different prices) → meter and fully pre-consume per the routed model → outbound POST tasks**) → caller polling (driven at 3~5s, terminal states are idempotent and never touch the upstream) → notify callback (HMAC + backoff redelivery) → resource proxy (GET signed URL, streaming origin fetch + local cache). Reuses the route/billing/moderation/log/audit surfaces; scheduling fallback = orphan pre-consume release / expiry scan / notify redelivery (same as THMP MaintenanceScheduler).
 
 ---
 
