@@ -46,6 +46,14 @@ mvn package                                                   # 256 tests
 java -jar app/target/token-gateway-app-0.0.1-SNAPSHOT.jar     # listens on :9401
 ```
 
+**Full-chain smoke** (LLM face + task face + notify + reconciliation, five processes, zero real dependencies):
+
+```bash
+docker compose -f docker-compose.smoke.yml up -d              # redis + token-mock
+# start lotask4j + gateway/worker/demo control plane per docs/en/dev/lotask4j-tenant-onboarding.md §5
+bash scripts/smoke.sh                                         # PASS/FAIL matrix, nonzero exit = failure
+```
+
 Key configuration (`app/src/main/resources/application.yml`): `gateway.backend.url` (backend RPC target), `gateway.backend.internal-token` (`dev-` prefix skips the signed header), `gateway.health-report.enabled` (channel health reporting, default on), `gateway.thmp.*` (TokenHub shadow/cutover, default off).
 
 ## Documentation
@@ -72,4 +80,5 @@ Key configuration (`app/src/main/resources/application.yml`): `gateway.backend.u
 | [Backend Security Contract (en)](https://funcommons.github.io/token-gateway/en/dev/backend-security-contract) · [中文](docs/开发文档/04_后端服务对接安全契约方案.md) | Auth three modes (jwt/key/none) · scenario tiers · per-request signing · credential rotation |
 | [Task Face lotask4j Hosting (en)](https://funcommons.github.io/token-gateway/en/dev/task-lotask4j-hosting) · [中文](docs/开发文档/05_任务面lotask4j托管方案.md) | Platform-mediated execution · Groovy script adaptation · zero-modification onboarding (R1~R9 re-evaluated) |
 | [Task Face Development Handbook (en)](https://funcommons.github.io/token-gateway/en/dev/task-face-dev-handbook) · [中文](docs/开发文档/06_任务面face-task开发手册.md) | Component breakdown · lotask4j integration contract · config model · M2.5 task breakdown |
+| [lotask4j Tenant Onboarding (en)](https://funcommons.github.io/token-gateway/en/dev/lotask4j-tenant-onboarding) · [中文](docs/开发文档/07_lotask4j租户开通手册.md) | Tenant provisioning · credential injection · full-chain smoke runbook |
 | [Capability-Face Contract](docs/开发文档/03_能力面接口契约.yaml) | OpenAPI contract for backend endpoints + MQ log messages |

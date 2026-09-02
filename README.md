@@ -56,6 +56,14 @@ mvn package                                                   # 256 个单测
 java -jar app/target/token-gateway-app-0.0.1-SNAPSHOT.jar     # 监听 9401
 ```
 
+**全链路冒烟**（LLM 面 + 任务面 + notify + 对账，五进程零真实依赖）：
+
+```bash
+docker compose -f docker-compose.smoke.yml up -d              # redis + token-mock
+# lotask4j 起好 + 网关/Worker/demo 控制层按 docs/开发文档/07_lotask4j租户开通手册.md §5 拉起
+bash scripts/smoke.sh                                         # PASS/FAIL 矩阵, 非零退出码=有 FAIL
+```
+
 关键配置（`app/src/main/resources/application.yml`）：`gateway.backend.url`（后端 RPC 目标）、`gateway.backend.internal-token`（`dev-` 开头跳过签名头）、`gateway.health-report.enabled`（渠道健康上报，默认开）、`gateway.thmp.*`（TokenHub 影子/切流，默认关闭）。
 
 ## 文档
@@ -82,4 +90,5 @@ java -jar app/target/token-gateway-app-0.0.1-SNAPSHOT.jar     # 监听 9401
 | [docs/开发文档/04_后端服务对接安全契约方案.md](docs/开发文档/04_后端服务对接安全契约方案.md) | 后端对接安全契约（鉴权三式 jwt/key/none · 场景分级 · 逐请求签名 · 凭证轮换） |
 | [docs/开发文档/05_任务面lotask4j托管方案.md](docs/开发文档/05_任务面lotask4j托管方案.md) | 任务面 lotask4j 托管方案（平台中转执行 · Groovy 脚本适配 · 零改造接入清单 R1~R9 对照） |
 | [docs/开发文档/06_任务面face-task开发手册.md](docs/开发文档/06_任务面face-task开发手册.md) | 任务面开发实施手册（组件分解 · lotask4j 对接契约 · 配置模型 · M2.5 任务分解） |
+| [docs/开发文档/07_lotask4j租户开通手册.md](docs/开发文档/07_lotask4j租户开通手册.md) | lotask4j 租户开通与冒烟环境 runbook（建租户 · 凭证注入 · 全链路冒烟） |
 | [docs/开发文档/03_能力面接口契约.yaml](docs/开发文档/03_能力面接口契约.yaml) | 能力面 OpenAPI 契约（后端需实现的端点 + MQ 日志消息） |

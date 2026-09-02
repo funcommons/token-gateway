@@ -124,6 +124,6 @@ CapabilityValidator 增补：`face=task` 时校验 `lotask.url/tenant-secret/res
 
 | # | 项 | 建议默认 |
 |---|---|---|
-| 1 | lotask4j 租户开通流程（建租户/拿 tenant_secret/worker token）属平台运维手册，需在 lotask4j 侧补一篇 on-boarding | 先在测试实例手工开通，runbook 后补 |
+| 1 | ~~租户开通 runbook~~ **已落地（2026-09-02）**：《07_lotask4j租户开通手册》（建租户/secret 三变量同源/task_type 注册/轮换/冒烟拉起/故障速查） | — |
 | 2 | ~~首个上游选哪家~~ **已决议（2026-09-02）：联调/冒烟默认上游 = token-mock**（`scripts/video/token-mock-v1.groovy` 已落地，真实厂商脚本按其形状写）；token-mock 管理面支持 forceStatus/failureRate 故障演练 | 生产首个真实厂商另议 |
 | 3 | task-worker 是否并入 app 模块以 `face=worker` 启动 | **独立模块独立 main**（Worker 池扩缩节奏与网关不同，《05》§3） |

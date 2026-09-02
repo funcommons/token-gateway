@@ -49,6 +49,7 @@ export default defineConfig({
               { text: '后端服务对接安全契约方案', link: '/开发文档/04_后端服务对接安全契约方案' },
               { text: '任务面 lotask4j 托管方案', link: '/开发文档/05_任务面lotask4j托管方案' },
               { text: '任务面 face-task 开发手册', link: '/开发文档/06_任务面face-task开发手册' },
+              { text: 'lotask4j 租户开通手册', link: '/开发文档/07_lotask4j租户开通手册' },
               { text: '能力面接口契约（YAML）', link: `${githubBlob}/开发文档/03_能力面接口契约.yaml` },
             ]
           }
@@ -104,6 +105,7 @@ export default defineConfig({
               { text: 'Backend Security Contract', link: '/en/dev/backend-security-contract' },
               { text: 'Task Face lotask4j Hosting', link: '/en/dev/task-lotask4j-hosting' },
               { text: 'Task Face Development Handbook', link: '/en/dev/task-face-dev-handbook' },
+              { text: 'lotask4j Tenant Onboarding', link: '/en/dev/lotask4j-tenant-onboarding' },
               { text: 'Capability-Face Contract (YAML)', link: `${githubBlob}/开发文档/03_能力面接口契约.yaml` },
             ]
           }

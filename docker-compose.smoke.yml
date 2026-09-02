@@ -1,0 +1,35 @@
+# 冒烟基础设施 (redis + token-mock; lotask4j 按其仓部署, 见 docs/开发文档/07_lotask4j租户开通手册.md)
+#
+#   docker compose -f docker-compose.smoke.yml up -d
+#
+# 应用进程 (网关/Worker/控制层 demo) 用 fat jar 另起:
+#   mvn package
+#   docker compose -f docker-compose.smoke.yml up -d
+#   lotask4j 起好后 → 见 07 手册「冒烟环境快速拉起」
+#   java -jar demo-control-plane/target/demo-control-plane-*.jar &
+#   TGW_NOTIFY_SIGN_KEY=smoke-notify-key java -jar app/target/token-gateway-app-*.jar &
+#   TGW_NOTIFY_SIGN_KEY=smoke-notify-key java -jar task-worker/target/task-worker-*.jar &
+#   bash scripts/smoke.sh
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: smoke-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  token-mock:
+    image: ghcr.io/funcommons/token-mock:latest
+    container_name: smoke-token-mock
+    ports:
+      - "9999:9999"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9999/openai/v1/models"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

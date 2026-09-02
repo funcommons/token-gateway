@@ -124,6 +124,6 @@ Ordering: a ∥ b can run in parallel (contract first); c depends on a+b.
 
 | # | Item | Suggested default |
 |---|---|---|
-| 1 | lotask4j tenant onboarding flow (create tenant / obtain tenant_secret / worker token) is a platform-ops handbook item, to be added on the lotask4j side | Hand-provision on a test instance first; write the runbook later |
+| 1 | ~~tenant onboarding runbook~~ **Landed (2026-09-02)**: `./lotask4j-tenant-onboarding.md` (create tenant / three-variable same-secret mapping / task_type registration / rotation / smoke bring-up / troubleshooting) | — |
 | 2 | ~~Which upstream is first~~ **Resolved (2026-09-02): token-mock is the default integration/smoke upstream** (`scripts/video/token-mock-v1.groovy` landed; real vendor scripts follow its shape); token-mock admin supports forceStatus/failureRate fault drills | First production vendor TBD |
 | 3 | Whether task-worker merges into the app module as `face=worker` | **Independent module with its own main** (Worker pool scaling cadence differs from the gateway, 05 §3) |
