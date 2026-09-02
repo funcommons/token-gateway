@@ -52,17 +52,19 @@ token-gateway/
 前置：后端能力面服务（如 MMagiX 单体）已在 9400 端口启动；Redis 可达（默认 localhost:6379）。
 
 ```bash
-mvn package                                                   # 457 个单测
+mvn package                                                   # 263 个单测
 java -jar app/target/token-gateway-app-0.1.0.jar              # 监听 9401
 ```
 
-**全链路冒烟**（LLM 面 + 任务面 + notify + 对账，五进程零真实依赖）：
+**全链路冒烟**（LLM 面 + 任务面正负路径 + notify + 对账，11 步 28 断言——notify 验签双侧设钥时满配 29，五进程零真实依赖）：
 
 ```bash
 docker compose -f docker-compose.smoke.yml up -d              # redis + token-mock
 # lotask4j 起好 + 网关/Worker/demo 控制层按 docs/开发文档/07_lotask4j租户开通手册.md §5 拉起
 bash scripts/smoke.sh                                         # PASS/FAIL 矩阵, 非零退出码=有 FAIL
 ```
+
+**覆盖率门禁**：JaCoCo `check` 绑定 `verify`——`mvn verify` 低于模块阈值即构建失败（gateway-core 80% / gateway-spi 60% / face-task 58% / face-llm 55% / task-worker 50%，阈值在各自 pom 覆写）。
 
 关键配置（`app/src/main/resources/application.yml`）：`gateway.backend.url`（后端 RPC 目标）、`gateway.backend.internal-token`（`dev-` 开头跳过签名头）、`gateway.health-report.enabled`（渠道健康上报，默认开）、`gateway.thmp.*`（TokenHub 影子/切流，默认关闭）。
 

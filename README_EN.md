@@ -42,17 +42,19 @@ Maven multi-module (design doc §9; faces independently deployable):
 Prerequisites: backend capability services reachable (e.g. MMagiX monolith on :9400); Redis reachable (default localhost:6379).
 
 ```bash
-mvn package                                                   # 457 tests
+mvn package                                                   # 263 tests
 java -jar app/target/token-gateway-app-0.1.0.jar              # listens on :9401
 ```
 
-**Full-chain smoke** (LLM face + task face + notify + reconciliation, five processes, zero real dependencies):
+**Full-chain smoke** (LLM face + task face positive/negative paths + notify + reconciliation, 11 steps / 28 assertions — 29 with notify verify keys configured on both sides, five processes, zero real dependencies):
 
 ```bash
 docker compose -f docker-compose.smoke.yml up -d              # redis + token-mock
 # start lotask4j + gateway/worker/demo control plane per docs/en/dev/lotask4j-tenant-onboarding.md §5
 bash scripts/smoke.sh                                         # PASS/FAIL matrix, nonzero exit = failure
 ```
+
+**Coverage gate**: JaCoCo `check` is bound to `verify` — `mvn verify` fails below per-module thresholds (gateway-core 80% / gateway-spi 60% / face-task 58% / face-llm 55% / task-worker 50%, overridden in each module pom).
 
 Key configuration (`app/src/main/resources/application.yml`): `gateway.backend.url` (backend RPC target), `gateway.backend.internal-token` (`dev-` prefix skips the signed header), `gateway.health-report.enabled` (channel health reporting, default on), `gateway.thmp.*` (TokenHub shadow/cutover, default off).
 

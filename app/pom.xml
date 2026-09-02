@@ -11,6 +11,11 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
+    <!-- JaCoCo 门禁: 装配壳仅 3 行, 豁免 -->
+    <properties>
+        <jacoco.line.min>0.0</jacoco.line.min>
+    </properties>
+
     <artifactId>token-gateway-app</artifactId>
     <name>token-gateway-app</name>
     <description>

@@ -101,17 +101,31 @@ docker compose -f docker-compose.smoke.yml up -d
 
 # ② lotask4j (按其仓 README 部署; PG + V1→V4 迁移 + redis-name=default 指向 ①)
 
-# ③ 构建 + 起应用 (环境变量见 §3)
+# ③ 构建 + 起应用 (共享环境变量见 §3; 端口/联动变量按下方内联注入)
 mvn package
-java -jar demo-control-plane/target/demo-control-plane-*.jar &
-java -jar app/target/token-gateway-app-*.jar &
-java -jar task-worker/target/task-worker-*.jar &
+source /tmp/tgw-smoke/env   # 或以任意方式 export §3 全部变量
+# 平台在容器内时回调宿主网关须用 host.docker.internal (非 localhost)
+export LOTASK_WEBHOOK_CALLBACK_URL=http://host.docker.internal:9406/internal/lotask/webhook
 
-# ④ 全链路冒烟 (LLM 面 + 任务面 + notify + 对账)
-bash scripts/smoke.sh
+# 控制层 demo :9405 — 携带 notify 验签钥 (与网关同值)
+nohup env SERVER_PORT=9405 TGW_NOTIFY_SIGN_KEY="$TGW_NOTIFY_SIGN_KEY" \
+  java -jar demo-control-plane/target/demo-control-plane-*.jar > /tmp/tgw-smoke/control-plane.log 2>&1 &
+
+# 网关 :9406 — backend.url 指向控制层 (默认 9400, 必须覆盖!) + notify 签名钥
+nohup env SERVER_PORT=9406 GATEWAY_BACKEND_URL=http://localhost:9405 \
+  TOKEN_GATEWAY_TASK_NOTIFY_SIGN_KEY="$TGW_NOTIFY_SIGN_KEY" \
+  java -jar app/target/token-gateway-app-*.jar > /tmp/tgw-smoke/gateway.log 2>&1 &
+
+# Worker :9411 (yml 默认端口)
+nohup java -jar task-worker/target/task-worker-*.jar > /tmp/tgw-smoke/worker.log 2>&1 &
+
+# ④ 全链路冒烟 (默认端口 9400/9401, 端口避让时用环境变量指路)
+CP=http://localhost:9405 GW=http://localhost:9406 LOTASK=http://localhost:<port> bash scripts/smoke.sh
 ```
 
-冒烟覆盖矩阵：chat 同步/流式正路径、10202/10400/10106/10617 负路径、任务 create→SUCCEEDED（token-mock 自然节奏 ~60s）、代理资源免凭证拉取 + sig 篡改 400、notify 验签、openHolds 对账零差异、Idempotency-Key 拒绝式去重。
+冒烟覆盖矩阵（11 步 28 断言，notify 验签双侧设钥时满配 29）：chat 同步/流式正路径、10202/10400/10106/10617 负路径、任务 create→SUCCEEDED（token-mock 自然节奏 ~60s）、代理资源免凭证拉取 + sig 篡改 400、**未知 task_no poll → 404/10400**、**webhook 篡改（真实 lotaskId + 伪造签名谎报 FAILED → 回查平台核实，状态不污染、不产生 notify）**、**超时钟 EXPIRED（Redis 注入过期 deadline → 判定 TIMEOUT + 全额退款 + notify；audio 模态无 Worker 脚本恒 QUEUED，零竞态）**、notify 验签、openHolds 对账零差异（settle + refund 双路径）、Idempotency-Key 拒绝式去重。
+
+> **运维注意**：运行中的进程从 `target/` 下的 jar 启动，重新 `mvn clean`/构建会删掉其底层文件——进程不会立刻死，但惰性类加载会 `NoClassDefFoundError` 退化成僵尸（进程活着、健康检查时好时坏、Redis/登录全挂）。构建后按上方配方重启三进程。
 
 ## 6. 故障速查
 

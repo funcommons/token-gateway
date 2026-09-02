@@ -11,6 +11,11 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
+    <!-- JaCoCo 门禁: 实测 62.4% (2026-09-02) -->
+    <properties>
+        <jacoco.line.min>0.60</jacoco.line.min>
+    </properties>
+
     <artifactId>gateway-spi</artifactId>
     <name>gateway-spi</name>
     <description>

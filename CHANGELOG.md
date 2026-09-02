@@ -2,6 +2,18 @@
 
 格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 测试基建
+
+- **JaCoCo 覆盖率门禁**：agent + report 全模块，`check` 绑定 `verify` 阶段；模块阈值按实测值回落 3pp 设置（gateway-core 80% / gateway-spi 60% / face-task 58% / face-llm 55% / task-worker 50%，demo-control-plane 与 app 为非生产制品豁免），低于阈值构建失败
+- CI 由 `mvn package` 升级为 `mvn -B verify`（门禁生效），并上传各模块 jacoco.csv 报告制品
+- **全链路冒烟负路径扩展（18 → 28 断言，notify 验签双侧设钥时满配 29）**：
+  - 未知 task_no poll → 404 + 业务码 10400
+  - webhook 篡改：携带真实 lotaskId + 伪造签名谎报 FAILED → 载荷被拒、verify-then-act 回查平台核实（非终态忽略）、状态不被污染、不产生 notify
+  - 超时钟闭环：注入过期 deadline → 判定 EXPIRED + 错误码 TIMEOUT + 全额退款 + EXPIRED notify（audio 模态无 Worker 脚本，平台任务恒 QUEUED，零竞态确定性触发）
+  - 对账零差异升级为 settle（SUCCEEDED）+ refund（EXPIRED）双路径闭环断言
+
 ## [0.1.0] - 2026-09-02
 
 首个公开版本：通用模型能力网关（LLM 同步面 + 任务四模态面），任务面由 lotask4j 平台托管，全链路冒烟 18/18 通过。

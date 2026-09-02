@@ -21,6 +21,13 @@ MOCK=${MOCK:-http://localhost:9999}      # token-mock
 DEMO_KEY=${DEMO_KEY:-sk-demo-ok123456}
 NOTIFY_KEY_SET=${TGW_NOTIFY_SIGN_KEY:+yes}
 
+# Redis 访问 (负路径 deadline 注入 / meta 反查用): 原生 redis-cli, 回退 docker exec
+if command -v redis-cli >/dev/null 2>&1; then
+  REDIS_CLI="redis-cli"
+else
+  REDIS_CLI="docker exec ${REDIS_CONTAINER:-redis} redis-cli"
+fi
+
 PASS=0; FAIL=0
 declare -a RESULTS
 
@@ -67,6 +74,11 @@ check_url "lotask4j         $LOTASK"  "$LOTASK/actuator/health"
 check_url "demo-control-plane $CP"    "$CP/demo/state"
 check_url "网关             $GW"      "$GW/actuator/health"
 check_url "Worker(dry-run)  :9411"    "http://localhost:9411/actuator/health"
+if $REDIS_CLI PING >/dev/null 2>&1; then
+  echo "  ✅ redis 可达 ($REDIS_CLI)"
+else
+  echo "  ❌ redis 不可达 (REDIS_CONTAINER=${REDIS_CONTAINER:-redis})"; MISSING=1
+fi
 if [ "$MISSING" = "1" ]; then
   echo; echo "预检失败, 终止。"; exit 1
 fi
@@ -145,7 +157,66 @@ TAMPER=$(echo "$PROXY_URL" | sed 's/sig=./sig=0/')
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$GW$TAMPER")
 assert_eq "篡改 sig → 400" "$CODE" "400"
 
-step "6. 任务面 — notify 回调 (验签 + 终态一致)"
+step "6. 任务面 — 未知任务 poll (404 + 业务码 10400)"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$GW/v1/audios/T0000000000000000000" \
+  -H "Authorization: Bearer $DEMO_KEY")
+assert_eq "未知 task_no poll → HTTP 404" "$CODE" "404"
+ENVELOPE=$(curl -s "$GW/v1/audios/T0000000000000000000" -H "Authorization: Bearer $DEMO_KEY")
+assert_eq "未知 task_no poll → 信封 10400" "$(echo "$ENVELOPE" | jsonfield code)" "10400"
+
+step "7. 负路径 — webhook 篡改 (伪造 FAILED 不得生效; 无验签走 verify-then-act 回查)"
+# audio 模态无 Worker 脚本 → 平台任务恒 QUEUED (确定性零竞态), 同时承载 7/8 两步
+EXP_T=$(curl -s "$GW/v1/audios" \
+  -H "Authorization: Bearer $DEMO_KEY" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: smoke-exp-$(date +%s)" \
+  -d "{\"model\":\"vid-mock-1\",\"input\":\"篡改/超时演练\",\"notify_url\":\"$CP/callback\"}" \
+  | jsonfield task_no)
+assert_contains "audio create 返回 task_no" "$EXP_T" "T"
+LOTASK_ID=$($REDIS_CLI GET "tgw:task:meta:$EXP_T" | jsonfield lotaskId)
+[ -n "$LOTASK_ID" ] && ok "meta 可读 (lotaskId 反查锚点)" || bad "meta 不可读: $EXP_T"
+FORGE=$(curl -s -X POST "$GW/internal/lotask/webhook" \
+  -H "X-ASTS-Event-Id: smoke-forge-$(date +%s)" \
+  -H "X-ASTS-Timestamp: 1788329615000" \
+  -H "X-ASTS-Signature: $(printf '0%.0s' $(seq 1 64))" \
+  -H "Content-Type: application/json" \
+  -d "{\"task_id\":\"$LOTASK_ID\",\"status\":\"FAILED\",\"result\":{\"error\":\"forged\"}}")
+assert_contains "篡改签名 → 拒载荷 + 回查平台 (mode=reconciled)" "$FORGE" "reconciled"
+sleep 3
+FORGE_STATUS=$(curl -s "$GW/v1/audios/$EXP_T" -H "Authorization: Bearer $DEMO_KEY" | jsonfield status)
+if [ "$FORGE_STATUS" = "FAILED" ]; then
+  bad "伪造 FAILED 生效 (状态污染!)"
+else
+  ok "伪造 FAILED 不生效 (状态仍 $FORGE_STATUS)"
+fi
+FORGE_NOTIFY=$(curl -s "$CP/demo/notifications" | python3 -c "
+import sys, json
+hits = [r for r in json.load(sys.stdin)
+        if r.get('task_no') == '$EXP_T' and r.get('status') == 'FAILED']
+print('yes' if hits else 'no')
+" 2>/dev/null)
+assert_eq "伪造 FAILED 未产生 notify" "$FORGE_NOTIFY" "no"
+
+step "8. 超时钟 — deadline 注入 → EXPIRED 判定 + 全额退款闭环"
+$REDIS_CLI ZADD tgw:task:deadlines $(( $(date +%s) * 1000 - 1000 )) "$EXP_T" > /dev/null
+EXP_POLL=""; EXP_STATUS=""
+for i in $(seq 1 24); do   # 24 × 5s = 120s 上限 (超时钟扫描周期 60s)
+  sleep 5
+  EXP_POLL=$(curl -s "$GW/v1/audios/$EXP_T" -H "Authorization: Bearer $DEMO_KEY")
+  EXP_STATUS=$(echo "$EXP_POLL" | jsonfield status)
+  echo "  ... poll[$i] status=$EXP_STATUS"
+  [ "$EXP_STATUS" = "EXPIRED" ] && break
+done
+assert_eq "超时钟判定 EXPIRED" "$EXP_STATUS" "EXPIRED"
+assert_eq "EXPIRED 错误码 TIMEOUT" "$(echo "$EXP_POLL" | jsonfield error.code)" "TIMEOUT"
+EXP_NOTIFY=$(curl -s "$CP/demo/notifications" | python3 -c "
+import sys, json
+hits = [r for r in json.load(sys.stdin)
+        if r.get('task_no') == '$EXP_T' and r.get('status') == 'EXPIRED']
+print('yes' if hits else 'no')
+" 2>/dev/null)
+assert_eq "EXPIRED notify 已发" "$EXP_NOTIFY" "yes"
+
+step "9. 任务面 — notify 回调 (验签 + 终态一致)"
 NOTIFY_HIT=""
 for i in $(seq 1 10); do
   NOTIFY=$(curl -s "$CP/demo/notifications")
@@ -170,11 +241,11 @@ else
   bad "notify 未收到 (60s 内)"
 fi
 
-step "7. 对账零差异 (预扣-终态闭环)"
+step "10. 对账零差异 (SUCCEEDED settle + EXPIRED refund 双路径闭环)"
 OPEN=$(curl -s "$CP/demo/state" | jsonfield openHolds)
 assert_eq "控制层账本无未闭环预扣 (openHolds 空)" "$OPEN" "{}"
 
-step "8. 幂等 — 同 Idempotency-Key 重复 create 被拒绝式去重"
+step "11. 幂等 — 同 Idempotency-Key 重复 create 被拒绝式去重"
 DUP=$(curl -s -o /dev/null -w '%{http_code}' "$GW/v1/videos" \
   -H "Authorization: Bearer $DEMO_KEY" -H "Content-Type: application/json" \
   -H "Idempotency-Key: $IDEM" \

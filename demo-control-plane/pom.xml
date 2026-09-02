@@ -11,6 +11,11 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
+    <!-- JaCoCo 门禁: 联调桩非生产制品, 豁免 -->
+    <properties>
+        <jacoco.line.min>0.0</jacoco.line.min>
+    </properties>
+
     <artifactId>demo-control-plane</artifactId>
     <name>demo-control-plane</name>
     <description>

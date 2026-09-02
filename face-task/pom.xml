@@ -11,6 +11,11 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
+    <!-- JaCoCo 门禁: 实测 61.6% (2026-09-02) -->
+    <properties>
+        <jacoco.line.min>0.58</jacoco.line.min>
+    </properties>
+
     <artifactId>face-task</artifactId>
     <name>face-task</name>
     <description>

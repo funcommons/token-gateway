@@ -15,4 +15,12 @@ jobs:
           distribution: temurin
           java-version: 17
           cache: maven
-      - run: mvn -B package
+      # verify = test + JaCoCo 覆盖率门禁 (check 绑 verify, 低于各模块阈值即失败)
+      - run: mvn -B verify
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-reports
+          path: '*/target/site/jacoco/jacoco.csv'
+          if-no-files-found: ignore

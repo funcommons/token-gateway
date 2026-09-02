@@ -101,17 +101,31 @@ docker compose -f docker-compose.smoke.yml up -d
 
 # ② lotask4j (per its repo README; PG + V1→V4 migrations + redis-name=default pointing at ①)
 
-# ③ Build + start apps (env vars per §3)
+# ③ Build + start apps (shared env vars per §3; per-process overrides inline below)
 mvn package
-java -jar demo-control-plane/target/demo-control-plane-*.jar &
-java -jar app/target/token-gateway-app-*.jar &
-java -jar task-worker/target/task-worker-*.jar &
+source /tmp/tgw-smoke/env   # or export all §3 variables any way you like
+# platform runs in a container → it must reach the gateway via host.docker.internal
+export LOTASK_WEBHOOK_CALLBACK_URL=http://host.docker.internal:9406/internal/lotask/webhook
 
-# ④ Full-chain smoke (LLM face + task face + notify + reconciliation)
-bash scripts/smoke.sh
+# demo control plane :9405 — carries the notify verify key (same value as gateway)
+nohup env SERVER_PORT=9405 TGW_NOTIFY_SIGN_KEY="$TGW_NOTIFY_SIGN_KEY" \
+  java -jar demo-control-plane/target/demo-control-plane-*.jar > /tmp/tgw-smoke/control-plane.log 2>&1 &
+
+# gateway :9406 — backend.url must point at the control plane (default is 9400, override mandatory!)
+nohup env SERVER_PORT=9406 GATEWAY_BACKEND_URL=http://localhost:9405 \
+  TOKEN_GATEWAY_TASK_NOTIFY_SIGN_KEY="$TGW_NOTIFY_SIGN_KEY" \
+  java -jar app/target/token-gateway-app-*.jar > /tmp/tgw-smoke/gateway.log 2>&1 &
+
+# worker :9411 (yml default port)
+nohup java -jar task-worker/target/task-worker-*.jar > /tmp/tgw-smoke/worker.log 2>&1 &
+
+# ④ Full-chain smoke (defaults 9400/9401; pass env vars when ports are shifted)
+CP=http://localhost:9405 GW=http://localhost:9406 LOTASK=http://localhost:<port> bash scripts/smoke.sh
 ```
 
-Smoke coverage matrix: chat sync/streaming happy paths; 10202/10400/10106/10617 negative paths; task create→SUCCEEDED (token-mock natural cadence ~60s); proxy resource credential-free fetch + tampered sig → 400; notify verification; openHolds zero-diff reconciliation; Idempotency-Key rejection dedup.
+Smoke coverage matrix (11 steps, 28 assertions — 29 with notify verify keys on both sides): chat sync/streaming happy paths; 10202/10400/10106/10617 negative paths; task create→SUCCEEDED (token-mock natural cadence ~60s); proxy resource credential-free fetch + tampered sig → 400; unknown task_no poll → 404/10400; webhook tampering (real lotaskId + forged signature claiming FAILED → verify-then-act re-checks the platform, state untouched, no notify); timeout clock EXPIRED (Redis-injected past deadline → TIMEOUT + full refund + notify; audio modality has no worker script so the platform task stays QUEUED — zero race); notify verification; openHolds zero-diff reconciliation (settle + refund dual path); Idempotency-Key rejection dedup.
+
+> **Ops note**: running processes boot from jars under `target/` — running `mvn clean`/a rebuild deletes the underlying files. Processes do not die immediately but degrade into zombies on lazy class loading (`NoClassDefFoundError`: alive on the surface, Redis/login failing, health endpoint flaky). Restart all three processes per the recipe above after a rebuild.
 
 ## 6. Troubleshooting
 
