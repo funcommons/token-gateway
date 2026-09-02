@@ -11,6 +11,7 @@ token-gateway:
     lotask:
       url: ${LOTASK_URL:http://localhost:8080}
       auth: jwt
+      tenant-name: ${LOTASK_TENANT_NAME:}
       jwt-secret: ${LOTASK_JWT_SECRET:}
       access-key: ${LOTASK_ACCESS_KEY:}
       sign-key: ${LOTASK_SIGN_KEY:}
@@ -32,3 +33,12 @@ logging:
     root: INFO
     fun.commons.tokengateway: INFO
     script: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized

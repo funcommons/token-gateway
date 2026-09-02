@@ -15,3 +15,12 @@ logging:
   level:
     root: INFO
     fun.commons.tokengateway.demo: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized

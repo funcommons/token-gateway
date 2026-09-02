@@ -15,8 +15,8 @@ public class TaskFaceConfig {
     /** 任务过期窗口 (超时 EXPIRED + 全额退款; 超时钟默认 deadline, 可按 task_type 覆盖). */
     private Duration expireScan = Duration.ofHours(24);
 
-    /** 资源代理缓存目录 (face=task 实例挂盘). */
-    private String resourceCacheDir = "/data/tgw-cache";
+    /** 资源代理缓存目录 (face=task 实例挂盘; 默认相对工作目录, 部署时挂持久卷并显式配置). */
+    private String resourceCacheDir = "./data/tgw-cache";
 
     /** 资源代理 sig 签名密钥 (环境变量注入). */
     private String resourceSignKey;

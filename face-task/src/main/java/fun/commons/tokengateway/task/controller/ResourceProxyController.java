@@ -5,6 +5,7 @@ import fun.commons.tokengateway.exception.RelayException;
 import fun.commons.tokengateway.framework.ApiCode;
 import fun.commons.tokengateway.spi.config.TokenGatewayProperties;
 import fun.commons.tokengateway.task.lotask.LotaskTaskClient;
+import fun.commons.tokengateway.task.lotask.LotaskTaskView;
 import fun.commons.tokengateway.task.resource.ResourceSigner;
 import fun.commons.tokengateway.task.state.TaskMetaStore;
 import fun.commons.tokengateway.task.state.TaskNoMappingStore;
@@ -66,12 +67,19 @@ public class ResourceProxyController {
                             new org.springframework.core.io.buffer.DefaultDataBufferFactory(),
                             8192)));
         }
-        // 取上游原始 URL: 终态条目里已是代理 URL, 须回 lotask 结果拿原文
+        // 取上游原始 URL: 终态条目里已是代理 URL, 须回 lotask 结果拿原文;
+        // 回源凭证 = create 时存入 meta 的渠道 apiKey (上游按渠道验钥)
         return mappingStore.get(taskNo)
                 .switchIfEmpty(Mono.error(new RelayException(404, ApiCode.NOT_FOUND.getCode(),
                         "任务不存在: " + taskNo)))
-                .flatMap(lotaskClient::get)
-                .flatMap(view -> {
+                .flatMap(lotaskId -> metaStore.getMeta(taskNo)
+                        .map(meta -> lotaskClient.get(lotaskId)
+                                .map(view -> new Object[]{view, meta == null ? null : meta.upstreamApiKey()}))
+                        .defaultIfEmpty(lotaskClient.get(lotaskId).map(view -> new Object[]{view, null}))
+                        .flatMap(mono -> mono))
+                .flatMap(arr -> {
+                    LotaskTaskView view = (LotaskTaskView) arr[0];
+                    String upstreamKey = (String) arr[1];
                     if (!"SUCCESS".equals(view.status())) {
                         return Mono.error(new RelayException(409, ApiCode.STATE_CONFLICT.getCode(),
                                 "任务非 SUCCEEDED, 资源不可取"));
@@ -81,18 +89,23 @@ public class ResourceProxyController {
                         return Mono.error(new RelayException(404, ApiCode.NOT_FOUND.getCode(),
                                 "资源索引越界: " + index));
                     }
-                    return fetchAndCache(upstreamUrl, cacheFile);
+                    return fetchAndCache(upstreamUrl, cacheFile, upstreamKey);
                 });
     }
 
-    private Mono<ResponseEntity<Flux<DataBuffer>>> fetchAndCache(String upstreamUrl, Path cacheFile) {
+    private Mono<ResponseEntity<Flux<DataBuffer>>> fetchAndCache(String upstreamUrl, Path cacheFile,
+                                                                 String upstreamApiKey) {
         try {
             Files.createDirectories(cacheFile.getParent());
         } catch (Exception e) {
             return Mono.error(new RelayException(500, ApiCode.SYSTEM_BUSY.getCode(), "缓存盘不可用"));
         }
-        Flux<DataBuffer> upstream = webClientBuilder.build().get()
-                .uri(upstreamUrl)
+        WebClient.RequestHeadersSpec<?> spec = webClientBuilder.build().get().uri(upstreamUrl);
+        if (upstreamApiKey != null && !upstreamApiKey.isBlank()) {
+            spec.header(org.springframework.http.HttpHeaders.AUTHORIZATION,
+                    "Bearer " + upstreamApiKey);
+        }
+        Flux<DataBuffer> upstream = spec
                 .retrieve()
                 .bodyToFlux(DataBuffer.class);
         return DataBufferUtils.write(upstream, cacheFile)

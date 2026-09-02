@@ -37,7 +37,7 @@ public class TerminalEventHandler {
     private final TaskMetaStore metaStore;
     private final TaskBillingSaga billingSaga;
     private final NotifyDispatcher notifyDispatcher;
-    private final ResourceSigner resourceSigner;
+    private final fun.commons.tokengateway.task.ResourceUrlConverter resourceUrlConverter;
     private final TokenGatewayProperties props;
 
     /**
@@ -62,9 +62,11 @@ public class TerminalEventHandler {
         Mono<Void> settle;
         Map<String, Object> notifyBody;
         if (mapped == TaskStatus.SUCCEEDED) {
-            Map<String, Object> converted = convertResources(taskNo, result);
-            settle = metaStore.saveTerminalResult(taskNo,
-                    JSON.toJSONString(terminalEntry(TaskStatus.SUCCEEDED, converted, null)), ttl);
+            Map<String, Object> converted = resourceUrlConverter.convert(taskNo, result);
+            // SUCCEEDED 也须计费闭环: 预扣转实扣 (settle), 与 saveTerminalResult 串行
+            settle = billingSaga.settleOnce(meta.preConsumeId(), taskNo)
+                    .then(metaStore.saveTerminalResult(taskNo,
+                            JSON.toJSONString(terminalEntry(TaskStatus.SUCCEEDED, converted, null)), ttl));
             notifyBody = notifyBody(taskNo, TaskStatus.SUCCEEDED, converted, null);
         } else {
             settle = billingSaga.refundOnce(meta.preConsumeId(), "task " + mapped.name(), taskNo)
@@ -111,29 +113,6 @@ public class TerminalEventHandler {
         return entry;
     }
 
-    /** resources 转网关代理 URL (相对路径 + exp/sig; 调用方拼网关 origin). */
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> convertResources(String taskNo, Map<String, Object> result) {
-        Map<String, Object> converted = result == null ? new LinkedHashMap<>() : new LinkedHashMap<>(result);
-        Object resources = converted.get("resources");
-        if (!(resources instanceof List<?> list)) {
-            return converted;
-        }
-        List<String> proxied = new ArrayList<>(list.size());
-        for (int i = 0; i < list.size(); i++) {
-            String query = resourceSigner.signQuery(taskNo, i);
-            if (query == null) {
-                // fail-closed: 上游 URL 永不透传 (《05》§4) — 密钥缺失时清空 resources,
-                // 调用方拿到空列表重试; 配置恢复后由对账兜底重放终态事件重建
-                log.error("[Terminal] resource-sign-key 缺失, 资源转代理 URL 失败: taskNo={}", taskNo);
-                converted.put("resources", List.of());
-                return converted;
-            }
-            proxied.add("/v1/resources/" + taskNo + "/" + i + "?" + query);
-        }
-        converted.put("resources", proxied);
-        return converted;
-    }
 
     private static Map<String, Object> notifyBody(String taskNo, TaskStatus status,
                                                   Map<String, Object> result,

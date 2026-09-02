@@ -38,7 +38,7 @@ public class TaskMetaStore {
 
     /** 任务元数据 (create 时刻写入; deadlineEpochMs = 超时钟判定线). */
     public record TaskMeta(String lotaskId, String preConsumeId, String modality,
-                           String notifyUrl, long deadlineEpochMs) {
+                           String notifyUrl, long deadlineEpochMs, String upstreamApiKey) {
     }
 
     /** create 时刻全量落账 (meta + 反查 + deadline 索引 + 预扣未闭环清单). */

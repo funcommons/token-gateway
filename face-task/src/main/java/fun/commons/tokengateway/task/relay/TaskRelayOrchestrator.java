@@ -38,7 +38,7 @@ import java.util.Map;
  * → 路由快照加密 → lotask4j submit (幂等键=task_no) → 失败全额退款 + 10004.
  *
  * <p>poll 管线 (《05》§5.3): key 验证 → task_no→lotask id 映射 → lotask get → 状态映射;
- * 终态返回存储结果 (M2.5c 起 resources 转 sig 代理 URL, 当前透传原文并标注).
+ * 终态返回存储结果, resources 一律转 sig 代理 URL (透传路径同样不泄漏上游 URL).
  */
 @Slf4j
 @Service
@@ -55,6 +55,7 @@ public class TaskRelayOrchestrator {
     private final RouteSnapshotCipher snapshotCipher;
     private final TaskNoMappingStore mappingStore;
     private final TaskMetaStore metaStore;
+    private final fun.commons.tokengateway.task.ResourceUrlConverter resourceUrlConverter;
     private final TokenGatewayProperties props;
 
     /**
@@ -136,7 +137,7 @@ public class TaskRelayOrchestrator {
                                                 new TaskMetaStore.TaskMeta(lotaskId, preConsumeId,
                                                         modality,
                                                         notifyUrl == null ? null : notifyUrl.toString(),
-                                                        deadline), ttl))
+                                                        deadline, channel.getApiKey()), ttl))
                                         .thenReturn(createdView(modality, taskNo));
                             })
                             .onErrorResume(e -> {
@@ -213,15 +214,15 @@ public class TaskRelayOrchestrator {
         return out;
     }
 
-    /** 轮询视图: 终态返回存储结果; resources 转 sig 代理 URL 为 M2.5c 增量 (当前透传原文). */
+    /** 轮询视图: 终态返回存储结果; resources 一律转代理 URL (永不透传上游原文). */
     private Map<String, Object> pollView(String taskNo, LotaskTaskView view) {
         TaskStatus status = TaskStateMapper.map(view.status());
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("task_no", taskNo);
         out.put("status", status.name());
         if (status == TaskStatus.SUCCEEDED && view.result() != null) {
-            // TODO(M2.5c): resources 转 sig 代理 URL (资源代理 + 缓存索引), 上游 URL 永不透传
-            out.put("result", view.result());
+            // poll 透传路径同样转代理 URL (上游 URL 永不透传, 《05》§4; webhook 未达时兜底)
+            out.put("result", resourceUrlConverter.convert(taskNo, view.result()));
         }
         if (status == TaskStatus.FAILED || status == TaskStatus.EXPIRED) {
             Map<String, Object> error = new LinkedHashMap<>();

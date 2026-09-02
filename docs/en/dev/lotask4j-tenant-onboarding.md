@@ -15,7 +15,7 @@
 |---|---|---|
 | Tenant `name` | — | Integrator identity (e.g. `token-gateway`) |
 | Tenant `tenantSecret` (one-time plaintext) | The credential behind `LOTASK_JWT_SECRET` + `LOTASK_SIGN_KEY` + `LOTASK_TENANT_SECRET` (same value — see §4) | client_credentials login / write-endpoint HMAC / webhook verification |
-| Tenant id (assigned at creation) | `LOTASK_ACCESS_KEY` | Write-endpoint `X-Access-Key` header (platform DbSecretProvider looks up the key by tenant id) |
+| Tenant `name` (chosen at creation) | `LOTASK_ACCESS_KEY` + `LOTASK_TENANT_NAME` | Write-endpoint `X-Access-Key` header (platform DbSecretProvider looks up by tenant **name**, **not id**) and login client_id |
 | task_type config | Worker claim type | `video` (timeout/concurrency/retries configured platform-side) |
 
 > Credential discipline: the `tenantSecret` plaintext appears exactly once (create/reset response) — **store it in your secret manager / environment immediately; never in git or chat logs**.
@@ -68,8 +68,9 @@ The gateway delivers `submit.callbackUrl` per task (`LOTASK_WEBHOOK_CALLBACK_URL
 
 ```bash
 export LOTASK_URL=http://<lotask>:8080
-export LOTASK_JWT_SECRET=<tenantSecret>      # LotaskAuthSigner self-mints HS256 bearer
-export LOTASK_ACCESS_KEY=42                  # tenant id (X-Access-Key)
+export LOTASK_TENANT_NAME=<tenant name>      # client_credentials login subject (= tenant name from 2.2)
+export LOTASK_JWT_SECRET=<tenantSecret>      # login client_secret (LotaskAuthSigner exchanges + caches bearer)
+export LOTASK_ACCESS_KEY=<tenant name>       # X-Access-Key (= tenant name, NOT id!)
 export LOTASK_SIGN_KEY=<tenantSecret>        # HMAC four-header secret (= tenant_secret)
 export LOTASK_TENANT_SECRET=<tenantSecret>   # webhook verification (same key)
 export LOTASK_WEBHOOK_CALLBACK_URL=http://<gateway>:9401/internal/lotask/webhook
@@ -85,11 +86,12 @@ export WORKER_EGRESS_ALLOWLIST=http://localhost:9999   # Worker egress whitelist
 
 lotask4j V4+ credentials are **tenant-scoped**:
 
-1. **Login**: `POST /api/v1/auth/token` (client_credentials, `client_id=tenant name, client_secret=tenantSecret`) → bearer. The gateway's `LotaskAuthSigner` **self-mints an HS256 JWT** using `LOTASK_JWT_SECRET` (= tenantSecret), which the platform validates by the same logic.
-2. **Write-endpoint HMAC** (submit/cancel paths): `X-Access-Key=tenant id`; secret = the `tenant_secret` decrypted by `DbSecretProvider` per id; five-part stringToSign — same recipe as the gateway's `ThmpSignature`.
+1. **Login**: `POST /api/v1/auth/token` (client_credentials, `client_id=tenant name, client_secret=tenantSecret`) → bearer.
+   **Real login is mandatory — self-minted JWTs are rejected** (V4+ field-tested): platform-issued tokens carry a session fingerprint (`hash`/`jti` claims, validated by the framework4j accesstoken interceptor); a self-minted minimal JWT gets 401. The gateway/worker `LotaskAuthSigner` does login + in-process caching + renewal 5min before exp + 30s cooldown on login failure; the login endpoint is idempotent, so a duplicate login at concurrent cold start is harmless.
+2. **Write-endpoint HMAC** (submit/cancel paths): `X-Access-Key=tenant name` (`DbSecretProvider` looks up `asts_tenant.name`, **not id** — the platform yml comment saying "= tenant id" is wrong, the `DbSecretProvider` implementation is authoritative); secret = the decrypted `tenant_secret`; five-part stringToSign — same recipe as the gateway's `ThmpSignature`. Note: all three domain APIs (client/worker) are annotated `@RequiresToken("TENANT")` — the bearer login covers every domain; HMAC is only enforced on client-domain write endpoints.
 3. **Webhook verification**: the platform signs deliveries with the task-owning tenant's `tenant_secret` → the gateway's `WebhookVerifier` recomputes with `LOTASK_TENANT_SECRET`.
 
-All three key sources are `asts_tenant.tenant_secret`, so deployments inject the same value into three variables; the only independent one is `LOTASK_ACCESS_KEY` (the tenant id).
+All three key sources are `asts_tenant.tenant_secret` (login / HMAC / webhook — inject the same value into the three variables); `LOTASK_ACCESS_KEY` = tenant `name`, same value as `LOTASK_TENANT_NAME`.
 
 ## 5. Bring Up the Smoke Environment (full chain)
 
@@ -116,7 +118,7 @@ Smoke coverage matrix: chat sync/streaming happy paths; 10202/10400/10106/10617 
 | Symptom | Check |
 |---|---|
 | Gateway fail-fast "task.lotask.url not configured" | `LOTASK_URL` is required when face=task |
-| create 502 (lotask submit failed) | Platform logs for auth: 401=token invalid (client_id must be the tenant name); signature rejected=ACCESS_KEY/SECRET mismatch |
+| create 502 (lotask submit failed) | Inspect the 401 body: "no auth token"=bearer missing (check LOTASK_TENANT_NAME/JWT_SECRET, real login required); "logged in elsewhere"=same-tenant multi-process session kicking (gateway & worker must point at the same Redis to share the token store); "unknown AccessKey"=X-Access-Key wrong (tenant **name**, not id); "signature header missing/invalid"=HMAC four headers or sign-key mismatch |
 | Task stuck PENDING | Worker down / script missing (Worker logs `ScriptLoader`); platform `asts_task` state and worker heartbeat |
 | No webhook received | Platform→gateway network; platform outbox delivery status; `LOTASK_WEBHOOK_CALLBACK_URL` reachability |
 | No notify received | Gateway `[Notify]` logs; caller address reachability; backoff tiers 1m/10m/1h — be patient |

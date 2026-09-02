@@ -22,10 +22,13 @@ public class LotaskFaceConfig {
     /** auth=jwt 时的 HS256 共享 secret (环境变量注入). */
     private String jwtSecret;
 
+    /** auth=jwt 时的登录主体 = 平台租户名 (client_credentials 的 client_id, 环境变量注入). */
+    private String tenantName;
+
     /** auth=key 时的静态 key (环境变量注入). */
     private String key;
 
-    /** 写操作 HMAC 四头签名: 应用 access key (asts_application, 环境变量注入). */
+    /** 写操作 HMAC 四头签名: X-Access-Key = 平台租户 name (asts_tenant.name 查钥, 环境变量注入). */
     private String accessKey;
 
     /** 写操作 HMAC 四头签名: 应用 secret (环境变量注入, 恒定时间比较由平台侧保证). */

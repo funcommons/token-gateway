@@ -3,6 +3,7 @@ package fun.commons.tokengateway.task.notify;
 import fun.commons.tokengateway.spi.config.TokenGatewayProperties;
 import fun.commons.tokengateway.task.billing.TaskBillingSaga;
 import fun.commons.tokengateway.task.lotask.LotaskTaskClient;
+import fun.commons.tokengateway.task.ResourceUrlConverter;
 import fun.commons.tokengateway.task.resource.ResourceSigner;
 import fun.commons.tokengateway.task.state.TaskMetaStore;
 import fun.commons.tokengateway.task.state.TaskMetaStore.TaskMeta;
@@ -37,7 +38,7 @@ class TerminalEventHandlerTest {
     private TerminalEventHandler handler;
 
     private static final TaskMeta META = new TaskMeta(
-            "lotask-id-1", "pc1", "video", "https://caller/cb", 0L);
+            "lotask-id-1", "pc1", "video", "https://caller/cb", 0L, null);
 
     @BeforeEach
     void setUp() {
@@ -47,11 +48,12 @@ class TerminalEventHandlerTest {
         TokenGatewayProperties props = new TokenGatewayProperties();
         props.getTask().setResourceSignKey("test-sign-key");
         when(billingSaga.refundOnce(anyString(), anyString(), anyString())).thenReturn(Mono.empty());
+        when(billingSaga.settleOnce(anyString(), anyString())).thenReturn(Mono.empty());
         when(metaStore.saveTerminalResult(anyString(), anyString(), any())).thenReturn(Mono.empty());
         when(metaStore.clearDeadline(anyString())).thenReturn(Mono.empty());
         when(metaStore.closePending(anyString())).thenReturn(Mono.empty());
         handler = new TerminalEventHandler(metaStore, billingSaga, notifyDispatcher,
-                new ResourceSigner(props), props);
+                new ResourceUrlConverter(new ResourceSigner(props)), props);
     }
 
     @Test

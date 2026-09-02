@@ -51,15 +51,18 @@ echo "=============================================="
 
 step "0. 预检 (五进程可达性)"
 check_url() {
-  local name=$1 url=$2
-  if curl -sf -o /dev/null --max-time 3 "$url"; then
+  local name=$1 url=$2 hdr=${3:-}
+  local args=(-sf -o /dev/null --max-time 3)
+  [ -n "$hdr" ] && args+=(-H "$hdr")
+  if curl "${args[@]}" "$url"; then
     echo "  ✅ $name 可达 ($url)"
   else
     echo "  ❌ $name 不可达 ($url) — 见脚本头部启动说明"; MISSING=1
   fi
 }
 MISSING=0
-check_url "token-mock        $MOCK"    "$MOCK/openai/v1/models"
+# token-mock 全端点验 vendor key (含 models), 预检带 openai vendor key
+check_url "token-mock        $MOCK"    "$MOCK/openai/v1/models"  "Authorization: Bearer sk-mock-openai-1234567890abcdef"
 check_url "lotask4j         $LOTASK"  "$LOTASK/actuator/health"
 check_url "demo-control-plane $CP"    "$CP/demo/state"
 check_url "网关             $GW"      "$GW/actuator/health"
@@ -67,7 +70,7 @@ check_url "Worker(dry-run)  :9411"    "http://localhost:9411/actuator/health"
 if [ "$MISSING" = "1" ]; then
   echo; echo "预检失败, 终止。"; exit 1
 fi
-curl -sf "$CP/demo/reset" > /dev/null && echo "  ✅ 控制层 demo 已复位"
+curl -sf -X POST "$CP/demo/reset" > /dev/null && echo "  ✅ 控制层 demo 已复位"
 
 step "1. LLM 面 — 正路径 (chat 同步)"
 RESP=$(curl -s "$GW/v1/chat/completions" \
@@ -100,7 +103,7 @@ ENVELOPE=$(curl -s "$GW/v1/chat/completions" \
 assert_eq "内容含违禁词 → 信封 10106" "$(echo "$ENVELOPE" | jsonfield code)" "10106"
 ENVELOPE=$(curl -s "$GW/v1/videos" \
   -H "Authorization: Bearer sk-poor-xxx" -H "Content-Type: application/json" \
-  -H "Idempotency-Key: smoke-poor-1" \
+  -H "Idempotency-Key: smoke-poor-$(date +%s)" \
   -d '{"model":"vid-mock-1"}')
 assert_eq "sk-poor 任务创建 → 信封 10617 (不产生任务)" "$(echo "$ENVELOPE" | jsonfield code)" "10617"
 
@@ -132,7 +135,12 @@ PROXY_URL=$(echo "$POLL" | python3 -c "import sys,json;print(json.load(sys.stdin
 HTTP_CODE=$(curl -s -o /tmp/smoke-resource.bin -w '%{http_code}' "$GW$PROXY_URL")
 assert_eq "代理 URL 免凭证拉取 200" "$HTTP_CODE" "200"
 FILESIZE=$(wc -c < /tmp/smoke-resource.bin | tr -d ' ')
-[ "$FILESIZE" -gt 1000 ] && ok "资源非空 ($FILESIZE bytes)" || bad "资源过小 ($FILESIZE bytes)"
+# token-mock 产物为最小合法 MP4 (ftyp box 头, ~28B): 校验非空 + MP4 魔数而非字节数
+if [ "$FILESIZE" -ge 20 ] && head -c 12 /tmp/smoke-resource.bin | grep -q "ftyp"; then
+  ok "资源非空且为 MP4 头 ($FILESIZE bytes)"
+else
+  bad "资源异常 ($FILESIZE bytes, 缺 ftyp 魔数)"
+fi
 TAMPER=$(echo "$PROXY_URL" | sed 's/sig=./sig=0/')
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$GW$TAMPER")
 assert_eq "篡改 sig → 400" "$CODE" "400"

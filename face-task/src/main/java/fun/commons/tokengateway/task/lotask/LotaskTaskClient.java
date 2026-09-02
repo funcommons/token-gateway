@@ -11,7 +11,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
+import reactor.util.retry.Retry;
 
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
@@ -43,6 +45,21 @@ public class LotaskTaskClient {
     }
 
     /**
+     * 401 自愈 (令牌被平台撤销, 如 reset-secret 轮换): 清共享缓存后重试一次,
+     * 重订阅重新登录取新 token. 限一次防与平台状态异常死循环.
+     */
+    private <T> Mono<T> withKickRetry(Mono<T> mono) {
+        return mono
+                .onErrorResume(e -> !isAuthKick(e) ? Mono.error(e)
+                        : authSigner.invalidate().then(Mono.error(e)))
+                .retryWhen(Retry.max(1).transientErrors(true).filter(this::isAuthKick));
+    }
+
+    private boolean isAuthKick(Throwable e) {
+        return e instanceof WebClientResponseException w && w.getStatusCode().value() == 401;
+    }
+
+    /**
      * 提交任务, 返回 lotask 任务 ID (OpenID 字符串).
      *
      * @param taskType       任务类型 (video/image/audio/tts, 决定 Worker 脚本与超时档)
@@ -60,15 +77,16 @@ public class LotaskTaskClient {
             body.put("callbackUrl", callbackUrl);
         }
         byte[] raw = JSON.toJSONBytes(body);
-        WebClient.RequestBodySpec spec = webClientBuilder.build().post()
-                .uri(cfg().getUrl() + SUBMIT_PATH)
-                .contentType(MediaType.APPLICATION_JSON);
-        authSigner.attachAuth(spec);
-        authSigner.attachSignature(spec, "POST", SUBMIT_PATH, raw);
-        return spec.bodyValue(new String(raw, StandardCharsets.UTF_8))
-                .retrieve()
-                .bodyToMono(String.class)
-                .timeout(cfg().getReadTimeout())
+        return withKickRetry(Mono.defer(() -> authSigner.authorize(webClientBuilder.build().post()
+                        .uri(cfg().getUrl() + SUBMIT_PATH)
+                        .contentType(MediaType.APPLICATION_JSON)))
+                .flatMap(spec -> {
+                    authSigner.attachSignature(spec, "POST", SUBMIT_PATH, raw);
+                    return spec.bodyValue(new String(raw, StandardCharsets.UTF_8))
+                            .retrieve()
+                            .bodyToMono(String.class)
+                            .timeout(cfg().getReadTimeout());
+                }))
                 .map(json -> {
                     JSONObject env = JSON.parseObject(json);
                     if (env.getIntValue("code") != 0) {
@@ -94,12 +112,11 @@ public class LotaskTaskClient {
      */
     public Mono<LotaskTaskView> get(String lotaskId) {
         String path = "/api/v1/client/tasks/" + lotaskId;
-        WebClient.RequestHeadersSpec<?> spec = webClientBuilder.build().get()
-                .uri(cfg().getUrl() + path);
-        authSigner.attachAuth(spec);
-        return spec.retrieve()
-                .bodyToMono(String.class)
-                .timeout(cfg().getReadTimeout())
+        return withKickRetry(Mono.defer(() -> authSigner.authorize(webClientBuilder.build().get()
+                        .uri(cfg().getUrl() + path)))
+                .flatMap(spec -> spec.retrieve()
+                        .bodyToMono(String.class)
+                        .timeout(cfg().getReadTimeout())))
                 .map(json -> {
                     JSONObject env = JSON.parseObject(json);
                     if (env.getIntValue("code") != 0) {
@@ -134,15 +151,18 @@ public class LotaskTaskClient {
      */
     public Mono<Void> cancel(String lotaskId) {
         String path = "/api/v1/client/tasks/" + lotaskId + "/cancel";
-        WebClient.RequestBodySpec spec = webClientBuilder.build().post()
-                .uri(cfg().getUrl() + path)
-                .contentType(MediaType.APPLICATION_JSON);
-        authSigner.attachAuth(spec);
-        authSigner.attachSignature(spec, "POST", path, new byte[0]);
-        return spec.bodyValue("{}")
-                .retrieve()
-                .bodyToMono(String.class)
-                .timeout(cfg().getReadTimeout())
+        byte[] raw = "{}".getBytes(StandardCharsets.UTF_8);
+        return withKickRetry(Mono.defer(() -> authSigner.authorize(webClientBuilder.build().post()
+                        .uri(cfg().getUrl() + path)
+                        .contentType(MediaType.APPLICATION_JSON)))
+                .flatMap(spec -> {
+                    // 签名字节与实际发送 body 同源 (原空字节签名与 "{}" 不一致, V4+ 验签会拒)
+                    authSigner.attachSignature(spec, "POST", path, raw);
+                    return spec.bodyValue(new String(raw, StandardCharsets.UTF_8))
+                            .retrieve()
+                            .bodyToMono(String.class)
+                            .timeout(cfg().getReadTimeout());
+                }))
                 .doOnError(e -> log.error("[Lotask] cancel RPC 失败: id={}, err={}",
                         lotaskId, e.getMessage()))
                 .onErrorResume(e -> Mono.empty())

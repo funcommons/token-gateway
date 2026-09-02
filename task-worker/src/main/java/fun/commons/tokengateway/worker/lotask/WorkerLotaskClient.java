@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
 
 import java.time.OffsetDateTime;
@@ -35,17 +36,22 @@ public class WorkerLotaskClient {
         return props.getTask().getLotask().getUrl();
     }
 
+    private boolean isAuthKick(Throwable e) {
+        return e instanceof WebClientResponseException w && w.getStatusCode().value() == 401;
+    }
+
     /** 抢占一个任务; 无任务 → Mono.empty(). */
     public Mono<ClaimedTask> poll(String taskType, String workerId) {
         Map<String, Object> body = Map.of("taskType", taskType, "workerId", workerId);
         byte[] raw = JSON.toJSONBytes(body);
-        WebClient.RequestBodySpec spec = webClientBuilder.build().post()
-                .uri(base() + POLL_PATH).contentType(MediaType.APPLICATION_JSON);
-        authSigner.attachAuth(spec);
-        authSigner.attachSignature(spec, "POST", POLL_PATH, raw);
-        return spec.bodyValue(new String(raw, java.nio.charset.StandardCharsets.UTF_8))
-                .retrieve().bodyToMono(String.class)
-                .timeout(props.getTask().getLotask().getReadTimeout())
+        return authSigner.authorize(webClientBuilder.build().post()
+                        .uri(base() + POLL_PATH).contentType(MediaType.APPLICATION_JSON))
+                .flatMap(spec -> {
+                    authSigner.attachSignature(spec, "POST", POLL_PATH, raw);
+                    return spec.bodyValue(new String(raw, java.nio.charset.StandardCharsets.UTF_8))
+                            .retrieve().bodyToMono(String.class)
+                            .timeout(props.getTask().getLotask().getReadTimeout());
+                })
                 .<ClaimedTask>handle((json, sink) -> {
                     JSONObject env = JSON.parseObject(json);
                     if (env.getIntValue("code") != 0 || env.getJSONObject("data") == null) {
@@ -65,20 +71,29 @@ public class WorkerLotaskClient {
                             d.getObject("leaseExpireAt", OffsetDateTime.class)));
                 })
                 .onErrorResume(e -> {
+                    if (isAuthKick(e)) {
+                        log.warn("[WorkerClient] 令牌被撤销 (401), 清共享缓存, 下轮重登录: type={}",
+                                taskType);
+                        return authSigner.invalidate().then(Mono.empty());
+                    }
                     log.warn("[WorkerClient] poll 失败 (下轮重试): type={}, err={}",
                             taskType, e.getMessage());
                     return Mono.empty();
                 });
     }
 
-    /** 上报进度 (同时续约 lease; fencing 回传). */
+    /**
+     * 上报进度 (同时续约 lease; fencing 回传).
+     * 平台 progressWithVersion 成功即 version+1 且不回传 —— CAS 成功后本地 bumpVersion 同步,
+     * 否则下一次 progress 起全部 fencing 失败.
+     */
     public Mono<Void> progress(ClaimedTask task, String stepKey, int stepProgress) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("currentStepKey", stepKey);
         body.put("stepProgress", stepProgress);
         body.put("executionToken", task.executionToken());
         body.put("version", task.version());
-        return post("/api/v1/worker/tasks/" + task.id() + "/progress", body)
+        return post("/api/v1/worker/tasks/" + task.id() + "/progress", body, task::bumpVersion)
                 .onErrorResume(e -> {
                     log.warn("[WorkerClient] progress 失败: id={}, err={}", task.id(), e.getMessage());
                     return Mono.empty();
@@ -100,43 +115,51 @@ public class WorkerLotaskClient {
         }
         body.put("executionToken", task.executionToken());
         body.put("version", task.version());
-        return post("/api/v1/worker/tasks/" + task.id() + "/result", body)
+        return post("/api/v1/worker/tasks/" + task.id() + "/result", body, null)
                 .doOnError(e -> log.error("[WorkerClient] result 上报失败: id={}, status={}, err={}",
                         task.id(), status, e.getMessage()));
     }
 
     /** 查询状态 (取消信号检测: CANCELLING → Worker 停循环上报 CANCELLED). */
     public Mono<String> status(ClaimedTask task) {
-        WebClient.RequestHeadersSpec<?> spec = webClientBuilder.build().get()
-                .uri(base() + "/api/v1/worker/tasks/" + task.id() + "/status");
-        authSigner.attachAuth(spec);
-        return spec.retrieve().bodyToMono(String.class)
-                .timeout(props.getTask().getLotask().getReadTimeout())
+        return authSigner.authorize(webClientBuilder.build().get()
+                        .uri(base() + "/api/v1/worker/tasks/" + task.id() + "/status"))
+                .flatMap(spec -> spec.retrieve().bodyToMono(String.class)
+                        .timeout(props.getTask().getLotask().getReadTimeout()))
                 .map(json -> {
                     JSONObject env = JSON.parseObject(json);
                     JSONObject d = env.getJSONObject("data");
                     return d == null ? null : d.getString("status");
                 })
-                .onErrorResume(e -> Mono.empty());
+                .onErrorResume(e -> isAuthKick(e)
+                        ? authSigner.invalidate().then(Mono.empty())
+                        : Mono.empty());
     }
 
-    private Mono<Void> post(String path, Map<String, Object> body) {
+    private Mono<Void> post(String path, Map<String, Object> body, Runnable onSuccess) {
         byte[] raw = JSON.toJSONBytes(body);
-        WebClient.RequestBodySpec spec = webClientBuilder.build().post()
-                .uri(base() + path).contentType(MediaType.APPLICATION_JSON);
-        authSigner.attachAuth(spec);
-        authSigner.attachSignature(spec, "POST", path, raw);
-        return spec.bodyValue(new String(raw, java.nio.charset.StandardCharsets.UTF_8))
-                .retrieve().bodyToMono(String.class)
-                .timeout(props.getTask().getLotask().getReadTimeout())
+        return authSigner.authorize(webClientBuilder.build().post()
+                        .uri(base() + path).contentType(MediaType.APPLICATION_JSON))
+                .flatMap(spec -> {
+                    authSigner.attachSignature(spec, "POST", path, raw);
+                    return spec.bodyValue(new String(raw, java.nio.charset.StandardCharsets.UTF_8))
+                            .retrieve().bodyToMono(String.class)
+                            .timeout(props.getTask().getLotask().getReadTimeout());
+                })
                 .flatMap(json -> {
                     JSONObject env = JSON.parseObject(json);
                     if (env.getIntValue("code") != 0) {
                         return Mono.error(new IllegalStateException(
                                 "lotask worker 域拒绝: " + env.getString("message")));
                     }
+                    if (onSuccess != null) {
+                        onSuccess.run();
+                    }
                     return Mono.empty();
                 })
+                .onErrorResume(e -> isAuthKick(e)
+                        ? authSigner.invalidate().then(Mono.error(e))
+                        : Mono.error(e))
                 .then();
     }
 }

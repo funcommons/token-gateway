@@ -15,7 +15,7 @@
 |---|---|---|
 | 租户 `name` | — | 接入方身份（如 `token-gateway`） |
 | 租户 `tenantSecret`（一次性明文） | `LOTASK_JWT_SECRET` 的登录凭据 + `LOTASK_SIGN_KEY` + `LOTASK_TENANT_SECRET`（同一个值，见 §4 认证说明） | client_credentials 登录 / 写端点 HMAC / webhook 验签 |
-| 租户 id（创建后分配） | `LOTASK_ACCESS_KEY` | 写端点 `X-Access-Key` 头（平台 DbSecretProvider 按租户 id 查钥） |
+| 租户 `name`（创建时指定） | `LOTASK_ACCESS_KEY` + `LOTASK_TENANT_NAME` | 写端点 `X-Access-Key` 头（平台 DbSecretProvider **按租户 name** 查钥，**不是 id**）；登录 client_id |
 | task_type 配置 | Worker 拉单类型 | `video`（超时/并发/重试在平台侧配置） |
 
 > 凭证纪律：`tenantSecret` 明文只在创建/重置响应出现一次，**立即入密钥管理系统/环境变量，不入仓不入聊天记录**。
@@ -68,8 +68,9 @@ curl -s -X POST http://<lotask>:8080/api/v1/admin/types \
 
 ```bash
 export LOTASK_URL=http://<lotask>:8080
-export LOTASK_JWT_SECRET=<tenantSecret>      # LotaskAuthSigner 自铸 HS256 bearer
-export LOTASK_ACCESS_KEY=42                  # 租户 id (X-Access-Key)
+export LOTASK_TENANT_NAME=<租户名>           # client_credentials 登录主体 (= 建租户时的 name)
+export LOTASK_JWT_SECRET=<tenantSecret>      # 登录 client_secret (LotaskAuthSigner 换取并缓存 bearer)
+export LOTASK_ACCESS_KEY=<租户名>            # X-Access-Key (= 租户 name, 非 id!)
 export LOTASK_SIGN_KEY=<tenantSecret>        # HMAC 四头 secret (= tenant_secret)
 export LOTASK_TENANT_SECRET=<tenantSecret>   # webhook 验签 (同一密钥)
 export LOTASK_WEBHOOK_CALLBACK_URL=http://<gateway>:9401/internal/lotask/webhook
@@ -85,11 +86,12 @@ export WORKER_EGRESS_ALLOWLIST=http://localhost:9999   # Worker 出网白名单 
 
 lotask4j V4+ 的凭据体系以**租户**为粒度：
 
-1. **登录**：`POST /api/v1/auth/token`（client_credentials，`client_id=租户名, client_secret=tenantSecret`）→ bearer。网关 `LotaskAuthSigner` 用 `LOTASK_JWT_SECRET`（= tenantSecret）**自铸 HS256 JWT** 走同一校验逻辑。
-2. **写端点 HMAC**（submit/cancel 两路径）：`X-Access-Key=租户 id`，secret = `DbSecretProvider` 按 id 解密出的 `tenant_secret`，toSign 五段式与网关 `ThmpSignature` 同源。
+1. **登录**：`POST /api/v1/auth/token`（client_credentials，`client_id=租户名, client_secret=tenantSecret`）→ bearer。
+   **必须真登录，不能自铸 JWT**（V4+ 实测）：平台签发的 token 带会话指纹（`hash`/`jti` claims，framework4j accesstoken 拦截器校验会话），自铸最小 JWT 一律 401。网关/Worker 的 `LotaskAuthSigner` 走「登录 + **Redis 共享 token store** + exp 前置续期（5min）+ 登录单飞锁 + 登录失败 30s 冷却」——平台会话策略为**单租户单会话**（新 token 踢旧），网关与 Worker 必须指向同一 Redis 共享 bearer，否则互踢（「账号已在别处登录」）；401 自愈只清被拒 token，不误删其他进程刚登录的新 token。
+2. **写端点 HMAC**（submit/cancel 两路径）：`X-Access-Key=租户 name`（`DbSecretProvider` 按 `asts_tenant.name` 查钥，**不是 id** —— 平台 yml 里「X-Access-Key=租户 id」的注释是错的，以 `DbSecretProvider` 实现为准），secret = 解密出的 `tenant_secret`，toSign 五段式与网关 `ThmpSignature` 同源。**注意**：三域 API（client/worker）均标 `@RequiresToken("TENANT")`，bearer 登录对所有域生效；HMAC 只在 client 域写端点强制。
 3. **webhook 验签**：平台用任务归属租户的 `tenant_secret` 签名投递 → 网关 `WebhookVerifier` 用 `LOTASK_TENANT_SECRET` 复算。
 
-三处密钥源都是 `asts_tenant.tenant_secret`，故部署时同一值注入三个变量（唯一独立的是 `LOTASK_ACCESS_KEY`=租户 id）。
+三处密钥源都是 `asts_tenant.tenant_secret`（登录 / HMAC / webhook 同值注入三个变量）；`LOTASK_ACCESS_KEY` = 租户 `name`，与 `LOTASK_TENANT_NAME` 同值。
 
 ## 5. 冒烟环境快速拉起（全链路）
 
@@ -116,7 +118,7 @@ bash scripts/smoke.sh
 | 现象 | 排查 |
 |---|---|
 | 网关启动 fail-fast「task.lotask.url 未配置」 | face=task 时必配 `LOTASK_URL` |
-| create 502 (lotask submit 失败) | 平台侧日志看鉴权：401=token 无效（检查 client_id=租户名）；签名拒绝=ACCESS_KEY/SECRET 错位 |
+| create 502 (lotask submit 失败) | 看 401 响应体细分：「未提供认证令牌」=bearer 缺失（检查 LOTASK_TENANT_NAME/JWT_SECRET，须真登录）；「账号已在别处登录」=同租户多进程互踢（网关与 Worker 必须指向同一 Redis 共享 token store）；「未知的 AccessKey」=X-Access-Key 错位（填租户 **name** 非 id）；「签名头缺失/签名错误」=HMAC 四头或 sign-key 错位 |
 | 任务一直 PENDING | Worker 未起/脚本缺失（Worker 日志 `ScriptLoader`）；平台侧 `asts_task` 状态与 worker 心跳 |
 | webhook 收不到 | 平台→网关网络；平台 outbox 表投递状态；`LOTASK_WEBHOOK_CALLBACK_URL` 可达性 |
 | notify 未收到 | 网关日志 `[Notify]`；调用方地址可达性；退避档位 1m/10m/1h 耐心等 |

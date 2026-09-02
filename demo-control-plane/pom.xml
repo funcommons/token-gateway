@@ -34,6 +34,12 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- Actuator (独立进程健康探测, 冒烟预检依赖 /actuator/health) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

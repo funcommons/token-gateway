@@ -29,7 +29,8 @@ services:
     ports:
       - "9999:9999"
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:9999/openai/v1/models"]
+      # token-mock 全端点验 vendor key (含 models): 健康检查须带 openai vendor key
+      test: ["CMD", "curl", "-sf", "-H", "Authorization: Bearer sk-mock-openai-1234567890abcdef", "http://localhost:9999/openai/v1/models"]
       interval: 5s
       timeout: 3s
       retries: 10

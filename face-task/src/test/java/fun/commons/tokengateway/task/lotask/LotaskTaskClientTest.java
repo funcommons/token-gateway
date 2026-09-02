@@ -37,7 +37,7 @@ class LotaskTaskClientTest {
         props.getTask().getLotask().setJwtSecret("test-jwt-secret");
         props.getTask().getLotask().setAccessKey("ak-test");
         props.getTask().getLotask().setSignKey("sk-test");
-        client = new LotaskTaskClient(WebClient.builder(), props, new LotaskAuthSigner(props));
+        client = new LotaskTaskClient(WebClient.builder(), props, new LotaskAuthSigner(props, WebClient.builder(), new LotaskTokenStore(null)));
     }
 
     @AfterEach

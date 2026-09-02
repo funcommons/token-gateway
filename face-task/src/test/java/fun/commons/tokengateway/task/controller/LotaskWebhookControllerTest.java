@@ -85,7 +85,7 @@ class LotaskWebhookControllerTest {
         String[] parts = sig(raw).split("\\|");
         when(metaStore.findTaskNo("lotask-1")).thenReturn(Mono.just("T1"));
         when(metaStore.getMeta("T1")).thenReturn(Mono.just(
-                new TaskMeta("lotask-1", "pc1", "video", null, 0L)));
+                new TaskMeta("lotask-1", "pc1", "video", null, 0L, null)));
 
         StepVerifier.create(controller.receive("evt-1", parts[0], parts[1], raw))
                 .assertNext(resp -> {
@@ -105,7 +105,7 @@ class LotaskWebhookControllerTest {
                 new LotaskTaskView("lotask-2", "FAILED", null, "UPSTREAM_ERROR", "boom")));
         when(metaStore.findTaskNo("lotask-2")).thenReturn(Mono.just("T2"));
         when(metaStore.getMeta("T2")).thenReturn(Mono.just(
-                new TaskMeta("lotask-2", "pc2", "video", null, 0L)));
+                new TaskMeta("lotask-2", "pc2", "video", null, 0L, null)));
 
         StepVerifier.create(controller.receive("evt-2", null, null, raw))
                 .assertNext(resp -> assertThat(resp.getBody()).containsEntry("mode", "reconciled"))

@@ -3,6 +3,7 @@ package fun.commons.tokengateway.task.billing;
 import fun.commons.tokengateway.contract.PreConsumeRequest;
 import fun.commons.tokengateway.contract.PreConsumeVO;
 import fun.commons.tokengateway.contract.RefundRequest;
+import fun.commons.tokengateway.contract.SettleRequest;
 import fun.commons.tokengateway.contract.TokenValidateVO;
 import fun.commons.tokengateway.exception.RelayException;
 import fun.commons.tokengateway.framework.ApiCode;
@@ -17,7 +18,7 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 
 /**
- * 任务计费 saga (《05》§7: 全额预扣 → 终态退款, 无 usage 结算步).
+ * 任务计费 saga (《05》§7: 全额预扣 → 终态 settle (SUCCEEDED) / refund (失败态)).
  *
  * <p>与 LLM 面差异: 任务按模型全额定价 (先路由定价再预扣, 模型不同价不同),
  * 无 token 估算 — estimatedPromptTokens/estimatedCompletionTokens 传 0,
@@ -94,6 +95,25 @@ public class TaskBillingSaga {
                             .onErrorResume(e -> Mono.empty())
                             .then();
                 });
+    }
+
+    /**
+     * 终态结算 (SUCCEEDED: 预扣转实扣, 释放 hold). billing 面自身幂等
+     * (重复 settle 对已 SETTLED 的 hold 不再扣款); RPC 失败仅记日志, 对账兜底.
+     */
+    public Mono<Void> settleOnce(String preConsumeId, String requestId) {
+        if (preConsumeId == null) {
+            return Mono.empty();
+        }
+        return billingApi.settle(SettleRequest.builder()
+                        .preConsumeId(preConsumeId)
+                        .success(true)
+                        .requestId(requestId)
+                        .build())
+                .doOnError(e -> log.error("[TaskBilling] settle RPC 失败: preConsumeId={}, err={}",
+                        preConsumeId, e.getMessage()))
+                .onErrorResume(e -> Mono.empty())
+                .then();
     }
 
     private static String failReason(ApiResponse<PreConsumeVO> resp) {

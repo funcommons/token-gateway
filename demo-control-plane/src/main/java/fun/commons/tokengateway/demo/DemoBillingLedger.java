@@ -43,7 +43,8 @@ public class DemoBillingLedger {
 
     private BigDecimal balanceOf(String userId) {
         return balances.computeIfAbsent(userId == null ? "anon" : userId,
-                k -> new BigDecimal("100.00"));
+                // sk-poor 演练用户: 余额低于任务面一口价 → pre-consume 拒绝 (10617 演练路径)
+                k -> "demo-poor".equals(k) ? new BigDecimal("0.0001") : new BigDecimal("100.00"));
     }
 
     public PreConsumeVO preConsume(PreConsumeRequest req) {

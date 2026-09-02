@@ -61,7 +61,10 @@ public class LotaskWebhookController {
             return Mono.just(ResponseEntity.badRequest()
                     .body(Map.of("received", false, "reason", "invalid json")));
         }
-        String lotaskId = payload == null ? null : payload.getString("id");
+        // 平台 outbox 载荷字段 = task_id (WebhookServiceImpl); 兼容 id 以容契约定型前差异
+        String lotaskId = payload == null ? null
+                : (payload.getString("task_id") != null ? payload.getString("task_id")
+                        : payload.getString("id"));
         String status = payload == null ? null : payload.getString("status");
         if (lotaskId == null || status == null) {
             return Mono.just(ResponseEntity.badRequest()

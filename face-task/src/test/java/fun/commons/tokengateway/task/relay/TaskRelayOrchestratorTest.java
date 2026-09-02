@@ -8,6 +8,8 @@ import fun.commons.tokengateway.rpc.HttpBillingApi;
 import fun.commons.tokengateway.rpc.HttpChannelApi;
 import fun.commons.tokengateway.rpc.HttpTokenApi;
 import fun.commons.tokengateway.rpc.RpcInternalAuth;
+import fun.commons.tokengateway.task.ResourceUrlConverter;
+import fun.commons.tokengateway.task.resource.ResourceSigner;
 import fun.commons.tokengateway.spi.config.TokenGatewayProperties;
 import fun.commons.tokengateway.task.billing.TaskBillingSaga;
 import fun.commons.tokengateway.task.lotask.LotaskTaskClient;
@@ -91,12 +93,14 @@ class TaskRelayOrchestratorTest {
 
         TokenGatewayProperties props = new TokenGatewayProperties();
         props.getTask().getLotask().setWebhookCallbackUrl("http://gw/internal/lotask/webhook");
+        props.getTask().setResourceSignKey("test-sign-key");
 
         orchestrator = new TaskRelayOrchestrator(
                 new HttpTokenApi(b, gwProps, auth),
                 new HttpChannelApi(b, gwProps, auth),
                 new TaskBillingSaga(new HttpBillingApi(b, gwProps, auth), alwaysFirst),
-                lotaskClient, cipher, mappingStore, metaStore, props);
+                lotaskClient, cipher, mappingStore, metaStore,
+                new ResourceUrlConverter(new ResourceSigner(props)), props);
         this.metaStore = metaStore;
     }
 
@@ -206,7 +210,7 @@ class TaskRelayOrchestratorTest {
     }
 
     @Test
-    @DisplayName("poll: SUCCEEDED → 状态映射 + result 透传 (sig 转换 M2.5c)")
+    @DisplayName("poll: SUCCEEDED → 状态映射 + result 资源转代理 URL (永不透传)")
     void pollSucceeded() {
         backend.enqueue(json("{\"code\":0,\"data\":{\"valid\":true}}"));
         when(mappingStore.get("T-ok")).thenReturn(Mono.just("YeirYkxHuQ"));
@@ -221,7 +225,8 @@ class TaskRelayOrchestratorTest {
                     assertThat(view.get("status")).isEqualTo("SUCCEEDED");
                     @SuppressWarnings("unchecked")
                     Map<String, Object> result = (Map<String, Object>) view.get("result");
-                    assertThat(result.get("resources")).isEqualTo(List.of("https://up/v.mp4"));
+                    assertThat((List<?>) result.get("resources")).allSatisfy(u ->
+                            assertThat((String) u).startsWith("/v1/resources/T-ok/0?"));
                 })
                 .verifyComplete();
     }
