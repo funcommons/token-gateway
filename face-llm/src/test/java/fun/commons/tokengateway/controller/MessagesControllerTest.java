@@ -113,6 +113,50 @@ class MessagesControllerTest {
     }
 
     @Test
+    @DisplayName("软失败: openai 上游 200+错误载荷 (无 status) → RelayException(502) 而非垃圾 200 (issue #1 缺口1)")
+    void upstreamSoftErrorPayload() {
+        mockTokenOk();
+        mockDistribute("openai");
+        mockScanPass();
+        upstream.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"error\":{\"message\":\"model overloaded\","
+                        + "\"type\":\"server_error\",\"code\":\"overloaded_error\"}}"));
+        // 错误路径 fire-and-forget: refund + access-log
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
+
+        StepVerifier.create((Mono<?>) controller.messages("Bearer sk-test", null, anthropicBody()))
+                .verifyErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 502
+                        && re.getMessage().contains("model overloaded"));
+    }
+
+    @Test
+    @DisplayName("上游 401 → RelayException(401) 真实状态码 (不再恒 502, issue #1 缺口3)")
+    void upstream401PassesThroughRealStatus() {
+        mockTokenOk();
+        mockDistribute("anthropic");
+        mockScanPass();
+        upstream.enqueue(new MockResponse()
+                .setResponseCode(401)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"type\":\"error\",\"error\":{\"type\":\"authentication_error\","
+                        + "\"message\":\"invalid x-api-key\"}}"));
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
+
+        StepVerifier.create((Mono<?>) controller.messages("Bearer sk-test", null, anthropicBody()))
+                .verifyErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 401
+                        && re.getMessage().contains("HTTP_401"));
+    }
+
+    @Test
     @DisplayName("非流式 anthropic 上游: 原样透传 (type=message shape)")
     void nonStreamAnthropicPassthrough() {
         mockTokenOk();

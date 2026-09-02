@@ -45,6 +45,7 @@ class ChatCompletionControllerTest {
     private MockWebServer upstreamServer;
     private ChatCompletionController controller;
     private MockModerationApi moderationApi;
+    private final java.util.List<String> healthCalls = new java.util.ArrayList<>();
 
     @BeforeEach
     void setUp() throws Exception {
@@ -75,7 +76,7 @@ class ChatCompletionControllerTest {
                 new fun.commons.tokengateway.relay.AccessLogReporter(
                         new fun.commons.tokengateway.rpc.HttpAccessLogApi(builder, props,
                                 new fun.commons.tokengateway.rpc.RpcInternalAuth(props)),
-                        fun.commons.tokengateway.relay.TestChannelHealthReporters.disabled()),
+                        fun.commons.tokengateway.relay.TestChannelHealthReporters.recording(healthCalls)),
                 moderationApi,
                 builder);
     }
@@ -183,6 +184,101 @@ class ChatCompletionControllerTest {
         StepVerifier.create((Mono<?>) controller.complete("Bearer bad", null, body))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 401);
+    }
+
+    @Test
+    @DisplayName("软失败: 上游 200+错误载荷 → RelayException(429) + 渠道记失败 + 退款 (issue #1 缺口1)")
+    void upstreamSoftErrorPayload() throws Exception {
+        mockTokenOk();
+        // PLATFORM 账本: 计费 RPC 真实发生, 才能断言 refund-vs-settle 走向
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"channelId\":\"c1\","
+                        + "\"baseUrl\":\"" + upstreamServer.url("/").toString().replaceAll("/$", "") + "\","
+                        + "\"apiKey\":\"sk-up\",\"protocol\":\"openai\",\"billingMode\":\"PLATFORM\"}}"));
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"success\":true,\"preConsumeId\":\"pc-1\"}}"));
+        upstreamServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"error\":{\"message\":\"You exceeded your current quota\","
+                        + "\"type\":\"insufficient_quota\",\"status\":429}}"));
+        // 错误路径 fire-and-forget: refund + access-log (record-failure 走 recording 桩不发 HTTP)
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", "gpt-4o");
+        body.put("messages", List.of(Map.of("role", "user", "content", "x")));
+
+        StepVerifier.create((Mono<?>) controller.complete("Bearer sk-test", null, body))
+                .verifyErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 429
+                        && re.getMessage().contains("You exceeded your current quota"));
+
+        waitForHealthCall();
+        // 渠道健康: 记失败携真实 errorCode, 不再走 reportSuccess 清零
+        assertThat(healthCalls).containsExactly("failure:c1:HTTP_429");
+
+        // 计费: refund 发生, settle 不发生 (软失败不得按成功结算).
+        // fire-and-forget 出网有延迟, deadline 轮询等 refund, 到手后短暂宽限观察 settle 缺席.
+        boolean refunded = false;
+        boolean settled = false;
+        long deadline = System.currentTimeMillis() + 5000;
+        while (System.currentTimeMillis() < deadline) {
+            var req = backendServer.takeRequest(100, java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (req == null) {
+                continue;
+            }
+            if (req.getPath().contains("refund")) {
+                refunded = true;
+            }
+            if (req.getPath().contains("settle")) {
+                settled = true;
+            }
+            if (refunded && backendServer.getRequestCount() >= 5) {
+                break;
+            }
+        }
+        assertThat(refunded).as("软失败应走退款路径").isTrue();
+        assertThat(settled).as("软失败不得结算").isFalse();
+    }
+
+    @Test
+    @DisplayName("上游 401 → RelayException(401) 真实状态码 (不再恒 502, issue #1 缺口3)")
+    void upstream401PassesThroughRealStatus() throws Exception {
+        mockTokenOk();
+        mockDistribute("openai");
+        upstreamServer.enqueue(new MockResponse()
+                .setResponseCode(401)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"error\":{\"message\":\"Incorrect API key provided\"}}"));
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", "gpt-4o");
+        body.put("messages", List.of(Map.of("role", "user", "content", "x")));
+
+        StepVerifier.create((Mono<?>) controller.complete("Bearer sk-test", null, body))
+                .verifyErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 401
+                        && re.getMessage().contains("HTTP_401"));
+
+        waitForHealthCall();
+        assertThat(healthCalls).containsExactly("failure:c1:HTTP_401");
+    }
+
+    /** fire-and-forget 健康上报异步完成, 轮询等待 (上限 5s). */
+    private void waitForHealthCall() throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (healthCalls.isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50);
+        }
     }
 
     @Test

@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **face-llm 渠道健康上报三缺口**（issue #1，新增 `UpstreamErrorPolicy`，口径对齐 MMagiX gateway）：
+  - **软失败识别**：上游 `200 + {"error":{...}}` 错误载荷（容错型代理网关的典型故障形态）不再按成功结算并触发 record-success 清零渠道失败计数——协议转换前识别错误体（OpenAI/Anthropic 双形态），按其真实 `status` 上抛并走退款路径
+  - **审核失败/内容违规不再误记渠道失败**：输出审核 RPC 故障与违规 BLOCK 走 `reportErrorWithoutHealth`（访问日志照记，渠道健康信号不触发），健康渠道不再因审核服务抖动被误冻结
+  - **上游真实状态码透传**：401（key 失效）/429（限流）/400/5xx 不再一律压成 502，渠道失败 errorCode 采用 `HTTP_<status>` / `UPSTREAM_ERROR` 分类；客户端信封亦透传上游状态（`upstream error HTTP_<status>` 前缀可区分上游故障与自身凭证问题）；客户端取消（499）仍不上报渠道健康
+  - 测试 339→362（+23：策略单测 10 + AccessLogReporter 健康分流 5 + 四 controller 软失败/真实状态码端到端 8）；全链路冒烟 29/29 回归通过
+
 ### 测试基建
 
 - **JaCoCo 覆盖率门禁**：agent + report 全模块，`check` 绑定 `verify` 阶段；模块阈值按实测值回落 3pp 设置并随覆盖率提升两轮 ratchet（当前 gateway-core 86% / task-worker 80% / face-llm 75% / face-task 72% / gateway-spi 77%，demo-control-plane 与 app 为非生产制品豁免），低于阈值构建失败

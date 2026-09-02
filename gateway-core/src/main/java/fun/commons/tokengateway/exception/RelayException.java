@@ -29,6 +29,13 @@ public class RelayException extends RuntimeException {
         this.code = code;
     }
 
+    /** 携带原始异常 (上游错误包装用, 保留 cause 链便于归因). */
+    public RelayException(int httpStatus, String message, Throwable cause) {
+        super(message, cause);
+        this.httpStatus = httpStatus;
+        this.code = defaultCodeOf(httpStatus);
+    }
+
     public int getHttpStatus() {
         return httpStatus;
     }

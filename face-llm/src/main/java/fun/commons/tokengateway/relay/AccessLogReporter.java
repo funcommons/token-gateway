@@ -17,7 +17,8 @@ import java.util.UUID;
  *
  * <p>把字段收集 (traceId / tenantId / token usage / latency) 与 RPC 调用封装到一处,
  * 避免每个 Controller 重复; 同点代理渠道健康上报 (ChannelHealthReporter):
- * 成功 → record-success, 上游 5xx → record-failure, 客户端取消/4xx 不上报.
+ * 成功 → record-success, 上游错误 (4xx/5xx, 真实状态码入 errorCode) → record-failure,
+ * 客户端取消 (499) 不上报; 审核失败/内容违规走 {@link #reportErrorWithoutHealth} 不触健康.
  *
  * <p>失败仅记日志, 不影响主响应.
  */
@@ -40,7 +41,7 @@ public class AccessLogReporter {
                                     java.math.BigDecimal creditConsumed,
                                     int latencyMs, String traceId) {
         return report(prepared, model, requestPath, 200,
-                promptTokens, completionTokens, cachedTokens, creditConsumed, latencyMs, traceId);
+                promptTokens, completionTokens, cachedTokens, creditConsumed, latencyMs, traceId, true);
     }
 
     /**
@@ -51,7 +52,17 @@ public class AccessLogReporter {
     public Mono<Void> reportError(RelayOrchestrator.PreparedRequest prepared,
                                   String model, String requestPath,
                                   int httpStatus, int latencyMs, String traceId) {
-        return report(prepared, model, requestPath, httpStatus, 0, 0, 0, null, latencyMs, traceId);
+        return report(prepared, model, requestPath, httpStatus, 0, 0, 0, null, latencyMs, traceId, true);
+    }
+
+    /**
+     * fire-and-forget 上报访问日志, 但不触发渠道健康上报
+     * (非渠道责任的失败: 审核 RPC 故障 / 内容违规 — issue #1 缺口 2, 健康渠道不应被误冻结).
+     */
+    public Mono<Void> reportErrorWithoutHealth(RelayOrchestrator.PreparedRequest prepared,
+                                               String model, String requestPath,
+                                               int httpStatus, int latencyMs, String traceId) {
+        return report(prepared, model, requestPath, httpStatus, 0, 0, 0, null, latencyMs, traceId, false);
     }
 
     private Mono<Void> report(RelayOrchestrator.PreparedRequest prepared,
@@ -59,7 +70,8 @@ public class AccessLogReporter {
                               int promptTokens, int completionTokens, int cachedTokens,
                               java.math.BigDecimal creditConsumed,
                               int latencyMs,
-                              String traceId) {
+                              String traceId,
+                              boolean withHealth) {
         if (prepared == null) {
             return Mono.empty();
         }
@@ -85,21 +97,26 @@ public class AccessLogReporter {
                 .creditConsumed(creditConsumed)
                 .latencyMs(latencyMs)
                 .build();
-        Mono<Void> health = reportChannelHealth(channel, token, statusCode);
+        Mono<Void> health = withHealth ? reportChannelHealth(channel, token, statusCode) : Mono.empty();
         return accessLogApi.record(entity).then(health);
     }
 
-    /** 渠道健康信号: 200 → record-success; 5xx → record-failure; 其余 (客户端取消/4xx) 不上报. */
+    /**
+     * 渠道健康信号 (issue #1 缺口 3: 上游真实状态码透传, 不再恒 502):
+     * 200 → record-success; 客户端取消 (499) → 不上报;
+     * 上游错误 (4xx/5xx, 含 200+错误载荷软失败) → record-failure, errorCode=HTTP_&lt;status&gt;.
+     */
     private Mono<Void> reportChannelHealth(DistributeVO channel, TokenValidateVO token, int statusCode) {
         if (statusCode == 200) {
             return channelHealthReporter.reportSuccess(channel);
         }
-        if (statusCode >= 500) {
-            return channelHealthReporter.reportFailure(channel,
-                    token != null ? token.getTenantId() : null,
-                    String.valueOf(statusCode), "upstream error");
+        if (statusCode == 499) {
+            return Mono.empty();
         }
-        return Mono.empty();
+        return channelHealthReporter.reportFailure(channel,
+                token != null ? token.getTenantId() : null,
+                statusCode > 0 ? "HTTP_" + statusCode : "UPSTREAM_ERROR",
+                "upstream error");
     }
 
     private static Long parseLong(String s) {

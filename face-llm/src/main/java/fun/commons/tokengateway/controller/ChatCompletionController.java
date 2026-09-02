@@ -8,6 +8,7 @@ import fun.commons.tokengateway.format.FormatConverter;
 import fun.commons.tokengateway.format.OpenAiSseConverter;
 import fun.commons.tokengateway.relay.ModerationSupport;
 import fun.commons.tokengateway.relay.RelayOrchestrator;
+import fun.commons.tokengateway.relay.UpstreamErrorPolicy;
 import fun.commons.tokengateway.rpc.HttpModerationApi;
 import fun.commons.tokengateway.upstream.SsePassthroughInvoker;
 import fun.commons.tokengateway.util.ChatTokenEstimator;
@@ -99,7 +100,8 @@ public class ChatCompletionController {
                                                 e -> log.warn("[Saga/settle+AccessLog] preConsumeId={}, err={}",
                                                         prepared.preConsumeId(), e.getMessage()));
                                 return auditOutput(prepared, resp)
-                                        .doOnError(err -> accessLogReporter.reportError(
+                                        // 审核失败/内容违规非渠道责任: 记访问日志但不触渠道健康 (issue #1 缺口 2)
+                                        .doOnError(err -> accessLogReporter.reportErrorWithoutHealth(
                                                 prepared, model, REQUEST_PATH, 500, latency,
                                                 traceId).subscribe(
                                                         v2 -> {},
@@ -117,7 +119,8 @@ public class ChatCompletionController {
                                                     e -> log.warn("[Saga/refund] preConsumeId={}, err={}",
                                                             prepared.preConsumeId(), e.getMessage()));
                                     accessLogReporter.reportError(prepared, model, REQUEST_PATH,
-                                            502, elapsedMs(startNs), traceId).subscribe(
+                                            UpstreamErrorPolicy.httpStatusOf(err),
+                                            elapsedMs(startNs), traceId).subscribe(
                                                     v -> {},
                                                     e -> log.warn("[AccessLog] err={}", e.getMessage()));
                                 }
@@ -180,10 +183,15 @@ public class ChatCompletionController {
                 .bodyValue(upstreamBody)
                 .retrieve()
                 .bodyToMono((Class<Map<String, Object>>) (Class<?>) Map.class)
-                .map(raw -> isAnthropic ? formatConverter.anthropicToOpenAIResponse(raw) : raw)
+                .map(raw -> {
+                    // 软失败: 200 + 错误载荷按上游真实错误上抛 (issue #1 缺口 1, 转换前判定双协议通吃)
+                    UpstreamErrorPolicy.throwIfSoftError(raw);
+                    return isAnthropic ? formatConverter.anthropicToOpenAIResponse(raw) : raw;
+                })
                 .onErrorResume(e -> {
                     log.error("[ChatCompletion] 非流式上游调用失败 url={}, err={}", url, e.getMessage());
-                    return Mono.error(new RelayException(502, "upstream failed: " + e.getMessage()));
+                    // 透传上游真实状态码, 不再恒 502 (issue #1 缺口 3)
+                    return Mono.error(UpstreamErrorPolicy.wrap(e));
                 });
     }
 
@@ -221,7 +229,8 @@ public class ChatCompletionController {
                                     e -> log.warn("[Saga/refund] preConsumeId={}, err={}",
                                             prepared.preConsumeId(), e.getMessage()));
                     accessLogReporter.reportError(prepared, model, REQUEST_PATH,
-                            502, elapsedMs(startNs), traceId).subscribe(
+                            UpstreamErrorPolicy.httpStatusOf(err),
+                            elapsedMs(startNs), traceId).subscribe(
                                     v -> {},
                                     e -> log.warn("[AccessLog] err={}", e.getMessage()));
                 })

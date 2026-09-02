@@ -1,7 +1,5 @@
 package fun.commons.tokengateway.controller;
 
-import fun.commons.tokengateway.exception.RelayException;
-
 import fun.commons.tokengateway.contract.DistributeVO;
 import fun.commons.tokengateway.relay.AccessLogReporter;
 import fun.commons.tokengateway.relay.RelayOrchestrator;
@@ -82,7 +80,8 @@ public class EmbeddingsController {
                                             e -> log.warn("[Saga/refund] preConsumeId={}, err={}",
                                                     prepared.preConsumeId(), e.getMessage()));
                             accessLogReporter.reportError(prepared, model, REQUEST_PATH,
-                                    502, elapsedMs(startNs), traceId).subscribe(
+                                    fun.commons.tokengateway.relay.UpstreamErrorPolicy.httpStatusOf(err),
+                                    elapsedMs(startNs), traceId).subscribe(
                                             v -> {},
                                             e -> log.warn("[AccessLog] err={}", e.getMessage()));
                         }));
@@ -98,9 +97,15 @@ public class EmbeddingsController {
                 .bodyValue(body)
                 .retrieve()
                 .bodyToMono((Class<Map<String, Object>>) (Class<?>) Map.class)
+                .map(raw -> {
+                    // 软失败: 200 + 错误载荷按上游真实错误上抛 (issue #1 缺口 1)
+                    fun.commons.tokengateway.relay.UpstreamErrorPolicy.throwIfSoftError(raw);
+                    return raw;
+                })
                 .onErrorResume(e -> {
                     log.error("[Embeddings] 上游调用失败 url={}, err={}", url, e.getMessage());
-                    return Mono.error(new RelayException(502, "upstream failed: " + e.getMessage()));
+                    // 透传上游真实状态码, 不再恒 502 (issue #1 缺口 3)
+                    return Mono.error(fun.commons.tokengateway.relay.UpstreamErrorPolicy.wrap(e));
                 });
     }
 

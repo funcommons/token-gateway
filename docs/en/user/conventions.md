@@ -55,6 +55,8 @@ Error envelope (6 fields):
 | 10617 | 402 | Insufficient balance | Top up and retry; no task is created on the task face |
 | 10700 | 200 | Partial success | Handle per the `data` details |
 
+> When the upstream channel returns 4xx/5xx, the gateway passes through the real upstream HTTP status and envelope code (e.g. 401→10202, 429→10500, 5xx→10001/10004); the error message carries an `upstream error HTTP_<status>` prefix — use it to tell upstream failures apart from your own credential issues (no more one-size-fits-all 502).
+
 ## 4. Tracing
 
 - Requests may carry `X-Trace-Id` (the gateway generates one if absent); the response **always** returns `X-Trace-Id`.

@@ -144,7 +144,7 @@ class ImagesControllerTest {
     }
 
     @Test
-    @DisplayName("上游失败 → 502 RelayException")
+    @DisplayName("上游 500 → RelayException(500) 真实状态码透传 (issue #1 缺口3)")
     void upstreamFailure() {
         mockTokenOk();
         mockDistribute();
@@ -154,8 +154,53 @@ class ImagesControllerTest {
         body.put("prompt", "x");
 
         StepVerifier.create((Mono<?>) controller.generate("Bearer sk-test", null, body))
-                .verifyErrorMatches(e -> e instanceof RelayException
-                        && ((RelayException) e).getHttpStatus() == 502);
+                .verifyErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 500
+                        && re.getMessage().contains("HTTP_500"));
+    }
+
+    @Test
+    @DisplayName("上游 429 → RelayException(429) 真实状态码 (不再恒 502, issue #1 缺口3)")
+    void upstream429PassesThroughRealStatus() {
+        mockTokenOk();
+        mockDistribute();
+        upstreamServer.enqueue(new MockResponse().setResponseCode(429)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"error\":{\"message\":\"rate limit exceeded\"}}"));
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("prompt", "x");
+
+        StepVerifier.create((Mono<?>) controller.generate("Bearer sk-test", null, body))
+                .verifyErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 429
+                        && re.getMessage().contains("HTTP_429"));
+    }
+
+    @Test
+    @DisplayName("软失败: 200+错误载荷 → RelayException 而非成功透传 (issue #1 缺口1)")
+    void upstreamSoftErrorPayload() {
+        mockTokenOk();
+        mockDistribute();
+        upstreamServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"error\":{\"message\":\"content policy violation\",\"type\":\"invalid_request_error\"}}"));
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("prompt", "x");
+
+        StepVerifier.create((Mono<?>) controller.generate("Bearer sk-test", null, body))
+                .verifyErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 502
+                        && re.getMessage().contains("content policy violation"));
     }
 
     @Test
