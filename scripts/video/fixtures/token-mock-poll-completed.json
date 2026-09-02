@@ -1,0 +1,11 @@
+{
+  "id": "video_mock_a1b2c3d4e5f60718293a4b5c",
+  "status": "completed",
+  "model": "vid-mock-1",
+  "prompt": "a cat",
+  "created_at": 1789000000,
+  "completed_at": 1789000061,
+  "url": "http://localhost:9999/openai/v1/videos/video_mock_a1b2c3d4e5f60718293a4b5c/content",
+  "duration_seconds": 5.0,
+  "resolution": "1080p"
+}
