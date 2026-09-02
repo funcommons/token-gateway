@@ -42,8 +42,8 @@ Maven multi-module (design doc §9; faces independently deployable):
 Prerequisites: backend capability services reachable (e.g. MMagiX monolith on :9400); Redis reachable (default localhost:6379).
 
 ```bash
-mvn package                                                   # 256 tests
-java -jar app/target/token-gateway-app-0.0.1-SNAPSHOT.jar     # listens on :9401
+mvn package                                                   # 457 tests
+java -jar app/target/token-gateway-app-0.1.0.jar              # listens on :9401
 ```
 
 **Full-chain smoke** (LLM face + task face + notify + reconciliation, five processes, zero real dependencies):
