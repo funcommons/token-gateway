@@ -6,7 +6,8 @@
 
 ### 测试基建
 
-- **JaCoCo 覆盖率门禁**：agent + report 全模块，`check` 绑定 `verify` 阶段；模块阈值按实测值回落 3pp 设置（gateway-core 80% / gateway-spi 60% / face-task 58% / face-llm 55% / task-worker 50%，demo-control-plane 与 app 为非生产制品豁免），低于阈值构建失败
+- **JaCoCo 覆盖率门禁**：agent + report 全模块，`check` 绑定 `verify` 阶段；模块阈值按实测值回落 3pp 设置并随覆盖率提升两轮 ratchet（当前 gateway-core 86% / task-worker 80% / face-llm 75% / face-task 72% / gateway-spi 77%，demo-control-plane 与 app 为非生产制品豁免），低于阈值构建失败
+- **覆盖率提升专项**（gate 接入当日实测 → 提升）：gateway-core 83.5%→89.2%、task-worker 52.2%→83.9%、face-llm 57.4%→78.8%、gateway-spi 62.4%→80.0%、face-task 61.6%→75.0%；新增 FormatConverter 全分支表驱动 / AnthropicToolChainSanitizer / WorkerLotaskClient（MockWebServer）/ DryRunController / ResourceProxyController / 超时钟+对账 job / NotifyDispatcher（签名+退避）/ HttpChannelApi / OnFaceCondition / SPI 模型速测共 10 个测试类
 - CI 由 `mvn package` 升级为 `mvn -B verify`（门禁生效），并上传各模块 jacoco.csv 报告制品
 - **全链路冒烟负路径扩展（18 → 28 断言，notify 验签双侧设钥时满配 29）**：
   - 未知 task_no poll → 404 + 业务码 10400

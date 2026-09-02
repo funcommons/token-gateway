@@ -11,9 +11,9 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <!-- JaCoCo 门禁: 实测 62.4% (2026-09-02) -->
+    <!-- JaCoCo 门禁: 实测 80.0% (2026-09-02 提升后) -->
     <properties>
-        <jacoco.line.min>0.60</jacoco.line.min>
+        <jacoco.line.min>0.77</jacoco.line.min>
     </properties>
 
     <artifactId>gateway-spi</artifactId>

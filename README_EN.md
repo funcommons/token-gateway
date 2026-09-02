@@ -54,7 +54,7 @@ docker compose -f docker-compose.smoke.yml up -d              # redis + token-mo
 bash scripts/smoke.sh                                         # PASS/FAIL matrix, nonzero exit = failure
 ```
 
-**Coverage gate**: JaCoCo `check` is bound to `verify` — `mvn verify` fails below per-module thresholds (gateway-core 80% / gateway-spi 60% / face-task 58% / face-llm 55% / task-worker 50%, overridden in each module pom).
+**Coverage gate**: JaCoCo `check` is bound to `verify` — `mvn verify` fails below per-module thresholds (gateway-core 86% / task-worker 80% / face-llm 75% / face-task 72% / gateway-spi 77%, ratcheted upward as coverage grows).
 
 Key configuration (`app/src/main/resources/application.yml`): `gateway.backend.url` (backend RPC target), `gateway.backend.internal-token` (`dev-` prefix skips the signed header), `gateway.health-report.enabled` (channel health reporting, default on), `gateway.thmp.*` (TokenHub shadow/cutover, default off).
 

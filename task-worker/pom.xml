@@ -11,6 +11,11 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
+    <!-- JaCoCo 门禁: 实测 83.9% (2026-09-02) -->
+    <properties>
+        <jacoco.line.min>0.80</jacoco.line.min>
+    </properties>
+
     <artifactId>task-worker</artifactId>
     <name>task-worker</name>
     <description>

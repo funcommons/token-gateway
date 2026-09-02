@@ -64,7 +64,7 @@ docker compose -f docker-compose.smoke.yml up -d              # redis + token-mo
 bash scripts/smoke.sh                                         # PASS/FAIL 矩阵, 非零退出码=有 FAIL
 ```
 
-**覆盖率门禁**：JaCoCo `check` 绑定 `verify`——`mvn verify` 低于模块阈值即构建失败（gateway-core 80% / gateway-spi 60% / face-task 58% / face-llm 55% / task-worker 50%，阈值在各自 pom 覆写）。
+**覆盖率门禁**：JaCoCo `check` 绑定 `verify`——`mvn verify` 低于模块阈值即构建失败（gateway-core 86% / task-worker 80% / face-llm 75% / face-task 72% / gateway-spi 77%，阈值随覆盖率提升滚动抬高）。
 
 关键配置（`app/src/main/resources/application.yml`）：`gateway.backend.url`（后端 RPC 目标）、`gateway.backend.internal-token`（`dev-` 开头跳过签名头）、`gateway.health-report.enabled`（渠道健康上报，默认开）、`gateway.thmp.*`（TokenHub 影子/切流，默认关闭）。
 
