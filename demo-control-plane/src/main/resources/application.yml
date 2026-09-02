@@ -1,0 +1,17 @@
+server:
+  port: 9400   # 对齐网关 gateway.backend.url 默认值
+
+spring:
+  application:
+    name: token-gateway-demo-control-plane
+
+demo:
+  # token-mock 上游地址 (docker run -p 9999:9999 ghcr.io/funcommons/token-mock)
+  upstream-mock: ${DEMO_UPSTREAM_MOCK:http://localhost:9999}
+  # notify 回调验签密钥 (与网关 task.notify-sign-key 一致; 空 = 不验签只记录)
+  notify-sign-key: ${TGW_NOTIFY_SIGN_KEY:}
+
+logging:
+  level:
+    root: INFO
+    fun.commons.tokengateway.demo: INFO

@@ -28,6 +28,7 @@
         <module>face-llm</module>
         <module>face-task</module>
         <module>task-worker</module>
+        <module>demo-control-plane</module>
         <module>app</module>
     </modules>
 
