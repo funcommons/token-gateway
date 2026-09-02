@@ -10,8 +10,8 @@ info:
       错误响应为 6 字段信封（code != 0 即失败）。
     - 认证：Authorization: Bearer <凭证> 或 x-api-key: <凭证>（两头同发 Bearer 优先）。
       凭证语义由模型路由命中的后端定义（MMagiX token / TokenHub sk-thmp-* / TokenGo token）。
-    - 接入手册见 docs/用户文档/01_LLM面接入手册.md；
-      任务面契约见 04_任务面API契约.yaml（规划中 M2.5）；
+    - 接入手册见 docs/用户文档/04_LLM面接入手册.md；
+      任务面契约见 08_任务面API契约.yaml（规划中 M2.5）；
       设计方案见 docs/开发文档/01_设计方案.md。
 servers:
   - url: http://localhost:9401

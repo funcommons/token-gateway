@@ -54,10 +54,14 @@ Key configuration (`app/src/main/resources/application.yml`): `gateway.backend.u
 
 | Doc | Description |
 |---|---|
-| [LLM Onboarding (en)](https://funcommons.github.io/token-gateway/en/user/llm-guide) · [中文](docs/用户文档/01_LLM面接入手册.md) | Caller integration (OpenAI/Anthropic SDK + error codes + backend config) |
-| [Task Onboarding (en)](https://funcommons.github.io/token-gateway/en/user/task-guide) · [中文](docs/用户文档/02_任务面接入手册.md) | Task face (create/poll/notify/resource proxy) — M2.5a/c landed; Worker execution M2.5b in progress |
-| [LLM API Contract](docs/用户文档/03_LLM面API契约.yaml) | OpenAPI contract (6 endpoints) |
-| [Task API Contract](docs/用户文档/04_任务面API契约.yaml) | M2.5a/c landed; Worker execution M2.5b in progress |
+| [Overview (en)](https://funcommons.github.io/token-gateway/en/user/overview) · [中文](docs/用户文档/01_产品简介.md) | Positioning / core concepts / doc map |
+| [Quickstart (en)](https://funcommons.github.io/token-gateway/en/user/quickstart) · [中文](docs/用户文档/02_快速开始.md) | First call in 5 minutes (LLM + task face) |
+| [Conventions (en)](https://funcommons.github.io/token-gateway/en/user/conventions) · [中文](docs/用户文档/03_通用约定.md) | Auth / error envelope & codes / rate limit / idempotency (**required**) |
+| [LLM Guide (en)](https://funcommons.github.io/token-gateway/en/user/llm-guide) · [中文](docs/用户文档/04_LLM面接入手册.md) | LLM face (6 endpoints + SDK examples + acceptance checklist) |
+| [Task Guide (en)](https://funcommons.github.io/token-gateway/en/user/task-guide) · [中文](docs/用户文档/05_任务面接入手册.md) | Task face (4-modality create/poll/notify/resource proxy + callback verification) |
+| [FAQ (en)](https://funcommons.github.io/token-gateway/en/user/faq) · [中文](docs/用户文档/06_FAQ.md) | Troubleshooting quick reference |
+| [LLM API Contract](docs/用户文档/07_LLM面API契约.yaml) | OpenAPI contract (6 endpoints) |
+| [Task API Contract](docs/用户文档/08_任务面API契约.yaml) | OpenAPI contract (M2.5 landed) |
 
 ### Developer Docs (Gateway / Backend Integrators)
 

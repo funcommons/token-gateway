@@ -11,8 +11,8 @@ create 可受理但任务不会被执行。协议权威 = THMP 18 号 §3.7；�
 
     - 四段式：create（全额预扣）→ poll（3~5s 驱动，终态幂等）→ notify（HMAC 回调）
       → 资源代理（exp+sig 24h 能力凭证，上游原始 URL 永不透传）。
-    - 认证 / 限流 / 幂等 / 错误信封与 LLM 面一致（见 03_LLM面API契约.yaml components）。
-    - 接入手册见 docs/用户文档/02_任务面接入手册.md。
+    - 认证 / 限流 / 幂等 / 错误信封与 LLM 面一致（见 07_LLM面API契约.yaml components）。
+    - 接入手册见 docs/用户文档/05_任务面接入手册.md。
 servers:
   - url: http://localhost:9401
     description: 本地开发（face=task/all 部署分组）

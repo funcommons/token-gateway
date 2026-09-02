@@ -64,10 +64,14 @@ java -jar app/target/token-gateway-app-0.0.1-SNAPSHOT.jar     # 监听 9401
 
 | 文档 | 说明 |
 |---|---|
-| [docs/用户文档/01_LLM面接入手册.md](docs/用户文档/01_LLM面接入手册.md) | LLM 面调用方接入（OpenAI/Anthropic SDK + 错误码 + 后端配置） |
-| [docs/用户文档/02_任务面接入手册.md](docs/用户文档/02_任务面接入手册.md) | 任务面接入（四模态 create/poll/notify/资源代理）——M2.5a/c 已落地，Worker 执行 M2.5b 进行中 |
-| [docs/用户文档/03_LLM面API契约.yaml](docs/用户文档/03_LLM面API契约.yaml) | LLM 面 OpenAPI 契约（6 端点） |
-| [docs/用户文档/04_任务面API契约.yaml](docs/用户文档/04_任务面API契约.yaml) | 任务面 OpenAPI 契约——M2.5a/c 已落地，Worker 执行 M2.5b 进行中 |
+| [docs/用户文档/01_产品简介.md](docs/用户文档/01_产品简介.md) | 产品定位 / 核心概念 / 文档导航 |
+| [docs/用户文档/02_快速开始.md](docs/用户文档/02_快速开始.md) | 5 分钟首次调用（LLM + 任务面） |
+| [docs/用户文档/03_通用约定.md](docs/用户文档/03_通用约定.md) | 认证 / 错误信封与错误码 / 限流 / 幂等 / 超时（**必读**） |
+| [docs/用户文档/04_LLM面接入手册.md](docs/用户文档/04_LLM面接入手册.md) | LLM 面调用方接入（6 端点详解 + SDK 示例 + 验收清单） |
+| [docs/用户文档/05_任务面接入手册.md](docs/用户文档/05_任务面接入手册.md) | 任务面接入（四模态 create/poll/notify/资源代理 + 回调验签） |
+| [docs/用户文档/06_FAQ.md](docs/用户文档/06_FAQ.md) | 常见问题与排障速查 |
+| [docs/用户文档/07_LLM面API契约.yaml](docs/用户文档/07_LLM面API契约.yaml) | LLM 面 OpenAPI 契约（6 端点） |
+| [docs/用户文档/08_任务面API契约.yaml](docs/用户文档/08_任务面API契约.yaml) | 任务面 OpenAPI 契约（M2.5 已落地） |
 
 ### 开发文档（网关开发与后端接入方）
 

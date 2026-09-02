@@ -4,11 +4,11 @@ layout: home
 hero:
   name: token-gateway
   text: Universal Model Capability Gateway
-  tagline: LLM sync face (protocol normalization · rate limiting · idempotency · moderation · billing saga) + task face (planned M2.5) · capability-face SPI · configuration-as-onboarding
+  tagline: LLM sync face (protocol normalization · rate limiting · idempotency · moderation · billing saga) + task face (async tasks · full pre-charge · terminal refund · resource proxy) · capability-face SPI · configuration-as-onboarding
   actions:
     - theme: brand
-      text: LLM Onboarding
-      link: /en/user/llm-guide
+      text: 5-Minute Quickstart
+      link: /en/user/quickstart
     - theme: alt
       text: Design Proposal
       link: /en/dev/design
@@ -25,6 +25,8 @@ features:
     details: Seven capability faces (route / token-validate / billing / moderation / access-log / audit / model-catalog), each with its own URL — separately deployable or all-in-one monolith. Edit yml and restart.
   - title: Pluggable Third Parties
     details: Adapter matrix mmagix / tokenhub / tokengo / openapi. Third parties implement the capability-face HTTP contract in any language — no Java required.
+  - title: Task Face (4 Modalities)
+    details: videos/images/audios/tts async tasks — task_no on create, poll/notify, resource proxy (exp+sig 24h, upstream URLs never exposed), timeout clock + reconciliation; lotask4j-hosted with Groovy-script upstream onboarding.
   - title: Production-grade Cross-cutting
     details: Redis sliding-window rate limiting (4 response headers) · Idempotency-Key rejection dedup · moderation fail-open · X-Trace-Id end-to-end.
   - title: Inter-backend Gradual Rollout

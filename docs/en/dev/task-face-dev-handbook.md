@@ -4,7 +4,7 @@
 |---|---|
 | Document | face-task implementation handbook: module/component breakdown, lotask4j integration contract, configuration model, M2.5 task breakdown |
 | Status | **Execution-level basis** for M2.5 development; the plan-level authority is `05_任务面lotask4j托管方案.md` → `./task-lotask4j-hosting.md` (V1.1) — on conflict, 05 wins and this doc is updated |
-| Companion | 05 (plan authority); `../user/task-guide.md` / `04_任务面API契约.yaml` (caller contract); `./backend-security-contract.md` (auth three modes) |
+| Companion | 05 (plan authority); `../user/task-guide.md` / `08_任务面API契约.yaml` (caller contract); `./backend-security-contract.md` (auth three modes) |
 | Version | V1.0 (2026-09-01) |
 
 ---
