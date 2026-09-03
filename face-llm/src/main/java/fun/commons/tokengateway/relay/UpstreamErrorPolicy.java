@@ -21,6 +21,28 @@ public final class UpstreamErrorPolicy {
     private UpstreamErrorPolicy() {
     }
 
+    /**
+     * 上游错误是否值得换道重试: 连接级中断 (PrematureClose, 常见于 SSE 提前断连) /
+     * 5xx / 401 (key 失效) / 429 (限流) / 超时 → 可重试;
+     * 其余 4xx (参数错误等, 换渠道也必失败) 不重试.
+     */
+    public static boolean isRetryable(Throwable err) {
+        // 第一轮: 连接级中断 (cause 链任意位置, 如 WCRE(200) 包裹的 PrematureClose) → 可重试
+        for (Throwable t = err; t != null; t = t.getCause()) {
+            if (t instanceof reactor.netty.http.client.PrematureCloseException) {
+                return true;
+            }
+        }
+        // 第二轮: 按 HTTP 状态判定
+        for (Throwable t = err; t != null; t = t.getCause()) {
+            if (t instanceof WebClientResponseException wcre) {
+                int status = wcre.getStatusCode().value();
+                return status >= 500 || status == 401 || status == 429;
+            }
+        }
+        return true;
+    }
+
     /** 渠道失败上报 errorCode: RelayException / WCRE (含 cause 链) → HTTP_&lt;status&gt;, 其余 → UPSTREAM_ERROR. */
     public static String errorCodeOf(Throwable err) {
         if (err instanceof RelayException re) {

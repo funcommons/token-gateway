@@ -4,6 +4,7 @@ import fun.commons.tokengateway.contract.DistributeRequest;
 import fun.commons.tokengateway.contract.DistributeVO;
 import fun.commons.tokengateway.contract.PreConsumeRequest;
 import fun.commons.tokengateway.contract.PreConsumeVO;
+import fun.commons.tokengateway.contract.RecordFailureRequest;
 import fun.commons.tokengateway.contract.RefundRequest;
 import fun.commons.tokengateway.contract.SettleRequest;
 import fun.commons.tokengateway.contract.TokenValidateRequest;
@@ -287,6 +288,67 @@ public class RelayOrchestrator {
                         prepared.preConsumeId(), e.getMessage()))
                 .onErrorResume(e -> Mono.empty())
                 .then();
+    }
+
+    /**
+     * 渠道失败上报 (record-failure RPC): 后端累计失败计数 / 冻结 / 清亲和.
+     * <p>fire-and-forget: RPC 失败仅记日志, 不影响主错误路径.
+     */
+    public Mono<Void> recordChannelFailure(PreparedRequest prepared, String model,
+                                           String errorCode, String errorMessage) {
+        if (prepared == null || prepared.channel() == null || prepared.channel().getChannelId() == null) {
+            return Mono.empty();
+        }
+        RecordFailureRequest request = RecordFailureRequest.builder()
+                .tenantId(prepared.token() != null ? prepared.token().getTenantId() : null)
+                .apiKeyId(prepared.token() != null ? prepared.token().getTokenId() : null)
+                .model(model)
+                .errorCode(errorCode)
+                .errorMessage(errorMessage)
+                .build();
+        return channelApi.recordFailure(prepared.channel().getChannelId(), request)
+                .doOnError(e -> log.warn("[Channel/recordFailure] channelId={}, err={}",
+                        prepared.channel().getChannelId(), e.getMessage()))
+                .onErrorResume(e -> Mono.empty())
+                .then();
+    }
+
+    /**
+     * 请求内渠道轮换: 退掉当前预扣 → 排除已失败渠道重新路由 → 为新渠道重新预扣.
+     * <p>调用方需先 {@link #recordChannelFailure} 上报失败 (含亲和清除), 再调此方法.
+     * <p>新 requestId 追加 -foN 后缀, 避免与原预扣的幂等键冲突.
+     */
+    public Mono<PreparedRequest> failoverToNextChannel(PreparedRequest current, String model,
+                                                       int estPromptTokens, int estCompletionTokens,
+                                                       List<String> excludeChannelIds) {
+        TokenValidateVO token = current.token();
+        String requestId = current.requestId() + "-fo" + excludeChannelIds.size();
+        return refund(current, "channel failover")
+                .then(channelApi.distribute(DistributeRequest.builder()
+                        .tenantId(token.getTenantId())
+                        .userId(token.getUserId())
+                        .apiKeyId(token.getTokenId())
+                        .groupId(token.getGroupId())
+                        .model(model)
+                        .excludeChannelIds(excludeChannelIds)
+                        .build()))
+                .flatMap(distResp -> {
+                    if (distResp == null || !distResp.isSuccess() || distResp.getData() == null) {
+                        String reason = distResp == null ? "no response" : distResp.getMessage();
+                        return Mono.error(new RelayException(503,
+                                "渠道轮换失败, 无可用候选: " + reason));
+                    }
+                    DistributeVO next = distResp.getData();
+                    log.info("[Channel/failover] model={}, {} → {}, excluded={}",
+                            model, current.channel().getChannelId(), next.getChannelId(), excludeChannelIds);
+                    return preConsumeIfNeeded(next, token, model, estPromptTokens, estCompletionTokens, requestId)
+                            .map(preConsumeId -> new PreparedRequest(
+                                    token, next, preConsumeId, requestId,
+                                    current.moderationSanitized(), current.moderationRuleCodes()))
+                            .switchIfEmpty(Mono.just(new PreparedRequest(
+                                    token, next, null, requestId,
+                                    current.moderationSanitized(), current.moderationRuleCodes())));
+                });
     }
 
     /**

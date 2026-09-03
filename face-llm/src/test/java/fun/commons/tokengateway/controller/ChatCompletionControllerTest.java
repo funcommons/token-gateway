@@ -45,6 +45,7 @@ class ChatCompletionControllerTest {
     private MockWebServer upstreamServer;
     private ChatCompletionController controller;
     private MockModerationApi moderationApi;
+    private fun.commons.tokengateway.relay.FailoverProperties failoverProps;
     private final java.util.List<String> healthCalls = new java.util.ArrayList<>();
 
     @BeforeEach
@@ -57,6 +58,9 @@ class ChatCompletionControllerTest {
         var props = new fun.commons.tokengateway.config.GatewayProperties();
         props.setUrl(backendServer.url("/").toString().replaceAll("/$", ""));
         props.setInternalToken("test-token");
+        failoverProps = new fun.commons.tokengateway.relay.FailoverProperties();
+        // 退避压到 1ms, 轮换用例不被 1s/2s 退避拖慢
+        failoverProps.setBaseBackoffMs(1L);
         WebClient.Builder builder = WebClient.builder();
         var tokenApi = new fun.commons.tokengateway.rpc.HttpTokenApi(builder, props, new fun.commons.tokengateway.rpc.RpcInternalAuth(props));
         var channelApi = new fun.commons.tokengateway.rpc.HttpChannelApi(builder, props, new fun.commons.tokengateway.rpc.RpcInternalAuth(props));
@@ -78,7 +82,8 @@ class ChatCompletionControllerTest {
                                 new fun.commons.tokengateway.rpc.RpcInternalAuth(props)),
                         fun.commons.tokengateway.relay.TestChannelHealthReporters.recording(healthCalls)),
                 moderationApi,
-                builder);
+                builder,
+                failoverProps);
     }
 
     @AfterEach
@@ -189,6 +194,8 @@ class ChatCompletionControllerTest {
     @Test
     @DisplayName("软失败: 上游 200+错误载荷 → RelayException(429) + 渠道记失败 + 退款 (issue #1 缺口1)")
     void upstreamSoftErrorPayload() throws Exception {
+        // 本用例专测软失败识别, 关闭轮换保持单渠道语义
+        failoverProps.setEnabled(false);
         mockTokenOk();
         // PLATFORM 账本: 计费 RPC 真实发生, 才能断言 refund-vs-settle 走向
         backendServer.enqueue(new MockResponse()
@@ -249,6 +256,8 @@ class ChatCompletionControllerTest {
     @Test
     @DisplayName("上游 401 → RelayException(401) 真实状态码 (不再恒 502, issue #1 缺口3)")
     void upstream401PassesThroughRealStatus() throws Exception {
+        // 本用例专测真实状态码透传, 关闭轮换保持单渠道语义
+        failoverProps.setEnabled(false);
         mockTokenOk();
         mockDistribute("openai");
         upstreamServer.enqueue(new MockResponse()
@@ -393,6 +402,122 @@ class ChatCompletionControllerTest {
         assertThat(settleBody).isNotNull();
         assertThat(settleBody).contains("\"actualPromptTokens\":12");
         assertThat(settleBody).contains("\"actualCompletionTokens\":7");
+    }
+
+    private MockResponse jsonOk() {
+        return new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0}");
+    }
+
+    /**
+     * 路由链 RPC 按真实调用顺序入队: distribute → preConsume (moderation 走 MockApi 无 RPC).
+     * 轮换轮 (failover) 同构.
+     */
+    private void mockRoute(String channelId, String preConsumeId) {
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"channelId\":\"" + channelId + "\","
+                        + "\"baseUrl\":\"" + upstreamServer.url("/").toString().replaceAll("/$", "") + "\","
+                        + "\"apiKey\":\"sk-up\",\"protocol\":\"openai\",\"billingMode\":\"PLATFORM\"}}"));
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"success\":true,\"preConsumeId\":\"" + preConsumeId + "\"}}"));
+    }
+
+    /**
+     * 收集后端 mock 已收到的请求路径 (record-failure / refund 等上报断言用).
+     */
+    private java.util.List<String> backendPaths() {
+        java.util.List<String> paths = new java.util.ArrayList<>();
+        okhttp3.mockwebserver.RecordedRequest req;
+        try {
+            while ((req = backendServer.takeRequest(200, java.util.concurrent.TimeUnit.MILLISECONDS)) != null) {
+                paths.add(req.getPath());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return paths;
+    }
+
+    @Test
+    @DisplayName("非流式轮换: 渠道1 500 → recordFailure + refund → 渠道2 成功 (excludeChannelIds 排除)")
+    void nonStreamFailoverSucceeds() throws Exception {
+        mockTokenOk();
+        mockRoute("c1", "pc-1");
+        upstreamServer.enqueue(new MockResponse().setResponseCode(500));
+        backendServer.enqueue(jsonOk());                            // record-failure c1 (中间轮换轮)
+        backendServer.enqueue(jsonOk());                            // refund pc-1 (failover 内)
+        mockRoute("c2", "pc-2");
+        upstreamServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"id\":\"chatcmpl-failover\",\"object\":\"chat.completion\","
+                        + "\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},"
+                        + "\"finish_reason\":\"stop\"}],"
+                        + "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}"));
+        backendServer.enqueue(jsonOk());                            // settle pc-2 (fire-and-forget)
+        backendServer.enqueue(jsonOk());                            // access-log (fire-and-forget)
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", "gpt-4o");
+        body.put("messages", List.of(Map.of("role", "user", "content", "x")));
+
+        StepVerifier.create(controller.complete("Bearer sk-test", null, body))
+                .assertNext(entity -> {
+                    assertThat(entity.getStatusCode().value()).isEqualTo(200);
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> r = (Map<String, Object>) entity.getBody();
+                    assertThat(r.get("object")).isEqualTo("chat.completion");
+                })
+                .verifyComplete();
+
+        assertThat(upstreamServer.getRequestCount()).isEqualTo(2);
+        assertThat(backendPaths()).anyMatch(p -> p != null && p.contains("record-failure"));
+        // 终态成功: 健康上报记 active 渠道成功, 不再残留渠道1 失败双计
+        assertThat(healthCalls).contains("success:c2");
+    }
+
+    @Test
+    @DisplayName("流式轮换: 渠道1 未吐帧 500 → recordFailure + 渠道2 SSE 成功")
+    void streamFailoverSucceeds() {
+        mockTokenOk();
+        mockRoute("c1", "pc-1");
+        upstreamServer.enqueue(new MockResponse().setResponseCode(500));
+        backendServer.enqueue(jsonOk());                            // record-failure c1
+        backendServer.enqueue(jsonOk());                            // refund pc-1
+        mockRoute("c2", "pc-2");
+        upstreamServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_END)
+                .setBody("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
+                        + "data: [DONE]\n\n"));
+        backendServer.enqueue(jsonOk());                            // settle pc-2 (fire-and-forget)
+        backendServer.enqueue(jsonOk());                            // access-log (fire-and-forget)
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", "gpt-4o");
+        body.put("stream", true);
+        body.put("messages", List.of(Map.of("role", "user", "content", "hi")));
+
+        java.util.concurrent.atomic.AtomicReference<
+                org.springframework.http.ResponseEntity<Object>> entityRef = new java.util.concurrent.atomic.AtomicReference<>();
+        StepVerifier.create(controller.complete("Bearer sk-test", null, body))
+                .assertNext(entity -> {
+                    assertThat(entity.getStatusCode().value()).isEqualTo(200);
+                    entityRef.set(entity);
+                })
+                .verifyComplete();
+
+        @SuppressWarnings("unchecked")
+        Flux<org.springframework.http.codec.ServerSentEvent<String>> flux =
+                (Flux<org.springframework.http.codec.ServerSentEvent<String>>) entityRef.get().getBody();
+        var events = flux.filter(e -> e.data() != null && !e.data().isBlank())
+                .collectList()
+                .block(java.time.Duration.ofSeconds(10));
+        assertThat(events).anyMatch(e -> e.data().contains("hi"));
+        assertThat(upstreamServer.getRequestCount()).isEqualTo(2);
+        assertThat(backendPaths()).anyMatch(p -> p != null && p.contains("record-failure"));
     }
 
     /**

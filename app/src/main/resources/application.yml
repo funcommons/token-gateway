@@ -57,6 +57,14 @@ gateway:
   health-report:
     enabled: true
 
+  # 请求内渠道轮换 (移植 MMagiX gateway cffc1ea): 上游可重试失败 (5xx/401/429/断连) 时
+  # record-failure + refund + excludeChannelIds re-distribute + 重新预扣;
+  # enabled=false 退化为单渠道快速失败. 终态失败健康计数由 access-log 健康上报兜底.
+  failover:
+    enabled: true
+    max-attempts: 3
+    base-backoff-ms: 1000
+
   # THMP 契约面影子双跑 (22 号 S2-W1): enabled=true 后旧 distribute 与中台 resolve 并行比对,
   # 结果只埋点不执行; secret 环境变量注入 (thmp_tenants 契约租户, 禁入仓).
   thmp:

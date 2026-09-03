@@ -6,11 +6,13 @@ import fun.commons.tokengateway.contract.DistributeVO;
 import fun.commons.tokengateway.contract.ModerationAuditRequest;
 import fun.commons.tokengateway.format.AnthropicSseConverter;
 import fun.commons.tokengateway.format.FormatConverter;
+import fun.commons.tokengateway.relay.FailoverProperties;
 import fun.commons.tokengateway.relay.ModerationSupport;
 import fun.commons.tokengateway.relay.RelayOrchestrator;
 import fun.commons.tokengateway.relay.UpstreamErrorPolicy;
 import fun.commons.tokengateway.rpc.HttpModerationApi;
 import fun.commons.tokengateway.upstream.SsePassthroughInvoker;
+import fun.commons.tokengateway.upstream.UpstreamModelMapper;
 import fun.commons.tokengateway.util.ChatTokenEstimator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,8 +26,12 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Anthropic Messages 端点 (WebFlux 原生).
@@ -54,6 +60,7 @@ public class MessagesController {
     private final fun.commons.tokengateway.relay.AccessLogReporter accessLogReporter;
     private final HttpModerationApi moderationApi;
     private final WebClient.Builder webClientBuilder;
+    private final FailoverProperties failoverProps;
 
     @PostMapping("/v1/messages")
     public Mono<org.springframework.http.ResponseEntity<Object>> messages(
@@ -80,35 +87,42 @@ public class MessagesController {
             return orchestrator.prepare(apiKey, model, estPrompt, estCompletion, userContent, traceId)
                     .map(prepared -> org.springframework.http.ResponseEntity.ok()
                             .contentType(MediaType.TEXT_EVENT_STREAM)
-                            .body((Object) invokeStream(prepared, sanitize(body, prepared), traceId)));
+                            .body((Object) invokeStream(prepared, sanitize(body, prepared), traceId,
+                                    estPrompt, estCompletion)));
         }
         long startNs = System.nanoTime();
         return orchestrator.prepare(apiKey, model, estPrompt, estCompletion, userContent, traceId)
                 .flatMap(prepared -> {
                     Map<String, Object> effectiveBody = sanitize(body, prepared);
                     AtomicBoolean settled = new AtomicBoolean();
-                    return invokeNonStream(prepared.channel(), effectiveBody)
+                    // 轮换后指向当前生效的 prepared (终态退款/记录用)
+                    AtomicReference<RelayOrchestrator.PreparedRequest> active = new AtomicReference<>(prepared);
+                    List<String> failedChannels = new ArrayList<>();
+                    return invokeNonStreamWithFailover(prepared, model, effectiveBody,
+                            estPrompt, estCompletion, failedChannels, 1, active)
                             .flatMap(resp -> {
+                                // 轮换后须结算 active (新预扣); 旧 prepared 已被 failover 内 refund 退款
+                                RelayOrchestrator.PreparedRequest current = active.get();
                                 // resp 已被 invoke 转换为 Anthropic shape, 统一按 Anthropic 提取
                                 // (openAiToAnthropicResponse 会把 usage 映射成 input/output_tokens)
                                 fun.commons.tokengateway.relay.TokenUsage u =
                                         fun.commons.tokengateway.relay.TokenUsageExtractor.fromAnthropic(resp);
                                 int latency = elapsedMs(startNs);
                                 settled.set(true);
-                                orchestrator.settle(prepared, u.promptTokens(), u.completionTokens(), u.cachedTokens(),
+                                orchestrator.settle(current, u.promptTokens(), u.completionTokens(), u.cachedTokens(),
                                         latency)
                                         .flatMap(credit -> accessLogReporter.reportSuccess(
-                                                prepared, model, REQUEST_PATH,
+                                                current, model, REQUEST_PATH,
                                                 u.promptTokens(), u.completionTokens(), u.cachedTokens(),
                                                 credit, latency, traceId))
                                         .subscribe(
                                                 v -> {},
                                                 e -> log.warn("[Saga/settle+AccessLog] preConsumeId={}, err={}",
-                                                        prepared.preConsumeId(), e.getMessage()));
-                                return auditOutput(prepared, resp)
+                                                        current.preConsumeId(), e.getMessage()));
+                                return auditOutput(current, resp)
                                         // 审核失败/内容违规非渠道责任: 记访问日志但不触渠道健康 (issue #1 缺口 2)
                                         .doOnError(err -> accessLogReporter.reportErrorWithoutHealth(
-                                                prepared, model, REQUEST_PATH, 500, latency,
+                                                current, model, REQUEST_PATH, 500, latency,
                                                 traceId).subscribe(
                                                         v2 -> {},
                                                         e -> log.warn("[AccessLog] err={}", e.getMessage())))
@@ -119,12 +133,13 @@ public class MessagesController {
                                     .body((Object) resp))
                             .doOnError(err -> {
                                 if (!settled.get()) {
-                                    orchestrator.refund(prepared,
+                                    RelayOrchestrator.PreparedRequest current = active.get();
+                                    orchestrator.refund(current,
                                             "upstream failed: " + err.getMessage()).subscribe(
                                                     v -> {},
                                                     e -> log.warn("[Saga/refund] preConsumeId={}, err={}",
-                                                            prepared.preConsumeId(), e.getMessage()));
-                                    accessLogReporter.reportError(prepared, model, REQUEST_PATH,
+                                                            current.preConsumeId(), e.getMessage()));
+                                    accessLogReporter.reportError(current, model, REQUEST_PATH,
                                             UpstreamErrorPolicy.httpStatusOf(err),
                                             elapsedMs(startNs), traceId).subscribe(
                                                     v -> {},
@@ -260,8 +275,9 @@ public class MessagesController {
 
         String endpoint = isAnthropicUpstream ? ANTHROPIC_ENDPOINT : OPENAI_ENDPOINT;
         String url = channel.getBaseUrl().replaceAll("/+$", "") + endpoint;
-        Map<String, Object> upstreamBody = isAnthropicUpstream
-                ? body : formatConverter.anthropicToOpenAiBody(body);
+        // 发上游用渠道重映射后的 upstream_code, 客户端 model 仅用于路由/计费
+        Map<String, Object> upstreamBody = UpstreamModelMapper.applyModelMapping(channel,
+                isAnthropicUpstream ? body : formatConverter.anthropicToOpenAiBody(body));
 
         return webClientBuilder.build().post()
                 .uri(url)
@@ -283,61 +299,152 @@ public class MessagesController {
                 });
     }
 
+    /**
+     * 非流式上游调用 (请求内轮换): 失败时记录渠道失败并换道重试, 至多 failover.max-attempts 次.
+     * <p>active 同步指向当前生效的 prepared, 终态退款/记录由 caller 读取.
+     */
+    private Mono<Map<String, Object>> invokeNonStreamWithFailover(
+            RelayOrchestrator.PreparedRequest prepared, String model, Map<String, Object> body,
+            int estPrompt, int estCompletion, List<String> failedChannels, int attempt,
+            AtomicReference<RelayOrchestrator.PreparedRequest> active) {
+        active.set(prepared);
+        return invokeNonStream(prepared.channel(), body)
+                .onErrorResume(err -> {
+                    if (!UpstreamErrorPolicy.isRetryable(err) || !failoverProps.shouldRetry(attempt)) {
+                        // 终态失败: 健康计数由 AccessLogReporter.reportError 统一上报, 此处不重复
+                        return Mono.error(err);
+                    }
+                    // 中间轮换轮: 失败计数须在此上报 (终态 reportError 只覆盖最后一个渠道)
+                    failedChannels.add(prepared.channel().getChannelId());
+                    log.warn("[Messages] 渠道失败, 轮换重试: attempt={}, model={}, channelId={}, excluded={}, err={}",
+                            attempt, model, prepared.channel().getChannelId(), failedChannels, err.getMessage());
+                    return orchestrator.recordChannelFailure(prepared, model,
+                                    UpstreamErrorPolicy.errorCodeOf(err), err.getMessage())
+                            .then(Mono.delay(Duration.ofMillis(
+                                    failoverProps.withJitter(failoverProps.backoffMs(attempt)))))
+                            .then(orchestrator.failoverToNextChannel(prepared, model,
+                                    estPrompt, estCompletion, failedChannels))
+                            .onErrorResume(foErr -> {
+                                log.error("[Messages] 渠道轮换失败, 按原错误返回: {}", foErr.getMessage());
+                                return Mono.error(err);
+                            })
+                            .flatMap(next -> invokeNonStreamWithFailover(next, model, body,
+                                    estPrompt, estCompletion, failedChannels, attempt + 1, active));
+                });
+    }
+
     private Flux<ServerSentEvent<String>> invokeStream(
-            fun.commons.tokengateway.relay.RelayOrchestrator.PreparedRequest prepared,
-            Map<String, Object> body, String traceId) {
+            RelayOrchestrator.PreparedRequest prepared,
+            Map<String, Object> body, String traceId, int estPrompt, int estCompletion) {
         long startNs = System.nanoTime();
         String model = String.valueOf(body.getOrDefault("model", ""));
-        DistributeVO channel = prepared.channel();
-        boolean isAnthropicUpstream = channel.getProtocol() != null
-                && "anthropic".equalsIgnoreCase(channel.getProtocol());
-        fun.commons.tokengateway.relay.StreamUsageAccumulator usageAcc =
-                new fun.commons.tokengateway.relay.StreamUsageAccumulator();
-
-        Flux<ServerSentEvent<String>> upstream;
-        if (isAnthropicUpstream) {
-            body.put("stream", true);
-            upstream = sseInvoker.invokeStreamAnthropicNative(channel, body, usageAcc);
-        } else {
-            Map<String, Object> upstreamBody = withIncludeUsage(formatConverter.anthropicToOpenAiBody(body));
-            upstreamBody.put("stream", true);
-            AnthropicSseConverter converter = new AnthropicSseConverter();
-            upstream = sseInvoker.invokeStream(channel, upstreamBody, converter, usageAcc);
-        }
-        return upstream
+        List<String> failedChannels = new ArrayList<>();
+        // 各次轮换尝试共享的 "当前生效 prepared / usage 累加器"; 生命周期钩子只挂最外层, 终态时读取,
+        // 避免内层尝试的完成信号穿透外层导致重复 settle/退款
+        AtomicReference<RelayOrchestrator.PreparedRequest> active = new AtomicReference<>(prepared);
+        AtomicReference<fun.commons.tokengateway.relay.StreamUsageAccumulator> activeAcc =
+                new AtomicReference<>(new fun.commons.tokengateway.relay.StreamUsageAccumulator());
+        return streamAttempt(prepared, body, failedChannels, 1, estPrompt, estCompletion, active, activeAcc)
                 .doOnComplete(() -> {
                     int latency = elapsedMs(startNs);
+                    RelayOrchestrator.PreparedRequest current = active.get();
+                    fun.commons.tokengateway.relay.StreamUsageAccumulator usageAcc = activeAcc.get();
                     fun.commons.tokengateway.relay.TokenUsage u = usageAcc.hasUsage()
                             ? usageAcc.result() : estimateFallback(body);
-                    orchestrator.settle(prepared, u.promptTokens(), u.completionTokens(), u.cachedTokens(), latency)
-                            .flatMap(credit -> accessLogReporter.reportSuccess(prepared, model, REQUEST_PATH,
+                    orchestrator.settle(current, u.promptTokens(), u.completionTokens(), u.cachedTokens(), latency)
+                            .flatMap(credit -> accessLogReporter.reportSuccess(current, model, REQUEST_PATH,
                                     u.promptTokens(), u.completionTokens(), u.cachedTokens(), credit, latency, traceId))
                             .subscribe(
                                     v -> {},
                                     e -> log.warn("[Saga/settle+AccessLog] preConsumeId={}, err={}",
-                                            prepared.preConsumeId(), e.getMessage()));
+                                            current.preConsumeId(), e.getMessage()));
                 })
                 .doOnError(err -> {
-                    orchestrator.refund(prepared,
+                    RelayOrchestrator.PreparedRequest current = active.get();
+                    orchestrator.refund(current,
                             "upstream stream error: " + err.getMessage()).subscribe(
                                     v -> {},
                                     e -> log.warn("[Saga/refund] preConsumeId={}, err={}",
-                                            prepared.preConsumeId(), e.getMessage()));
-                    accessLogReporter.reportError(prepared, model, REQUEST_PATH,
+                                            current.preConsumeId(), e.getMessage()));
+                    accessLogReporter.reportError(current, model, REQUEST_PATH,
                             UpstreamErrorPolicy.httpStatusOf(err),
                             elapsedMs(startNs), traceId).subscribe(
                                     v -> {},
                                     e -> log.warn("[AccessLog] err={}", e.getMessage()));
                 })
                 .doOnCancel(() -> {
-                    orchestrator.refund(prepared, "client cancelled").subscribe(
+                    RelayOrchestrator.PreparedRequest current = active.get();
+                    orchestrator.refund(current, "client cancelled").subscribe(
                             v -> {},
                             e -> log.warn("[Saga/refund] preConsumeId={}, err={}",
-                                    prepared.preConsumeId(), e.getMessage()));
-                    accessLogReporter.reportError(prepared, model, REQUEST_PATH,
+                                    current.preConsumeId(), e.getMessage()));
+                    accessLogReporter.reportError(current, model, REQUEST_PATH,
                             499, elapsedMs(startNs), traceId).subscribe(
                                     v -> {},
                                     e -> log.warn("[AccessLog] err={}", e.getMessage()));
+                });
+    }
+
+    /**
+     * 单次流式尝试 (请求内轮换): 失败且未向客户端吐帧时, 记录渠道失败并换道重试;
+     * 已吐帧后失败不能重放 (Anthropic 客户端会看到两段回答), 只上报失败计数并按原错误终止.
+     */
+    private Flux<ServerSentEvent<String>> streamAttempt(
+            RelayOrchestrator.PreparedRequest prepared,
+            Map<String, Object> body, List<String> failedChannels, int attempt,
+            int estPrompt, int estCompletion,
+            AtomicReference<RelayOrchestrator.PreparedRequest> active,
+            AtomicReference<fun.commons.tokengateway.relay.StreamUsageAccumulator> activeAcc) {
+        String model = String.valueOf(body.getOrDefault("model", ""));
+        fun.commons.tokengateway.relay.StreamUsageAccumulator usageAcc =
+                new fun.commons.tokengateway.relay.StreamUsageAccumulator();
+        active.set(prepared);
+        activeAcc.set(usageAcc);
+        AtomicBoolean emitted = new AtomicBoolean();
+        DistributeVO channel = prepared.channel();
+        boolean isAnthropicUpstream = channel.getProtocol() != null
+                && "anthropic".equalsIgnoreCase(channel.getProtocol());
+
+        Flux<ServerSentEvent<String>> upstream;
+        if (isAnthropicUpstream) {
+            body.put("stream", true);
+            upstream = sseInvoker.invokeStreamAnthropicNative(channel,
+                    UpstreamModelMapper.applyModelMapping(channel, body), usageAcc);
+        } else {
+            Map<String, Object> upstreamBody = UpstreamModelMapper.applyModelMapping(channel,
+                    withIncludeUsage(formatConverter.anthropicToOpenAiBody(body)));
+            upstreamBody.put("stream", true);
+            AnthropicSseConverter converter = new AnthropicSseConverter();
+            upstream = sseInvoker.invokeStream(channel, upstreamBody, converter, usageAcc);
+        }
+        return upstream
+                .doOnNext(e -> emitted.set(true))
+                .onErrorResume(err -> {
+                    if (emitted.get()) {
+                        // 已吐帧不能重放换道 (Anthropic 客户端会看到两段回答);
+                        // 终态健康计数由 AccessLogReporter.reportError 统一上报, 此处不重复
+                        return Flux.error(err);
+                    }
+                    if (!UpstreamErrorPolicy.isRetryable(err) || !failoverProps.shouldRetry(attempt)) {
+                        // 终态失败: 健康计数由 AccessLogReporter.reportError 统一上报, 此处不重复
+                        return Flux.error(err);
+                    }
+                    // 中间轮换轮: 失败计数须在此上报 (终态 reportError 只覆盖最后一个渠道)
+                    failedChannels.add(channel.getChannelId());
+                    log.warn("[Messages] 渠道失败, 轮换重试: attempt={}, model={}, channelId={}, excluded={}, err={}",
+                            attempt, model, channel.getChannelId(), failedChannels, err.getMessage());
+                    return orchestrator.recordChannelFailure(prepared, model,
+                                    UpstreamErrorPolicy.errorCodeOf(err), err.getMessage())
+                            .then(Mono.delay(Duration.ofMillis(
+                                    failoverProps.withJitter(failoverProps.backoffMs(attempt)))))
+                            .then(orchestrator.failoverToNextChannel(prepared, model,
+                                    estPrompt, estCompletion, failedChannels))
+                            .onErrorResume(foErr -> {
+                                log.error("[Messages] 渠道轮换失败, 按原错误返回: {}", foErr.getMessage());
+                                return Mono.error(err);
+                            })
+                            .flatMapMany(next -> streamAttempt(next, body, failedChannels,
+                                    attempt + 1, estPrompt, estCompletion, active, activeAcc));
                 });
     }
 
