@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-04
+
+### 新增
+
+- **请求内渠道轮换（failover）**（移植 MMagiX cffc1ea，face-llm）：
+  - 渠道可重试失败（网络故障/上游 5xx）自动退款 → 排除已失败渠道重新 distribute → 重新预扣重试；`gateway.failover.enabled/max-attempts/base-backoff-ms` 可配，退避 `base*2^(n-1)` ±20% 抖动，`enabled=false` 退化为单渠道快速失败
+  - 流式请求在吐帧前轮换（已吐帧不重放，防两段回答拼接）；非流式补齐客户端取消退款
+  - 渠道 `model_mapping` 重映射配置生效（此前被完全忽略，配置重映射的渠道会收到上游不存在的模型名）
+  - 健康上报不双计：中间轮换轮显式 record-failure，轮换中止时旧渠道失败由终态访问日志恰好计一次（防单渠道模型组加速误封）
+
 ### 修复
 
 - **face-llm 渠道健康上报三缺口**（issue #1，新增 `UpstreamErrorPolicy`，口径对齐 MMagiX gateway）：

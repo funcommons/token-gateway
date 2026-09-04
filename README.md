@@ -52,8 +52,8 @@ token-gateway/
 前置：后端能力面服务（如 MMagiX 单体）已在 9400 端口启动；Redis 可达（默认 localhost:6379）。
 
 ```bash
-mvn package                                                   # 263 个单测
-java -jar app/target/token-gateway-app-0.1.0.jar              # 监听 9401
+mvn verify                                                    # 369 个单测 + 覆盖率门禁
+java -jar app/target/token-gateway-app-0.2.0.jar              # 监听 9401
 ```
 
 **全链路冒烟**（LLM 面 + 任务面正负路径 + notify + 对账，11 步 28 断言——notify 验签双侧设钥时满配 29，五进程零真实依赖）：
