@@ -447,7 +447,6 @@ class ChatCompletionControllerTest {
         mockTokenOk();
         mockRoute("c1", "pc-1");
         upstreamServer.enqueue(new MockResponse().setResponseCode(500));
-        backendServer.enqueue(jsonOk());                            // record-failure c1 (中间轮换轮)
         backendServer.enqueue(jsonOk());                            // refund pc-1 (failover 内)
         mockRoute("c2", "pc-2");
         upstreamServer.enqueue(new MockResponse()
@@ -456,6 +455,7 @@ class ChatCompletionControllerTest {
                         + "\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},"
                         + "\"finish_reason\":\"stop\"}],"
                         + "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}"));
+        backendServer.enqueue(jsonOk());                            // record-failure c1 (换道成功后补记)
         backendServer.enqueue(jsonOk());                            // settle pc-2 (fire-and-forget)
         backendServer.enqueue(jsonOk());                            // access-log (fire-and-forget)
 
@@ -484,14 +484,14 @@ class ChatCompletionControllerTest {
         mockTokenOk();
         mockRoute("c1", "pc-1");
         upstreamServer.enqueue(new MockResponse().setResponseCode(500));
-        backendServer.enqueue(jsonOk());                            // record-failure c1
-        backendServer.enqueue(jsonOk());                            // refund pc-1
+        backendServer.enqueue(jsonOk());                            // refund pc-1 (failover 内)
         mockRoute("c2", "pc-2");
         upstreamServer.enqueue(new MockResponse()
                 .setHeader("Content-Type", "text/event-stream")
                 .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_END)
                 .setBody("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
                         + "data: [DONE]\n\n"));
+        backendServer.enqueue(jsonOk());                            // record-failure c1 (换道成功后补记)
         backendServer.enqueue(jsonOk());                            // settle pc-2 (fire-and-forget)
         backendServer.enqueue(jsonOk());                            // access-log (fire-and-forget)
 
@@ -518,6 +518,33 @@ class ChatCompletionControllerTest {
         assertThat(events).anyMatch(e -> e.data().contains("hi"));
         assertThat(upstreamServer.getRequestCount()).isEqualTo(2);
         assertThat(backendPaths()).anyMatch(p -> p != null && p.contains("record-failure"));
+    }
+
+    @Test
+    @DisplayName("轮换无候选 (单渠道): 500 可重试但换道中止 → 不中间上报, 终态 reportError 恰计 1 次 (防双计)")
+    void nonStreamFailoverNoCandidateRecordsSingleFailure() throws Exception {
+        mockTokenOk();
+        mockRoute("c1", "pc-1");
+        upstreamServer.enqueue(new MockResponse().setResponseCode(500));
+        backendServer.enqueue(jsonOk());                            // refund pc-1 (failover 内)
+        backendServer.enqueue(new MockResponse()                    // distribute: 无可用渠道 (业务失败信封)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":10400,\"message\":\"无可用渠道\",\"data\":null}"));
+        backendServer.enqueue(jsonOk());                            // 终态 refund pc-1 (幂等)
+        backendServer.enqueue(jsonOk());                            // access-log (fire-and-forget)
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", "gpt-4o");
+        body.put("messages", List.of(Map.of("role", "user", "content", "x")));
+
+        StepVerifier.create(controller.complete("Bearer sk-test", null, body))
+                .verifyErrorMatches(e -> e instanceof RelayException re && re.getHttpStatus() == 500);
+
+        waitForHealthCall();
+        assertThat(upstreamServer.getRequestCount()).isEqualTo(1);
+        // 轮换中止时不再中间上报 record-failure, 该失败只由终态 reportError 计一次
+        assertThat(backendPaths()).noneMatch(p -> p != null && p.contains("record-failure"));
+        assertThat(healthCalls.stream().filter(c -> c.startsWith("failure:c1")).count()).isEqualTo(1L);
     }
 
     /**

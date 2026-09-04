@@ -39,6 +39,7 @@ class MessagesControllerTest {
     private MockWebServer upstream;
     private MessagesController controller;
     private fun.commons.tokengateway.relay.FailoverProperties failoverProps;
+    private final java.util.List<String> healthCalls = new java.util.ArrayList<>();
 
     @BeforeEach
     void setUp() throws Exception {
@@ -65,7 +66,7 @@ class MessagesControllerTest {
                 new fun.commons.tokengateway.relay.AccessLogReporter(
                         new fun.commons.tokengateway.rpc.HttpAccessLogApi(b, props,
                                 new RpcInternalAuth(props)),
-                        fun.commons.tokengateway.relay.TestChannelHealthReporters.disabled()),
+                        fun.commons.tokengateway.relay.TestChannelHealthReporters.recording(healthCalls)),
                 new fun.commons.tokengateway.rpc.HttpModerationApi(b, props, new RpcInternalAuth(props)),
                 b,
                 failoverProps);
@@ -328,9 +329,9 @@ class MessagesControllerTest {
         mockTokenOk();
         mockRoute("c1", "pc-1", true);
         upstream.enqueue(new MockResponse().setResponseCode(500));
-        backend.enqueue(jsonOk());                                  // record-failure c1
-        backend.enqueue(jsonOk());                                  // refund pc-1
+        backend.enqueue(jsonOk());                                  // refund pc-1 (failover 内)
         mockRoute("c2", "pc-2", false);                       // 轮换 re-distribute + preConsume
+        backend.enqueue(jsonOk());                                  // record-failure c1 (换道成功后补记)
         mockAuditPass();                                      // 成功后内联输出审查
         backend.enqueue(jsonOk());                                  // settle pc-2 (fire-and-forget)
         backend.enqueue(jsonOk());                                  // access-log (fire-and-forget)
@@ -378,9 +379,9 @@ class MessagesControllerTest {
         mockTokenOk();
         mockRoute("c1", "pc-1", true);
         upstream.enqueue(new MockResponse().setResponseCode(500));
-        backend.enqueue(jsonOk());                                  // record-failure c1
-        backend.enqueue(jsonOk());                                  // refund pc-1
+        backend.enqueue(jsonOk());                                  // refund pc-1 (failover 内)
         mockRoute("c2", "pc-2", false);
+        backend.enqueue(jsonOk());                                  // record-failure c1 (换道成功后补记)
         upstream.enqueue(new MockResponse()
                 .setHeader("Content-Type", "text/event-stream")
                 .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_END)
@@ -409,5 +410,37 @@ class MessagesControllerTest {
         assertThat(events).anyMatch(e -> e.data().contains("hello"));
         assertThat(upstream.getRequestCount()).isEqualTo(2);
         assertThat(backendPaths()).anyMatch(p -> p != null && p.contains("record-failure"));
+    }
+
+    /** fire-and-forget 健康上报异步完成, 轮询等待 (上限 5s). */
+    private void waitForHealthCall() throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (healthCalls.isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50);
+        }
+    }
+
+    @Test
+    @DisplayName("轮换无候选 (单渠道): 500 可重试但换道中止 → 不中间上报, 终态 reportError 恰计 1 次 (防双计)")
+    void nonStreamFailoverNoCandidateRecordsSingleFailure() throws Exception {
+        mockTokenOk();
+        mockRoute("c1", "pc-1", true);
+        upstream.enqueue(new MockResponse().setResponseCode(500));
+        backend.enqueue(jsonOk());                                  // refund pc-1 (failover 内)
+        backend.enqueue(new MockResponse()                          // distribute: 无可用渠道 (业务失败信封)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":10400,\"message\":\"无可用渠道\",\"data\":null}"));
+        backend.enqueue(jsonOk());                                  // 终态 refund pc-1 (幂等)
+        backend.enqueue(jsonOk());                                  // access-log (fire-and-forget)
+
+        StepVerifier.create((Mono<?>) controller.messages(null, "sk-ant-x", anthropicBody()))
+                .verifyErrorMatches(e -> e instanceof RelayException
+                        && ((RelayException) e).getHttpStatus() == 500);
+
+        waitForHealthCall();
+        assertThat(upstream.getRequestCount()).isEqualTo(1);
+        // 轮换中止时不再中间上报 record-failure, 该失败只由终态 reportError 计一次
+        assertThat(backendPaths()).noneMatch(p -> p != null && p.contains("record-failure"));
+        assertThat(healthCalls.stream().filter(c -> c.startsWith("failure:c1")).count()).isEqualTo(1L);
     }
 }

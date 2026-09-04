@@ -314,22 +314,23 @@ public class MessagesController {
                         // 终态失败: 健康计数由 AccessLogReporter.reportError 统一上报, 此处不重复
                         return Mono.error(err);
                     }
-                    // 中间轮换轮: 失败计数须在此上报 (终态 reportError 只覆盖最后一个渠道)
+                    // 先换道, 换道成功才对旧渠道记一次失败: 轮换中止 (如无候选) 时该失败
+                    // 由终态 AccessLogReporter.reportError 恰好计一次, 防中间轮 + 终态双计
                     failedChannels.add(prepared.channel().getChannelId());
                     log.warn("[Messages] 渠道失败, 轮换重试: attempt={}, model={}, channelId={}, excluded={}, err={}",
                             attempt, model, prepared.channel().getChannelId(), failedChannels, err.getMessage());
-                    return orchestrator.recordChannelFailure(prepared, model,
-                                    UpstreamErrorPolicy.errorCodeOf(err), err.getMessage())
-                            .then(Mono.delay(Duration.ofMillis(
-                                    failoverProps.withJitter(failoverProps.backoffMs(attempt)))))
-                            .then(orchestrator.failoverToNextChannel(prepared, model,
-                                    estPrompt, estCompletion, failedChannels))
+                    return orchestrator.failoverToNextChannel(prepared, model,
+                                    estPrompt, estCompletion, failedChannels)
                             .onErrorResume(foErr -> {
                                 log.error("[Messages] 渠道轮换失败, 按原错误返回: {}", foErr.getMessage());
                                 return Mono.error(err);
                             })
-                            .flatMap(next -> invokeNonStreamWithFailover(next, model, body,
-                                    estPrompt, estCompletion, failedChannels, attempt + 1, active));
+                            .flatMap(next -> orchestrator.recordChannelFailure(prepared, model,
+                                            UpstreamErrorPolicy.errorCodeOf(err), err.getMessage())
+                                    .then(Mono.delay(Duration.ofMillis(
+                                            failoverProps.withJitter(failoverProps.backoffMs(attempt)))))
+                                    .then(invokeNonStreamWithFailover(next, model, body,
+                                            estPrompt, estCompletion, failedChannels, attempt + 1, active)));
                 });
     }
 
@@ -429,22 +430,23 @@ public class MessagesController {
                         // 终态失败: 健康计数由 AccessLogReporter.reportError 统一上报, 此处不重复
                         return Flux.error(err);
                     }
-                    // 中间轮换轮: 失败计数须在此上报 (终态 reportError 只覆盖最后一个渠道)
+                    // 先换道, 换道成功才对旧渠道记一次失败: 轮换中止 (如无候选) 时该失败
+                    // 由终态 AccessLogReporter.reportError 恰好计一次, 防中间轮 + 终态双计
                     failedChannels.add(channel.getChannelId());
                     log.warn("[Messages] 渠道失败, 轮换重试: attempt={}, model={}, channelId={}, excluded={}, err={}",
                             attempt, model, channel.getChannelId(), failedChannels, err.getMessage());
-                    return orchestrator.recordChannelFailure(prepared, model,
-                                    UpstreamErrorPolicy.errorCodeOf(err), err.getMessage())
-                            .then(Mono.delay(Duration.ofMillis(
-                                    failoverProps.withJitter(failoverProps.backoffMs(attempt)))))
-                            .then(orchestrator.failoverToNextChannel(prepared, model,
-                                    estPrompt, estCompletion, failedChannels))
+                    return orchestrator.failoverToNextChannel(prepared, model,
+                                    estPrompt, estCompletion, failedChannels)
                             .onErrorResume(foErr -> {
                                 log.error("[Messages] 渠道轮换失败, 按原错误返回: {}", foErr.getMessage());
                                 return Mono.error(err);
                             })
-                            .flatMapMany(next -> streamAttempt(next, body, failedChannels,
-                                    attempt + 1, estPrompt, estCompletion, active, activeAcc));
+                            .flatMapMany(next -> orchestrator.recordChannelFailure(prepared, model,
+                                            UpstreamErrorPolicy.errorCodeOf(err), err.getMessage())
+                                    .then(Mono.delay(Duration.ofMillis(
+                                            failoverProps.withJitter(failoverProps.backoffMs(attempt)))))
+                                    .thenMany(streamAttempt(next, body, failedChannels,
+                                            attempt + 1, estPrompt, estCompletion, active, activeAcc)));
                 });
     }
 

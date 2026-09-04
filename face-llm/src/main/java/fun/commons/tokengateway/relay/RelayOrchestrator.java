@@ -315,7 +315,8 @@ public class RelayOrchestrator {
 
     /**
      * 请求内渠道轮换: 退掉当前预扣 → 排除已失败渠道重新路由 → 为新渠道重新预扣.
-     * <p>调用方需先 {@link #recordChannelFailure} 上报失败 (含亲和清除), 再调此方法.
+     * <p>调用方在换道成功后调 {@link #recordChannelFailure} 补记旧渠道失败 (含亲和清除):
+     * 轮换中止 (如无候选) 时旧渠道仅由终态 AccessLogReporter.reportError 计一次, 防双计.
      * <p>新 requestId 追加 -foN 后缀, 避免与原预扣的幂等键冲突.
      */
     public Mono<PreparedRequest> failoverToNextChannel(PreparedRequest current, String model,
