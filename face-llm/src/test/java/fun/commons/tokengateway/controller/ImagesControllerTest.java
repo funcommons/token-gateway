@@ -45,24 +45,19 @@ class ImagesControllerTest {
         props.setUrl(backendServer.url("/").toString().replaceAll("/$", ""));
         props.setInternalToken("test-token");
         WebClient.Builder builder = WebClient.builder();
-        var tokenApi = new fun.commons.tokengateway.rpc.HttpTokenApi(builder, props,
-                new fun.commons.tokengateway.rpc.RpcInternalAuth(props));
-        var channelApi = new fun.commons.tokengateway.rpc.HttpChannelApi(builder, props,
-                new fun.commons.tokengateway.rpc.RpcInternalAuth(props));
+        var tokenApi = new fun.commons.tokengateway.rpc.HttpTokenApi(builder, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props));
+        var channelApi = new fun.commons.tokengateway.rpc.HttpChannelApi(builder, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props));
         var orchestrator = new fun.commons.tokengateway.relay.RelayOrchestrator(
                 tokenApi, channelApi,
-                new fun.commons.tokengateway.rpc.HttpBillingApi(builder, props,
-                        new fun.commons.tokengateway.rpc.RpcInternalAuth(props)),
+                new fun.commons.tokengateway.rpc.HttpBillingApi(builder, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props)),
                         new fun.commons.tokengateway.moderation.ModerationGate(
-                        new fun.commons.tokengateway.rpc.HttpModerationApi(builder, props,
-                        new fun.commons.tokengateway.rpc.RpcInternalAuth(props))),
+                        new fun.commons.tokengateway.rpc.HttpModerationApi(builder, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props), new fun.commons.tokengateway.spi.config.TokenGatewayProperties())),
                 new fun.commons.tokengateway.thmp.ThmpShadow.Noop(),
                 new fun.commons.tokengateway.thmp.ThmpCutover.Noop());
         controller = new ImagesController(
                 orchestrator,
                 new fun.commons.tokengateway.relay.AccessLogReporter(
-                        new fun.commons.tokengateway.rpc.HttpAccessLogApi(builder, props,
-                                new fun.commons.tokengateway.rpc.RpcInternalAuth(props)),
+                        new fun.commons.tokengateway.rpc.HttpAccessLogApi(builder, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props)),
                         fun.commons.tokengateway.relay.TestChannelHealthReporters.disabled()),
                 builder);
     }

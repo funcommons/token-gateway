@@ -62,14 +62,13 @@ class ChatCompletionControllerTest {
         // 退避压到 1ms, 轮换用例不被 1s/2s 退避拖慢
         failoverProps.setBaseBackoffMs(1L);
         WebClient.Builder builder = WebClient.builder();
-        var tokenApi = new fun.commons.tokengateway.rpc.HttpTokenApi(builder, props, new fun.commons.tokengateway.rpc.RpcInternalAuth(props));
-        var channelApi = new fun.commons.tokengateway.rpc.HttpChannelApi(builder, props, new fun.commons.tokengateway.rpc.RpcInternalAuth(props));
+        var tokenApi = new fun.commons.tokengateway.rpc.HttpTokenApi(builder, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props));
+        var channelApi = new fun.commons.tokengateway.rpc.HttpChannelApi(builder, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props));
         moderationApi = new MockModerationApi();
         var moderationGate = new ModerationGate(moderationApi);
         var orchestrator = new fun.commons.tokengateway.relay.RelayOrchestrator(
                 tokenApi, channelApi,
-                new fun.commons.tokengateway.rpc.HttpBillingApi(builder, props,
-                        new fun.commons.tokengateway.rpc.RpcInternalAuth(props)),
+                new fun.commons.tokengateway.rpc.HttpBillingApi(builder, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props)),
                 moderationGate,
                 new fun.commons.tokengateway.thmp.ThmpShadow.Noop(),
                 new fun.commons.tokengateway.thmp.ThmpCutover.Noop());
@@ -78,8 +77,7 @@ class ChatCompletionControllerTest {
                 new fun.commons.tokengateway.upstream.SsePassthroughInvoker(builder),
                 new fun.commons.tokengateway.format.FormatConverter(),
                 new fun.commons.tokengateway.relay.AccessLogReporter(
-                        new fun.commons.tokengateway.rpc.HttpAccessLogApi(builder, props,
-                                new fun.commons.tokengateway.rpc.RpcInternalAuth(props)),
+                        new fun.commons.tokengateway.rpc.HttpAccessLogApi(builder, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props)),
                         fun.commons.tokengateway.relay.TestChannelHealthReporters.recording(healthCalls)),
                 moderationApi,
                 builder,
@@ -308,6 +306,40 @@ class ChatCompletionControllerTest {
     }
 
     @Test
+    @DisplayName("G6: 审核 BLOCK 不触发渠道轮换 (轮换开启, 命中审核不得换道重试)")
+    void moderationBlockDoesNotFailover() throws Exception {
+        // 轮换开启 (setUp 默认 enabled=true, max-attempts=3); BLOCK 发生在 prepare 阶段,
+        // 必须直接失败而非换道重试
+        mockTokenOk();
+        mockDistribute("openai");
+        moderationApi.setOutcome(ModerationOutcome.block(List.of("sensitive_word")));
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", "gpt-4o");
+        body.put("messages", List.of(Map.of("role", "user", "content", "违禁内容")));
+
+        StepVerifier.create((Mono<?>) controller.complete("Bearer sk-test", null, body))
+                .verifyErrorMatches(e -> e instanceof RelayException
+                        && ((RelayException) e).getHttpStatus() == 400);
+
+        // 不轮换铁律: 上游零调用; 后端无 record-failure / 二次 distribute / refund
+        assertThat(upstreamServer.getRequestCount()).isZero();
+        long deadline = System.currentTimeMillis() + 2000;
+        java.util.List<String> paths = new java.util.ArrayList<>();
+        while (System.currentTimeMillis() < deadline) {
+            var req = backendServer.takeRequest(100, java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (req == null) {
+                break;
+            }
+            paths.add(req.getPath());
+        }
+        assertThat(paths).noneMatch(p -> p != null && p.contains("record-failure"));
+        assertThat(paths).noneMatch(p -> p != null && p.contains("refund"));
+        assertThat(paths.size()).as("仅 validate + distribute + preConsume: %s", paths)
+                .isLessThanOrEqualTo(3);
+    }
+
+    @Test
     @DisplayName("moderation MASK → 替换最后 user message content 转发上游")
     void moderationMaskReplacesUserMessage() {
         mockTokenOk();
@@ -473,9 +505,36 @@ class ChatCompletionControllerTest {
                 .verifyComplete();
 
         assertThat(upstreamServer.getRequestCount()).isEqualTo(2);
-        assertThat(backendPaths()).anyMatch(p -> p != null && p.contains("record-failure"));
+        // 收集后端全部请求 (保留 body, 供 settle attempts 断言)
+        java.util.List<String> paths = new java.util.ArrayList<>();
+        String settleBody = null;
+        long deadline = System.currentTimeMillis() + 5000;
+        while (System.currentTimeMillis() < deadline) {
+            okhttp3.mockwebserver.RecordedRequest req =
+                    backendServer.takeRequest(100, java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (req == null) {
+                if (paths.size() >= 4) {
+                    break;
+                }
+                continue;
+            }
+            paths.add(req.getPath());
+            if (req.getPath().contains("settle")) {
+                settleBody = req.getBody().readUtf8();
+            }
+        }
+        assertThat(paths).anyMatch(p -> p != null && p.contains("record-failure"));
         // 终态成功: 健康上报记 active 渠道成功, 不再残留渠道1 失败双计
         assertThat(healthCalls).contains("success:c2");
+
+        // G4: settle 携带失败尝试明细 —— 1 笔 LOSS (c1, HTTP_500, 500 未扣量 billed=false);
+        // MAIN 即本次 settle 本体, 能力面据 attempts 记路由损耗 (毛利报表 §11.7)
+        assertThat(settleBody).as("settle 应发出").isNotNull();
+        assertThat(settleBody)
+                .contains("\"sequence\":1")
+                .contains("\"channelId\":\"c1\"")
+                .contains("\"errorClass\":\"HTTP_500\"")
+                .contains("\"billed\":false");
     }
 
     @Test
@@ -556,8 +615,9 @@ class ChatCompletionControllerTest {
         private ModerationOutcome outcome = ModerationOutcome.pass(null);
 
         MockModerationApi() {
-            super(WebClient.builder(), new fun.commons.tokengateway.config.GatewayProperties(),
-                    new RpcInternalAuth(new fun.commons.tokengateway.config.GatewayProperties()));
+            super(WebClient.builder(),
+                    new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), new fun.commons.tokengateway.config.GatewayProperties()),
+                    new RpcInternalAuth(new fun.commons.tokengateway.config.GatewayProperties()), new fun.commons.tokengateway.spi.config.TokenGatewayProperties());
         }
 
         void setOutcome(ModerationOutcome outcome) {

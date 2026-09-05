@@ -96,9 +96,12 @@ class TaskRelayOrchestratorTest {
         props.getTask().setResourceSignKey("test-sign-key");
 
         orchestrator = new TaskRelayOrchestrator(
-                new HttpTokenApi(b, gwProps, auth),
-                new HttpChannelApi(b, gwProps, auth),
-                new TaskBillingSaga(new HttpBillingApi(b, gwProps, auth), alwaysFirst),
+                new HttpTokenApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), gwProps), auth),
+                new HttpChannelApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), gwProps), auth),
+                new fun.commons.tokengateway.rpc.AdapterSelector(new fun.commons.tokengateway.spi.config.TokenGatewayProperties()),
+                new fun.commons.tokengateway.rpc.TokenRouteClient(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), gwProps), auth,
+                        new fun.commons.tokengateway.spi.config.TokenGatewayProperties()),
+                new TaskBillingSaga(new HttpBillingApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), gwProps), auth), alwaysFirst),
                 lotaskClient, cipher, mappingStore, metaStore,
                 new ResourceUrlConverter(new ResourceSigner(props)), props);
         this.metaStore = metaStore;

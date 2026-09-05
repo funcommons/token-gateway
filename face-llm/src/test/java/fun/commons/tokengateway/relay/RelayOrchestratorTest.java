@@ -42,10 +42,10 @@ class RelayOrchestratorTest {
         props.setUrl(backend.url("/").toString().replaceAll("/$", ""));
         WebClient.Builder b = WebClient.builder();
         orchestrator = new RelayOrchestrator(
-                new HttpTokenApi(b, props, new RpcInternalAuth(props)),
-                new HttpChannelApi(b, props, new RpcInternalAuth(props)),
-                new fun.commons.tokengateway.rpc.HttpBillingApi(b, props, new RpcInternalAuth(props)),
-                new ModerationGate(new fun.commons.tokengateway.rpc.HttpModerationApi(b, props, new RpcInternalAuth(props))),
+                new HttpTokenApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props)),
+                new HttpChannelApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props)),
+                new fun.commons.tokengateway.rpc.HttpBillingApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props)),
+                new ModerationGate(new fun.commons.tokengateway.rpc.HttpModerationApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props), new fun.commons.tokengateway.spi.config.TokenGatewayProperties())),
                 new fun.commons.tokengateway.thmp.ThmpShadow.Noop(),
                 new fun.commons.tokengateway.thmp.ThmpCutover.Noop());
     }

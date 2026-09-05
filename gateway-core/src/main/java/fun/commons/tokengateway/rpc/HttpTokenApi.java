@@ -1,6 +1,5 @@
 package fun.commons.tokengateway.rpc;
 
-import fun.commons.tokengateway.config.GatewayProperties;
 import fun.commons.tokengateway.contract.TokenValidateRequest;
 import fun.commons.tokengateway.contract.TokenValidateVO;
 import fun.commons.tokengateway.framework.ApiResponse;
@@ -27,7 +26,7 @@ public class HttpTokenApi {
             new ParameterizedTypeReference<>() {};
 
     private final WebClient.Builder webClientBuilder;
-    private final GatewayProperties props;
+    private final CapabilityEndpoints endpoints;
     private final RpcInternalAuth internalAuth;
 
     /**
@@ -38,12 +37,12 @@ public class HttpTokenApi {
     public Mono<ApiResponse<TokenValidateVO>> validate(TokenValidateRequest request) {
         WebClient.RequestHeadersSpec<?> req =
                 webClientBuilder.build().post()
-                        .uri(props.getUrl() + "/api/v1/internal/tokens/validate")
+                        .uri(endpoints.tokenValidate().getUrl() + "/api/v1/internal/tokens/validate")
                         .bodyValue(request);
-        internalAuth.attachTo(req);
+        internalAuth.attachTo(req, endpoints.tokenValidate());
         return req.retrieve()
                 .bodyToMono(VALIDATE_TYPE)
-                .timeout(props.getTimeout())
+                .timeout(endpoints.tokenValidate().getTimeout())
                 .doOnError(e -> log.error("[HttpTokenApi] validate RPC 失败: apiKey={}, err={}",
                         request != null ? request.getApiKey() : null, e.getMessage()))
                 .onErrorResume(e -> Mono.just(ApiResponse.fail(

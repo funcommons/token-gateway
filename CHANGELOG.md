@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-05
+
+### 新增（TokenGo 组件化改造 G1-G6）
+
+- **G1 SPI 装配收尾**（issue #2）：能力面寻址收口到 `token-gateway.*` 七面配置（`CapabilityEndpoints`）——每面独立 url/auth（jwt/key/none 三式，`RpcInternalAuth` 面感知化）/超时；`TokenGatewayProperties` 绑定收口到 core（`SpiPropertiesConfiguration`）；**兼容窗口**：面 url 未配置回退 `gateway.backend.*`，存量部署零配置迁移
+- **G2 tokengo 适配器**（issue #3）：`AdapterSelector` 启动期校验 adapter 单选（非法值 fail-fast）；`TokenRouteClient`（resolve 选路 + report 三态回报，data_json 契约字段映射 DistributeVO）；adapter=tokengo|openapi 时 route 面走 token-route，mmagix/tokenhub 路径零触碰
+- **G3 鉴权 env 化**（issue #4）：app yml baked JWT 与 THMP dev 口令全部移除（env 注入，`GATEWAY_INTERNAL_TOKEN` / `THMP_CONTRACT_KEY_PASSPHRASE`）；双值窗轮转沿用 lotask webhook 主/备钥 grace 验签（`tenant-secret-previous`）；新增 `BakedCredentialScanTest`（仓库配置禁 baked JWT/明文密钥的 grep 断言）
+- **G4 settle 携带 attempt 明细**（issue #5，M1 向后兼容增量）：`SettleRequest.attempts` 可选字段（sequence/channelId/model/errorClass/billed/用量），软失败识别升级 `SoftUpstreamException`（billed=true 供能力面记 LOSS 路由损耗）；轮换 controller 累积失败尝试，settle 携带 1 MAIN + N LOSS
+- **G5 任务面接 token-route**（issue #6）：`TaskRelayOrchestrator` adapter=tokengo|openapi 时 route 走 token-route resolve；路由快照随 submit 下发 Worker 链路不变
+- **G6 ModerationGate fail 策略可配**（issue #7）：`token-gateway.moderation.fail-open` 可配（缺省 true 现网口径；fail-closed 时审核面故障按 BLOCK 拦截不误放）；回归用例：审核 BLOCK 不触发渠道轮换（上游零调用、无 record-failure/refund）
+
 ## [0.3.0] - 2026-09-05
 
 ### 新增

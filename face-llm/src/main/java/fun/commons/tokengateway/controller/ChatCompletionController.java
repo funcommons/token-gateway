@@ -8,6 +8,7 @@ import fun.commons.tokengateway.format.FormatConverter;
 import fun.commons.tokengateway.format.OpenAiSseConverter;
 import fun.commons.tokengateway.relay.FailoverProperties;
 import fun.commons.tokengateway.relay.ModerationSupport;
+import fun.commons.tokengateway.contract.SettleRequest;
 import fun.commons.tokengateway.relay.RelayOrchestrator;
 import fun.commons.tokengateway.relay.UpstreamErrorPolicy;
 import fun.commons.tokengateway.rpc.HttpModerationApi;
@@ -91,8 +92,9 @@ public class ChatCompletionController {
                     // 轮换后指向当前生效的 prepared (终态退款/记录用)
                     AtomicReference<RelayOrchestrator.PreparedRequest> active = new AtomicReference<>(prepared);
                     List<String> failedChannels = new ArrayList<>();
+                    List<SettleRequest.AttemptDetail> lossAttempts = new ArrayList<>();
                     return invokeNonStreamWithFailover(prepared, model, effectiveBody,
-                            estPrompt, estCompletion, failedChannels, 1, active)
+                            estPrompt, estCompletion, failedChannels, 1, active, lossAttempts)
                             .flatMap(resp -> {
                                 // 修复 P0: 轮换后须结算 active (新预扣); 旧 prepared 已被
                                 // failover 内 refund 退款, 用它会漏结算新预扣 (PENDING 挂账 + 用户白嫖)
@@ -104,7 +106,7 @@ public class ChatCompletionController {
                                 int latency = elapsedMs(startNs);
                                 settled.set(true);
                                 orchestrator.settle(current, u.promptTokens(), u.completionTokens(), u.cachedTokens(),
-                                        latency)
+                                        latency, lossAttempts)
                                         .flatMap(credit -> accessLogReporter.reportSuccess(
                                                 current, model, REQUEST_PATH,
                                                 u.promptTokens(), u.completionTokens(), u.cachedTokens(),
@@ -231,13 +233,14 @@ public class ChatCompletionController {
         long startNs = System.nanoTime();
         String model = String.valueOf(body.getOrDefault("model", ""));
         List<String> failedChannels = new ArrayList<>();
+        List<SettleRequest.AttemptDetail> lossAttempts = new ArrayList<>();
         // 各次轮换尝试共享的 "当前生效 prepared / usage 累加器"; 生命周期钩子只挂最外层, 终态时读取,
         // 避免内层尝试的完成信号穿透外层导致重复 settle/退款
         AtomicReference<RelayOrchestrator.PreparedRequest> active =
                 new AtomicReference<>(prepared);
         AtomicReference<fun.commons.tokengateway.relay.StreamUsageAccumulator> activeAcc =
                 new AtomicReference<>(new fun.commons.tokengateway.relay.StreamUsageAccumulator());
-        return streamAttempt(prepared, body, failedChannels, 1, estPrompt, estCompletion, active, activeAcc)
+        return streamAttempt(prepared, body, failedChannels, 1, estPrompt, estCompletion, active, activeAcc, lossAttempts)
                 .doOnComplete(() -> {
                     int latency = elapsedMs(startNs);
                     RelayOrchestrator.PreparedRequest current = active.get();
@@ -247,7 +250,7 @@ public class ChatCompletionController {
                     log.info("[ChatCompletion/stream] traceId={}, model={}, hasUsage={}, prompt={}, completion={}, cached={}",
                             traceId, model, usageAcc.hasUsage(),
                             u.promptTokens(), u.completionTokens(), u.cachedTokens());
-                    orchestrator.settle(current, u.promptTokens(), u.completionTokens(), u.cachedTokens(), latency)
+                    orchestrator.settle(current, u.promptTokens(), u.completionTokens(), u.cachedTokens(), latency, lossAttempts)
                             .flatMap(credit -> accessLogReporter.reportSuccess(current, model, REQUEST_PATH,
                                     u.promptTokens(), u.completionTokens(), u.cachedTokens(), credit, latency, traceId))
                             .subscribe(
@@ -290,7 +293,8 @@ public class ChatCompletionController {
             Map<String, Object> body, List<String> failedChannels, int attempt,
             int estPrompt, int estCompletion,
             AtomicReference<RelayOrchestrator.PreparedRequest> active,
-            AtomicReference<fun.commons.tokengateway.relay.StreamUsageAccumulator> activeAcc) {
+            AtomicReference<fun.commons.tokengateway.relay.StreamUsageAccumulator> activeAcc,
+            List<SettleRequest.AttemptDetail> lossAttempts) {
         String model = String.valueOf(body.getOrDefault("model", ""));
         fun.commons.tokengateway.relay.StreamUsageAccumulator usageAcc =
                 new fun.commons.tokengateway.relay.StreamUsageAccumulator();
@@ -318,6 +322,13 @@ public class ChatCompletionController {
                     // 先换道, 换道成功才对旧渠道记一次失败: 轮换中止 (如无候选) 时该失败
                     // 由终态 AccessLogReporter.reportError 恰好计一次, 防中间轮 + 终态双计
                     failedChannels.add(channel.getChannelId());
+                    lossAttempts.add(SettleRequest.AttemptDetail.builder()
+                            .sequence(attempt)
+                            .channelId(channel.getChannelId())
+                            .model(model)
+                            .errorClass(UpstreamErrorPolicy.errorCodeOf(err))
+                            .billed(err instanceof UpstreamErrorPolicy.SoftUpstreamException)
+                            .build());
                     log.warn("[ChatCompletion/stream] 渠道失败, 轮换重试: attempt={}, model={}, channelId={}, excluded={}, err={}",
                             attempt, model, channel.getChannelId(), failedChannels, err.getMessage());
                     return orchestrator.failoverToNextChannel(prepared, model,
@@ -331,7 +342,8 @@ public class ChatCompletionController {
                                     .then(Mono.delay(Duration.ofMillis(
                                             failoverProps.withJitter(failoverProps.backoffMs(attempt)))))
                                     .thenMany(streamAttempt(next, body, failedChannels,
-                                            attempt + 1, estPrompt, estCompletion, active, activeAcc)));
+                                            attempt + 1, estPrompt, estCompletion, active, activeAcc,
+                                            lossAttempts)));
                 });
     }
 
@@ -343,7 +355,8 @@ public class ChatCompletionController {
             RelayOrchestrator.PreparedRequest prepared,
             String model, Map<String, Object> body,
             int estPrompt, int estCompletion, List<String> failedChannels, int attempt,
-            AtomicReference<RelayOrchestrator.PreparedRequest> active) {
+            AtomicReference<RelayOrchestrator.PreparedRequest> active,
+            List<SettleRequest.AttemptDetail> lossAttempts) {
         active.set(prepared);
         return invokeUpstreamNonStream(prepared.channel(), body)
                 .onErrorResume(err -> {
@@ -354,6 +367,13 @@ public class ChatCompletionController {
                     // 先换道, 换道成功才对旧渠道记一次失败: 轮换中止 (如无候选) 时该失败
                     // 由终态 AccessLogReporter.reportError 恰好计一次, 防中间轮 + 终态双计
                     failedChannels.add(prepared.channel().getChannelId());
+                    lossAttempts.add(SettleRequest.AttemptDetail.builder()
+                            .sequence(attempt)
+                            .channelId(prepared.channel().getChannelId())
+                            .model(model)
+                            .errorClass(UpstreamErrorPolicy.errorCodeOf(err))
+                            .billed(err instanceof UpstreamErrorPolicy.SoftUpstreamException)
+                            .build());
                     log.warn("[ChatCompletion] 渠道失败, 轮换重试: attempt={}, model={}, channelId={}, excluded={}, err={}",
                             attempt, model, prepared.channel().getChannelId(), failedChannels, err.getMessage());
                     return orchestrator.failoverToNextChannel(prepared, model,
@@ -367,7 +387,8 @@ public class ChatCompletionController {
                                     .then(Mono.delay(Duration.ofMillis(
                                             failoverProps.withJitter(failoverProps.backoffMs(attempt)))))
                                     .then(invokeNonStreamWithFailover(next, model, body,
-                                            estPrompt, estCompletion, failedChannels, attempt + 1, active)));
+                                            estPrompt, estCompletion, failedChannels, attempt + 1, active,
+                                            lossAttempts)));
                 });
     }
 

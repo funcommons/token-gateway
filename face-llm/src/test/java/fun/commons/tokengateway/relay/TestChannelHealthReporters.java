@@ -32,7 +32,7 @@ public final class TestChannelHealthReporters {
         HealthReportProperties props = new HealthReportProperties();
         props.setEnabled(true);
         GatewayProperties gatewayProps = new GatewayProperties();
-        HttpChannelApi stub = new HttpChannelApi(WebClient.builder(), gatewayProps,
+        HttpChannelApi stub = new HttpChannelApi(WebClient.builder(), new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), gatewayProps),
                 new fun.commons.tokengateway.rpc.RpcInternalAuth(gatewayProps)) {
             @Override
             public Mono<ApiResponse<Void>> recordSuccess(String channelId) {

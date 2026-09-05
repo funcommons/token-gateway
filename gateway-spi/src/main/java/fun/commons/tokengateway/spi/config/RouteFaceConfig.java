@@ -17,6 +17,12 @@ public class RouteFaceConfig extends EndpointConfig {
     /** 模型绑定: 先命中先得, 支持通配 (如 ["gpt-*", "claude-*", "*"]). */
     private List<ModelBinding> routes = new ArrayList<>();
 
+    /**
+     * token-route 路由表标识 (G2/G5: adapter=tokengo|openapi 时 resolve 的 table_id;
+     * 部署方在 token-route 表 entry 的 data_json 里配 DistributeVO 同名字段).
+     */
+    private String tableId;
+
     /** 后端间灰度: 影子并行解析目标 (比对埋点不执行, 设计方案 §7). */
     private String shadowTo;
 

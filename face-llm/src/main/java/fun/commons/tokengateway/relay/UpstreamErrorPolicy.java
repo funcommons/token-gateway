@@ -87,10 +87,20 @@ public final class UpstreamErrorPolicy {
     }
 
     /**
+     * 软失败专用异常 (G4): 200+错误载荷 —— 上游已受理并可能已扣量,
+     * 渠道失败尝试明细按 {@code billed=true} 记 LOSS.
+     */
+    public static final class SoftUpstreamException extends RelayException {
+        public SoftUpstreamException(int httpStatus, String message) {
+            super(httpStatus, message);
+        }
+    }
+
+    /**
      * 200+错误载荷软失败判定: 顶层 {@code error} 为 Map 即软失败 (调用点放在协议转换之前,
      * OpenAI/Anthropic 两种形态通吃). 携带 status 字段用真实状态, 缺失/非法按 502.
      *
-     * @throws RelayException 载荷为错误体时
+     * @throws SoftUpstreamException 载荷为错误体时 (调用方以 instanceof 判 billed)
      */
     public static void throwIfSoftError(Map<String, Object> body) {
         if (body == null || !(body.get("error") instanceof Map<?, ?> err)) {
@@ -101,7 +111,7 @@ public final class UpstreamErrorPolicy {
             status = 502;
         }
         Object msg = err.get("message");
-        throw new RelayException(status,
+        throw new SoftUpstreamException(status,
                 "upstream soft error HTTP_" + status + ": " + (msg == null ? "-" : msg));
     }
 

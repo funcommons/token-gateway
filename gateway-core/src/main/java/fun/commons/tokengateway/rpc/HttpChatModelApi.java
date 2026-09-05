@@ -1,6 +1,5 @@
 package fun.commons.tokengateway.rpc;
 
-import fun.commons.tokengateway.config.GatewayProperties;
 import fun.commons.tokengateway.framework.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,7 +26,7 @@ public class HttpChatModelApi {
             new ParameterizedTypeReference<>() {};
 
     private final WebClient.Builder webClientBuilder;
-    private final GatewayProperties props;
+    private final CapabilityEndpoints endpoints;
     private final RpcInternalAuth internalAuth;
 
     /**
@@ -36,14 +35,14 @@ public class HttpChatModelApi {
      * @param groupId 订阅分组 ID, 非空时按分组范围过滤 (§3.1 路由约束); null 返所有启用模型
      */
     public Mono<ApiResponse<List<Map<String, Object>>>> listEnabledModels(Long groupId) {
-        String baseUri = props.getUrl() + "/api/v1/internal/chat-models";
+        String baseUri = endpoints.modelCatalog().getUrl() + "/api/v1/internal/chat-models";
         String uri = groupId != null ? baseUri + "?groupId=" + groupId : baseUri;
         WebClient.RequestHeadersSpec<?> req = webClientBuilder.build().get()
                 .uri(uri);
-        internalAuth.attachTo(req);
+        internalAuth.attachTo(req, endpoints.modelCatalog());
         return req.retrieve()
                 .bodyToMono(LIST_TYPE)
-                .timeout(props.getTimeout())
+                .timeout(endpoints.modelCatalog().getTimeout())
                 .doOnError(e -> log.error("[HttpChatModelApi] listEnabledModels RPC 失败: groupId={}, err={}",
                         groupId, e.getMessage()))
                 .onErrorResume(e -> Mono.just(ApiResponse.fail(

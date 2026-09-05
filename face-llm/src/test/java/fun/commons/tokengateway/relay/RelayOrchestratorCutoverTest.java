@@ -51,15 +51,11 @@ class RelayOrchestratorCutoverTest {
         var b = WebClient.builder();
         var gwProps = new fun.commons.tokengateway.config.GatewayProperties();
         gwProps.setUrl(backend.url("/").toString().replaceAll("/$", ""));
-        var tokenApi = new fun.commons.tokengateway.rpc.HttpTokenApi(b, gwProps,
-                new fun.commons.tokengateway.rpc.RpcInternalAuth(gwProps));
-        var channelApi = new fun.commons.tokengateway.rpc.HttpChannelApi(b, gwProps,
-                new fun.commons.tokengateway.rpc.RpcInternalAuth(gwProps));
-        var billingApi = new fun.commons.tokengateway.rpc.HttpBillingApi(b, gwProps,
-                new fun.commons.tokengateway.rpc.RpcInternalAuth(gwProps));
+        var tokenApi = new fun.commons.tokengateway.rpc.HttpTokenApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), gwProps), new fun.commons.tokengateway.rpc.RpcInternalAuth(gwProps));
+        var channelApi = new fun.commons.tokengateway.rpc.HttpChannelApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), gwProps), new fun.commons.tokengateway.rpc.RpcInternalAuth(gwProps));
+        var billingApi = new fun.commons.tokengateway.rpc.HttpBillingApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), gwProps), new fun.commons.tokengateway.rpc.RpcInternalAuth(gwProps));
         var moderationGate = new fun.commons.tokengateway.moderation.ModerationGate(
-                new fun.commons.tokengateway.rpc.HttpModerationApi(b, gwProps,
-                        new fun.commons.tokengateway.rpc.RpcInternalAuth(gwProps)));
+                new fun.commons.tokengateway.rpc.HttpModerationApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), gwProps), new fun.commons.tokengateway.rpc.RpcInternalAuth(gwProps), new fun.commons.tokengateway.spi.config.TokenGatewayProperties()));
         ThmpContractClient client = new ThmpContractClient(b, props);
         ThmpCandidateCache cache = new ThmpCandidateCache(client, Duration.ofSeconds(30));
         ThmpCutoverRouter cutover = new ThmpCutoverRouter(props, cache,

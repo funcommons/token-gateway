@@ -13,13 +13,16 @@ import fun.commons.tokengateway.exception.RelayException;
 import fun.commons.tokengateway.framework.ApiResponse;
 import fun.commons.tokengateway.moderation.ModerationGate;
 import fun.commons.tokengateway.moderation.ModerationOutcome;
+import fun.commons.tokengateway.rpc.AdapterSelector;
 import fun.commons.tokengateway.rpc.HttpBillingApi;
 import fun.commons.tokengateway.rpc.HttpChannelApi;
 import fun.commons.tokengateway.rpc.HttpTokenApi;
+import fun.commons.tokengateway.rpc.TokenRouteClient;
 import fun.commons.tokengateway.thmp.ThmpCutover;
 import fun.commons.tokengateway.thmp.ThmpShadow;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
@@ -45,7 +48,7 @@ import java.util.UUID;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @Autowired)
 public class RelayOrchestrator {
 
     private final HttpTokenApi tokenApi;
@@ -64,6 +67,24 @@ public class RelayOrchestrator {
      * 命中 → THMP 候选转路由; 未命中/失败 → 空 → 回旧 distribute (一键回旧).
      */
     private final ThmpCutover thmpCutover;
+
+    /** 适配器单选 (G2): adapter=tokengo|openapi 时 route 面走 token-route. */
+    private final AdapterSelector adapterSelector;
+
+    /** token-route 路由面客户端 (G2/G5): resolve 选路 + report 三态回报. */
+    private final TokenRouteClient tokenRouteClient;
+
+    /**
+     * 六参兼容构造 (测试/存量装配): adapter 缺省 mmagix, route 恒走旧 distribute,
+     * tokenRouteClient 恒不触达 (传 null 安全).
+     */
+    public RelayOrchestrator(HttpTokenApi tokenApi, HttpChannelApi channelApi,
+                             HttpBillingApi billingApi, ModerationGate moderationGate,
+                             ThmpShadow thmpShadow, ThmpCutover thmpCutover) {
+        this(tokenApi, channelApi, billingApi, moderationGate, thmpShadow, thmpCutover,
+                new AdapterSelector(new fun.commons.tokengateway.spi.config.TokenGatewayProperties()),
+                null);
+    }
 
     /**
      * 校验 token + 路由渠道 + 审核 + 预扣, 返回 prepared 上下文.
@@ -93,20 +114,20 @@ public class RelayOrchestrator {
                         return Mono.error(new RelayException(401, "invalid token"));
                     }
                     TokenValidateVO token = tokenResp.getData();
-                    return obtainRoute(token, model, requestId)
-                            .flatMap(channel -> moderateInput(token, userContent)
+                    return obtainRoute(token, model, requestId, estPromptTokens, estCompletionTokens)
+                            .flatMap(res -> moderateInput(token, userContent)
                                     .flatMap(moderation -> {
                                         String sanitized = maskedContentOf(moderation);
                                         List<String> codes = moderation.ruleCodes() == null
                                                 ? List.of() : moderation.ruleCodes();
-                                        return preConsumeIfNeeded(channel, token, model,
+                                        return preConsumeIfNeeded(res.channel(), token, model,
                                                 estPromptTokens, estCompletionTokens, requestId)
                                                 .map(preConsumeId -> new PreparedRequest(
-                                                        token, channel, preConsumeId, requestId,
-                                                        sanitized, codes))
+                                                        token, res.channel(), preConsumeId, requestId,
+                                                        sanitized, codes, res.entryId(), res.leaseId()))
                                                 .switchIfEmpty(Mono.just(new PreparedRequest(
-                                                        token, channel, null, requestId,
-                                                        sanitized, codes)));
+                                                        token, res.channel(), null, requestId,
+                                                        sanitized, codes, res.entryId(), res.leaseId())));
                                     }));
                 });
     }
@@ -115,11 +136,20 @@ public class RelayOrchestrator {
      * 路由获取: W3 灰度切流 (THMP 候选执行) 优先, 未命中/失败 → 回旧 distribute
      * (22 号风险表: 一键回旧 = 配置清空名单). 切流命中跳过影子比对 (THMP 即真源);
      * 旧链路命中维持 S2-W1 双跑埋点.
+     *
+     * <p>G2: adapter=tokengo|openapi 时 route 面走 token-route resolve (跳过切流与 distribute,
+     * data_json 契约字段映射 DistributeVO).
      */
-    private Mono<DistributeVO> obtainRoute(TokenValidateVO token, String model, String requestId) {
-        Mono<DistributeVO> cutover = thmpCutover.route(model, token.getTenantId(), requestId)
+    private Mono<RouteResolution> obtainRoute(TokenValidateVO token, String model, String requestId,
+                                              int estPromptTokens, int estCompletionTokens) {
+        if (adapterSelector.routeViaTokenRoute()) {
+            return tokenRouteClient.resolveFull(model, requestId, estPromptTokens, estCompletionTokens, null)
+                    .map(r -> new RouteResolution(r.channel(), r.entryId(), r.leaseId()));
+        }
+        Mono<RouteResolution> cutover = thmpCutover.route(model, token.getTenantId(), requestId)
                 .doOnNext(vo -> log.info("[Relay] 切流命中 THMP 路由: model={} channel={} base={}",
-                        model, vo.getChannelId(), vo.getBaseUrl()));
+                        model, vo.getChannelId(), vo.getBaseUrl()))
+                .map(vo -> new RouteResolution(vo, null, null));
         return cutover.switchIfEmpty(Mono.defer(() -> channelApi.distribute(
                         DistributeRequest.builder()
                                 .tenantId(token.getTenantId())
@@ -145,8 +175,12 @@ public class RelayOrchestrator {
                     DistributeVO channel = distResp.getData();
                     // 影子双跑 (22 号 S2-W1): 旧链路照常执行, THMP resolve 只比对不执行
                     thmpShadow.compare(model, token.getTenantId(), channel);
-                    return Mono.just(channel);
+                    return Mono.just(new RouteResolution(channel, null, null));
                 })));
+    }
+
+    /** 路由解析结果: channel + token-route 凭据 (Mmagix 路径后两者为 null). */
+    private record RouteResolution(DistributeVO channel, String entryId, String leaseId) {
     }
 
     /**
@@ -238,18 +272,32 @@ public class RelayOrchestrator {
      */
     public Mono<java.math.BigDecimal> settle(PreparedRequest prepared, int actualPromptTokens,
                              int actualCompletionTokens, int cachedTokens, int responseTimeMs) {
+        return settle(prepared, actualPromptTokens, actualCompletionTokens, cachedTokens,
+                responseTimeMs, null);
+    }
+
+    /**
+     * 结算 (G4 重载): 携带失败尝试明细 (billed=true 的 LOSS 供能力面记路由损耗).
+     * <p>attempts 为空/null 时不带该字段语义 (向后兼容, 旧计费后端忽略未知字段).
+     */
+    public Mono<java.math.BigDecimal> settle(PreparedRequest prepared, int actualPromptTokens,
+                             int actualCompletionTokens, int cachedTokens, int responseTimeMs,
+                             java.util.List<SettleRequest.AttemptDetail> attempts) {
         if (prepared.preConsumeId() == null) {
             return Mono.just(java.math.BigDecimal.ZERO);
         }
-        return billingApi.settle(SettleRequest.builder()
+        SettleRequest.SettleRequestBuilder builder = SettleRequest.builder()
                         .preConsumeId(prepared.preConsumeId())
                         .actualPromptTokens(actualPromptTokens)
                         .actualCompletionTokens(actualCompletionTokens)
                         .cacheReadTokens(cachedTokens)
                         .success(true)
                         .requestId(prepared.requestId())
-                        .responseTimeMs(responseTimeMs)
-                        .build())
+                        .responseTimeMs(responseTimeMs);
+        if (attempts != null && !attempts.isEmpty()) {
+            builder.attempts(attempts);
+        }
+        Mono<java.math.BigDecimal> chain = billingApi.settle(builder.build())
                 .doOnError(e -> log.error("[Billing/settle] preConsumeId={}, err={}",
                         prepared.preConsumeId(), e.getMessage()))
                 .onErrorResume(e -> Mono.just(ApiResponse.fail(
@@ -268,6 +316,14 @@ public class RelayOrchestrator {
                             prepared.preConsumeId(), credit);
                     return credit;
                 });
+        // G5: token-route 路径终态回报 SUCCESS (fire-and-forget, 不延长 settle 链)
+        if (prepared.reportable()) {
+            chain = chain.doOnNext(credit -> tokenRouteClient.report(
+                            prepared.routeEntryId(), prepared.routeLeaseId(),
+                            TokenRouteClient.ReportResult.SUCCESS, 1, responseTimeMs)
+                    .subscribe());
+        }
+        return chain;
     }
 
     /**
@@ -299,6 +355,10 @@ public class RelayOrchestrator {
         if (prepared == null || prepared.channel() == null || prepared.channel().getChannelId() == null) {
             return Mono.empty();
         }
+        // token-route 路径: RETRYABLE_FAIL 已在 failoverToNextChannel 内回报, 不再走 Mmagix RPC
+        if (prepared.reportable()) {
+            return Mono.empty();
+        }
         RecordFailureRequest request = RecordFailureRequest.builder()
                 .tenantId(prepared.token() != null ? prepared.token().getTenantId() : null)
                 .apiKeyId(prepared.token() != null ? prepared.token().getTokenId() : null)
@@ -324,40 +384,84 @@ public class RelayOrchestrator {
                                                        List<String> excludeChannelIds) {
         TokenValidateVO token = current.token();
         String requestId = current.requestId() + "-fo" + excludeChannelIds.size();
+        // token-route 路径: 旧 entry 报 RETRYABLE_FAIL (可重试失败, 入口仍存活)
+        Mono<Void> reportOld = current.reportable()
+                ? tokenRouteClient.report(current.routeEntryId(), current.routeLeaseId(),
+                        TokenRouteClient.ReportResult.RETRYABLE_FAIL, 1, 0)
+                : Mono.empty();
         return refund(current, "channel failover")
-                .then(channelApi.distribute(DistributeRequest.builder()
+                .then(reportOld)
+                .then(routeDistribute(token, model, requestId, estPromptTokens,
+                        estCompletionTokens, excludeChannelIds))
+                .flatMap(res -> {
+                    DistributeVO next = res.channel();
+                    log.info("[Channel/failover] model={}, {} → {}, excluded={}",
+                            model, current.channel().getChannelId(), next.getChannelId(), excludeChannelIds);
+                    return preConsumeIfNeeded(next, token, model, estPromptTokens, estCompletionTokens, requestId)
+                            .map(preConsumeId -> new PreparedRequest(
+                                    token, next, preConsumeId, requestId,
+                                    current.moderationSanitized(), current.moderationRuleCodes(),
+                                    res.entryId(), res.leaseId()))
+                            .switchIfEmpty(Mono.just(new PreparedRequest(
+                                    token, next, null, requestId,
+                                    current.moderationSanitized(), current.moderationRuleCodes(),
+                                    res.entryId(), res.leaseId())));
+                });
+    }
+
+    /**
+     * 路由分发 (G2 分发点): token-route resolve 或 Mmagix distribute, 统一归一
+     * {@link RouteResolution} (含 token-route 凭据, Mmagix 路径为 null).
+     */
+    private Mono<RouteResolution> routeDistribute(TokenValidateVO token, String model, String requestId,
+                                                  int estPromptTokens, int estCompletionTokens,
+                                                  List<String> excludeChannelIds) {
+        if (adapterSelector.routeViaTokenRoute()) {
+            return tokenRouteClient.resolveFull(model, requestId, estPromptTokens,
+                            estCompletionTokens, excludeChannelIds)
+                    .map(r -> new RouteResolution(r.channel(), r.entryId(), r.leaseId()));
+        }
+        return channelApi.distribute(DistributeRequest.builder()
                         .tenantId(token.getTenantId())
                         .userId(token.getUserId())
                         .apiKeyId(token.getTokenId())
                         .groupId(token.getGroupId())
                         .model(model)
                         .excludeChannelIds(excludeChannelIds)
-                        .build()))
+                        .build())
                 .flatMap(distResp -> {
                     if (distResp == null || !distResp.isSuccess() || distResp.getData() == null) {
                         String reason = distResp == null ? "no response" : distResp.getMessage();
                         return Mono.error(new RelayException(503,
                                 "渠道轮换失败, 无可用候选: " + reason));
                     }
-                    DistributeVO next = distResp.getData();
-                    log.info("[Channel/failover] model={}, {} → {}, excluded={}",
-                            model, current.channel().getChannelId(), next.getChannelId(), excludeChannelIds);
-                    return preConsumeIfNeeded(next, token, model, estPromptTokens, estCompletionTokens, requestId)
-                            .map(preConsumeId -> new PreparedRequest(
-                                    token, next, preConsumeId, requestId,
-                                    current.moderationSanitized(), current.moderationRuleCodes()))
-                            .switchIfEmpty(Mono.just(new PreparedRequest(
-                                    token, next, null, requestId,
-                                    current.moderationSanitized(), current.moderationRuleCodes())));
+                    return Mono.just(new RouteResolution(distResp.getData(), null, null));
                 });
     }
 
     /**
      * 预处理结果: token + channel + preConsumeId + requestId + 审核结果上下文.
+     *
+     * <p>routeEntryId/routeLeaseId: token-route 路由的 entry 凭据 (G2/G5, 三态回报用;
+     * Mmagix distribute 路径为 null).
      */
     public record PreparedRequest(TokenValidateVO token, DistributeVO channel,
                                   String preConsumeId, String requestId,
-                                  String moderationSanitized, List<String> moderationRuleCodes) {
+                                  String moderationSanitized, List<String> moderationRuleCodes,
+                                  String routeEntryId, String routeLeaseId) {
+
+        /** 六参兼容构造 (Mmagix distribute 路径, 无 token-route 凭据). */
+        public PreparedRequest(TokenValidateVO token, DistributeVO channel,
+                               String preConsumeId, String requestId,
+                               String moderationSanitized, List<String> moderationRuleCodes) {
+            this(token, channel, preConsumeId, requestId, moderationSanitized, moderationRuleCodes,
+                    null, null);
+        }
+
+        /** 是否 token-route 路由 (report 三态回报可达). */
+        public boolean reportable() {
+            return routeEntryId != null;
+        }
     }
 
     /**

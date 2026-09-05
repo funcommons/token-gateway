@@ -41,11 +41,11 @@ class CountTokensControllerTest {
         var props = new fun.commons.tokengateway.config.GatewayProperties();
         props.setUrl(backend.url("/").toString().replaceAll("/$", ""));
         WebClient.Builder b = WebClient.builder();
-        var tokenApi = new HttpTokenApi(b, props, new RpcInternalAuth(props));
-        var channelApi = new HttpChannelApi(b, props, new RpcInternalAuth(props));
+        var tokenApi = new HttpTokenApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props));
+        var channelApi = new HttpChannelApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props));
         controller = new CountTokensController(
-                new RelayOrchestrator(tokenApi, channelApi, new HttpBillingApi(b, props, new RpcInternalAuth(props)),
-                        new ModerationGate(new fun.commons.tokengateway.rpc.HttpModerationApi(b, props, new RpcInternalAuth(props))),
+                new RelayOrchestrator(tokenApi, channelApi, new HttpBillingApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props)),
+                        new ModerationGate(new fun.commons.tokengateway.rpc.HttpModerationApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props), new fun.commons.tokengateway.spi.config.TokenGatewayProperties())),
                 new fun.commons.tokengateway.thmp.ThmpShadow.Noop(),
                 new fun.commons.tokengateway.thmp.ThmpCutover.Noop()),
                 new FormatConverter(), b);

@@ -33,7 +33,7 @@ class AccessLogReporterTest {
         props.setUrl(backend.url("/").toString().replaceAll("/$", ""));
         props.setTimeout(Duration.ofSeconds(2));
         reporter = new AccessLogReporter(new fun.commons.tokengateway.rpc.HttpAccessLogApi(
-                WebClient.builder(), props,
+                WebClient.builder(), new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props),
                 new fun.commons.tokengateway.rpc.RpcInternalAuth(props)),
                 TestChannelHealthReporters.disabled());
 
@@ -117,7 +117,7 @@ class AccessLogReporterTest {
 
     private AccessLogReporter reporting(java.util.List<String> calls) {
         return new AccessLogReporter(new fun.commons.tokengateway.rpc.HttpAccessLogApi(
-                WebClient.builder(), props(),
+                WebClient.builder(), new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props()),
                 new fun.commons.tokengateway.rpc.RpcInternalAuth(props())),
                 TestChannelHealthReporters.recording(calls));
     }

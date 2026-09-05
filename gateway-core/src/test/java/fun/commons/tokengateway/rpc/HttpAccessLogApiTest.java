@@ -7,6 +7,7 @@ import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import fun.commons.tokengateway.spi.config.TokenGatewayProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.test.StepVerifier;
@@ -32,7 +33,7 @@ class HttpAccessLogApiTest {
         var props = new GatewayProperties();
         props.setUrl(backend.url("/").toString().replaceAll("/$", ""));
         props.setTimeout(Duration.ofSeconds(2));
-        api = new HttpAccessLogApi(WebClient.builder(), props, new RpcInternalAuth(props));
+        api = new HttpAccessLogApi(WebClient.builder(), new CapabilityEndpoints(new TokenGatewayProperties(), props), new RpcInternalAuth(props));
     }
 
     @AfterEach

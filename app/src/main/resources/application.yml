@@ -12,6 +12,24 @@ spring:
 # task=任务面(挂任务表库 + 资源缓存盘, M2.5) / all=单组合跑(默认, 小规模)
 token-gateway:
   face: all
+  # 协议形状适配器 (全局单选): mmagix | tokenhub | tokengo | openapi | custom:<spiName>
+  adapter: mmagix
+  # ---- 能力面寻址 (G1 SPI 装配收尾, 设计方案 §5.1): 每类服务独立 url/auth/超时,
+  # ---- 可分离部署也可同指单体. 未配置 url 的面回退 gateway.backend.* (兼容窗口,
+  # ---- 存量部署零配置迁移; 全部显式配置后可删 gateway.backend.*).
+  # 单体形态示例 (七面同指 MMagiX):
+  # route:
+  #   url: http://localhost:9400
+  #   auth: jwt
+  #   jwt-secret: ${GW_JWT_SECRET:}        # 预铸 JWT 或 HS256 secret, env 注入禁入仓
+  #   timeout: 3s
+  # 分离形态示例 (审核服务独立 + fail-closed, G6):
+  # moderation:
+  #   enabled: true
+  #   fail-open: false                     # 审核面故障时拦截 (合规优先); 缺省 true 放行
+  #   url: http://moderation-svc:9420
+  #   auth: key
+  #   key: ${GW_MODERATION_KEY:}
   # 任务面 (face=task/all 生效; 《05》零改造接入, 平台前提 lotask4j V4+; 凭证环境变量注入禁入仓)
   task:
     lotask:
@@ -22,6 +40,9 @@ token-gateway:
       access-key: ${LOTASK_ACCESS_KEY:}
       sign-key: ${LOTASK_SIGN_KEY:}
       tenant-secret: ${LOTASK_TENANT_SECRET:}
+      # 双值窗轮转 (G3, 已有机制): reset-secret 轮换 grace 期双钥 webhook 验签
+      # (WebhookVerifier.activeSecrets 主/备依次), 存量载荷全部过期后删除备钥
+      tenant-secret-previous: ${LOTASK_TENANT_SECRET_PREVIOUS:}
       webhook-callback-url: ${LOTASK_WEBHOOK_CALLBACK_URL:}
     snapshot-cipher-key: ${TGW_SNAPSHOT_CIPHER_KEY:}
     resource-sign-key: ${TGW_RESOURCE_SIGN_KEY:}
@@ -43,14 +64,14 @@ token-gateway:
   codec:
     max-in-memory-size: 16MB
 
-# 主应用 RPC 目标
+# 主应用 RPC 目标 (兼容窗口: token-gateway.* 七面未配置 url 的面回退到此; 全部迁移后删除)
 gateway:
   backend:
-    url: http://localhost:9400
-    # 固定内部签名 JWT, 与 bootstrap application-dev.yml / application-onetoken.yml
-    # 的 mmagix.internal-token.secret 一致 (HS256, secret=7UYrDe7Zr2DLXTS2k1l9fjdQ9hNyW6WT8rrfRjFlb4A).
-    # 后端换 secret 必须用 sign-internal-token.sh 同步重铸本 token.
-    internal-token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJtbWFnaXgiLCJzdWIiOiIwIiwiY2FsbGVyIjoiZ2F0ZXdheS13ZWJmbHV4IiwidGVuYW50X2lkIjoiMCIsInVzZXJfaWQiOiIwIiwiaWF0IjoxNzg2NTIyNDM3LCJleHAiOjE4NDcwMDI0Mzd9.3VJ8tlyfO-HZDN5Xk7m15dSiWhS0cBK-drBbvCsbIms
+    url: ${GATEWAY_BACKEND_URL:http://localhost:9400}
+    # 内部签名 JWT (auth=jwt 兼容形态): env 注入禁入仓 (G3).
+    # 用 sign-internal-token.sh 铸造 (与后端 mmagix.internal-token.secret 同 secret);
+    # dev- 前缀 = 本地无签名模式; 空 = 不发鉴权头 (仅 localhost).
+    internal-token: ${GATEWAY_INTERNAL_TOKEN:}
     timeout: 10s
 
   # 渠道健康上报 (record-success/record-failure): off 时渠道健康信号缺失需在监控侧补偿
@@ -80,7 +101,8 @@ gateway:
     # THMP thmp.enc.passphrase 兜底口令一致 (BYOK 逐租户口令 = 未决#12 决议).
     cutover-models: []
     cutover-percent: 0
-    key-passphrase: ${THMP_CONTRACT_KEY_PASSPHRASE:thmp-dev-enc-passphrase-0000000000000001}
+    # 密钥解密口令 (BYOK 逐租户口令优先): env 注入禁入仓 (G3, 原 dev 默认口令已移除)
+    key-passphrase: ${THMP_CONTRACT_KEY_PASSPHRASE:}
 
 management:
   endpoints:

@@ -1,6 +1,5 @@
 package fun.commons.tokengateway.rpc;
 
-import fun.commons.tokengateway.config.GatewayProperties;
 import fun.commons.tokengateway.contract.DistributeRequest;
 import fun.commons.tokengateway.contract.DistributeVO;
 import fun.commons.tokengateway.contract.RecordFailureRequest;
@@ -27,17 +26,17 @@ public class HttpChannelApi {
             new ParameterizedTypeReference<>() {};
 
     private final WebClient.Builder webClientBuilder;
-    private final GatewayProperties props;
+    private final CapabilityEndpoints endpoints;
     private final RpcInternalAuth internalAuth;
 
     public Mono<ApiResponse<DistributeVO>> distribute(DistributeRequest request) {
         WebClient.RequestHeadersSpec<?> req = webClientBuilder.build().post()
-                .uri(props.getUrl() + "/api/v1/internal/channels/distribute")
+                .uri(endpoints.route().getUrl() + "/api/v1/internal/channels/distribute")
                 .bodyValue(request);
-        internalAuth.attachTo(req);
+        internalAuth.attachTo(req, endpoints.route());
         return req.retrieve()
                 .bodyToMono(DISTRIBUTE_TYPE)
-                .timeout(props.getTimeout())
+                .timeout(endpoints.route().getTimeout())
                 .doOnError(e -> log.error("[HttpChannelApi] distribute RPC 失败: model={}, err={}",
                         request != null ? request.getModel() : null, e.getMessage()))
                 .onErrorResume(e -> Mono.just(ApiResponse.fail(
@@ -47,11 +46,11 @@ public class HttpChannelApi {
 
     public Mono<ApiResponse<Void>> recordFailure(String channelId, RecordFailureRequest request) {
         WebClient.RequestHeadersSpec<?> req = webClientBuilder.build().post()
-                .uri(props.getUrl() + "/api/v1/internal/channels/{channelId}/record-failure", channelId)
+                .uri(endpoints.route().getUrl() + "/api/v1/internal/channels/{channelId}/record-failure", channelId)
                 .bodyValue(request);
-        internalAuth.attachTo(req);
+        internalAuth.attachTo(req, endpoints.route());
         return req.retrieve().bodyToMono(VOID_TYPE)
-                .timeout(props.getTimeout())
+                .timeout(endpoints.route().getTimeout())
                 .onErrorResume(e -> Mono.just(ApiResponse.fail(
                         fun.commons.tokengateway.framework.ApiCode.SERVICE_TIMEOUT.getCode(),
                         "channel RPC failed: " + e.getMessage())));
@@ -59,10 +58,10 @@ public class HttpChannelApi {
 
     public Mono<ApiResponse<Void>> recordSuccess(String channelId) {
         WebClient.RequestHeadersSpec<?> req = webClientBuilder.build().post()
-                .uri(props.getUrl() + "/api/v1/internal/channels/{channelId}/record-success", channelId);
-        internalAuth.attachTo(req);
+                .uri(endpoints.route().getUrl() + "/api/v1/internal/channels/{channelId}/record-success", channelId);
+        internalAuth.attachTo(req, endpoints.route());
         return req.retrieve().bodyToMono(VOID_TYPE)
-                .timeout(props.getTimeout())
+                .timeout(endpoints.route().getTimeout())
                 .onErrorResume(e -> Mono.just(ApiResponse.fail(
                         fun.commons.tokengateway.framework.ApiCode.SERVICE_TIMEOUT.getCode(),
                         "channel RPC failed: " + e.getMessage())));

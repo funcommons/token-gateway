@@ -41,7 +41,10 @@ class ChannelHealthReporterTest {
         props.setTimeout(Duration.ofSeconds(2));
         healthProps = new HealthReportProperties();
         reporter = new ChannelHealthReporter(
-                new HttpChannelApi(WebClient.builder(), props, new RpcInternalAuth(props)),
+                new HttpChannelApi(WebClient.builder(),
+                        new fun.commons.tokengateway.rpc.CapabilityEndpoints(
+                                new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props),
+                        new RpcInternalAuth(props)),
                 healthProps);
     }
 

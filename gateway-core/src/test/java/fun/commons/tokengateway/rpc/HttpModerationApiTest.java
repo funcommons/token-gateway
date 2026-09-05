@@ -25,16 +25,20 @@ class HttpModerationApiTest {
 
     private MockWebServer server;
     private HttpModerationApi api;
+    private fun.commons.tokengateway.spi.config.TokenGatewayProperties spi;
+    private GatewayProperties props;
 
     @BeforeEach
     void setUp() throws Exception {
         server = new MockWebServer();
         server.start();
-        GatewayProperties props = new GatewayProperties();
+        props = new GatewayProperties();
         props.setUrl(server.url("/").toString().replaceAll("/$", ""));
         props.setInternalToken("test-internal-token");
         props.setTimeout(Duration.ofSeconds(2));
-        api = new HttpModerationApi(WebClient.builder(), props, new RpcInternalAuth(props));
+        spi = new fun.commons.tokengateway.spi.config.TokenGatewayProperties();
+        api = new HttpModerationApi(WebClient.builder(),
+                new CapabilityEndpoints(spi, props), new RpcInternalAuth(props), spi);
     }
 
     @AfterEach
@@ -198,5 +202,51 @@ class HttpModerationApiTest {
                     assertThat(outcome.ruleCodes()).isEqualTo(List.of());
                 })
                 .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("G6 fail-closed: fail-open=false 时 RPC 故障 → BLOCK (MODERATION_UNAVAILABLE)")
+    void failClosedBlocksOnRpcFailure() {
+        spi.getModeration().setFailOpen(false);
+        server.enqueue(new MockResponse().setResponseCode(500).setBody("server down"));
+
+        StepVerifier.create(api.scan(buildReq()))
+                .assertNext(outcome -> {
+                    assertThat(outcome.action()).isEqualTo(ModerationOutcome.Action.BLOCK_REQUEST);
+                    assertThat(outcome.ruleCodes())
+                            .containsExactly(HttpModerationApi.DEGRADE_RULE);
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("G6 fail-closed: 业务级 fail 包络 → 同样 BLOCK")
+    void failClosedBlocksOnBusinessFail() {
+        spi.getModeration().setFailOpen(false);
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":10100,\"message\":\"参数错误\",\"data\":null}"));
+
+        StepVerifier.create(api.scan(buildReq()))
+                .assertNext(outcome -> assertThat(outcome.isBlocked()).isTrue())
+                .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("G6 face 寻址: token-gateway.moderation.url 优先于 gateway.backend.url")
+    void faceUrlWinsOverLegacyFallback() throws Exception {
+        // 独立审核服务地址 (fail-closed 部署形态的分离部署)
+        try (okhttp3.mockwebserver.MockWebServer dedicated = new okhttp3.mockwebserver.MockWebServer()) {
+            dedicated.start();
+            spi.getModeration().setUrl(dedicated.url("/").toString().replaceAll("/$", ""));
+            spi.getModeration().setFailOpen(false);
+            dedicated.enqueue(new MockResponse().setResponseCode(503).setBody("down"));
+
+            StepVerifier.create(api.scan(buildReq()))
+                    .assertNext(outcome -> assertThat(outcome.isBlocked()).isTrue())
+                    .verifyComplete();
+            assertThat(dedicated.getRequestCount()).isEqualTo(1);
+            assertThat(server.getRequestCount()).isZero();
+        }
     }
 }

@@ -38,8 +38,8 @@ class ModelsControllerTest {
         props.setUrl(backend.url("/").toString().replaceAll("/$", ""));
         WebClient.Builder b = WebClient.builder();
         controller = new ModelsController(
-                new HttpTokenApi(b, props, new RpcInternalAuth(props)),
-                new HttpChatModelApi(b, props, new RpcInternalAuth(props)));
+                new HttpTokenApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props)),
+                new HttpChatModelApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props)));
     }
 
     @AfterEach

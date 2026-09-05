@@ -50,6 +50,8 @@ public class TaskRelayOrchestrator {
 
     private final HttpTokenApi tokenApi;
     private final HttpChannelApi channelApi;
+    private final fun.commons.tokengateway.rpc.AdapterSelector adapterSelector;
+    private final fun.commons.tokengateway.rpc.TokenRouteClient tokenRouteClient;
     private final TaskBillingSaga billingSaga;
     private final LotaskTaskClient lotaskClient;
     private final RouteSnapshotCipher snapshotCipher;
@@ -92,8 +94,15 @@ public class TaskRelayOrchestrator {
                 });
     }
 
-    /** 控制层 route resolve: 模型不同价不同, 先定价再预扣; 10400 语义透传 (同 LLM 面). */
+    /**
+     * 控制层 route resolve: 模型不同价不同, 先定价再预扣; 10400 语义透传 (同 LLM 面).
+     * <p>G5: adapter=tokengo|openapi 时走 token-route resolve (data_json 契约字段映射),
+     * 路由快照随 submit 载荷下发 Worker 的链路不变.
+     */
     private Mono<DistributeVO> resolveRoute(TokenValidateVO token, String model) {
+        if (adapterSelector.routeViaTokenRoute()) {
+            return tokenRouteClient.resolve(model, null, 0, 0, null);
+        }
         return channelApi.distribute(DistributeRequest.builder()
                         .tenantId(token.getTenantId())
                         .userId(token.getUserId())

@@ -1,6 +1,5 @@
 package fun.commons.tokengateway.rpc;
 
-import fun.commons.tokengateway.config.GatewayProperties;
 import fun.commons.tokengateway.contract.AccessLogRequest;
 import fun.commons.tokengateway.framework.ApiResponse;
 import lombok.RequiredArgsConstructor;
@@ -25,17 +24,17 @@ public class HttpAccessLogApi {
             new ParameterizedTypeReference<>() {};
 
     private final WebClient.Builder webClientBuilder;
-    private final GatewayProperties props;
+    private final CapabilityEndpoints endpoints;
     private final RpcInternalAuth internalAuth;
 
     public Mono<Void> record(AccessLogRequest request) {
         WebClient.RequestHeadersSpec<?> req = webClientBuilder.build().post()
-                .uri(props.getUrl() + "/api/v1/internal/access-log/record")
+                .uri(endpoints.accessLog().getUrl() + "/api/v1/internal/access-log/record")
                 .bodyValue(request);
-        internalAuth.attachTo(req);
+        internalAuth.attachTo(req, endpoints.accessLog());
         return req.retrieve()
                 .bodyToMono(TYPE)
-                .timeout(props.getTimeout())
+                .timeout(endpoints.accessLog().getTimeout())
                 .doOnError(e -> log.warn("[HttpAccessLog] record RPC 失败: model={}, err={}",
                         request != null ? request.getModelCode() : null, e.getMessage()))
                 .onErrorResume(e -> Mono.empty())
