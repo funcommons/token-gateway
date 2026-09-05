@@ -75,16 +75,12 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <!-- exec classifier: 保留普通 library jar (fat-jar 的类在 BOOT-INF 里,
+                     starter 作为依赖编译时 classpath 不可见); 可运行产物为 *-exec.jar -->
                 <configuration>
                     <mainClass>fun.commons.tokengateway.worker.TaskWorkerApplication</mainClass>
+                    <classifier>exec</classifier>
                 </configuration>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>repackage</goal>
-                        </goals>
-                    </execution>
-                </executions>
             </plugin>
         </plugins>
     </build>

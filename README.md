@@ -68,6 +68,25 @@ bash scripts/smoke.sh                                         # PASS/FAIL 矩阵
 
 关键配置（`app/src/main/resources/application.yml`）：`gateway.backend.url`（后端 RPC 目标）、`gateway.backend.internal-token`（`dev-` 开头跳过签名头）、`gateway.health-report.enabled`（渠道健康上报，默认开）、`gateway.thmp.*`（TokenHub 影子/切流，默认关闭）。
 
+**嵌入模式（spring-boot-starter）**：在自己的 WebFlux 应用里引用 starter 即装配网关（JitPack 发布，tag 即版本）：
+
+```xml
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+
+<dependency>
+    <groupId>com.github.funcommons.token-gateway</groupId>
+    <artifactId>token-gateway-spring-boot-starter</artifactId>
+    <version>v0.2.0</version>
+</dependency>
+```
+
+宿主须为 **WebFlux 栈**（MVC 宿主下 starter 不装配）；`token-gateway.face = llm | task | all` 分组同款语义，`token-gateway.enabled=false` 一键关闭；`token-gateway.worker.enabled=true` 可把任务执行 Worker 一并装进宿主（嵌入任务面完整闭环，无需另起 Worker 进程）。详见 [docs/用户文档/02_快速开始.md](docs/用户文档/02_快速开始.md)「嵌入模式」。
+
 ## 文档
 
 ### 用户文档（网关调用方）

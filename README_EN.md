@@ -58,6 +58,25 @@ bash scripts/smoke.sh                                         # PASS/FAIL matrix
 
 Key configuration (`app/src/main/resources/application.yml`): `gateway.backend.url` (backend RPC target), `gateway.backend.internal-token` (`dev-` prefix skips the signed header), `gateway.health-report.enabled` (channel health reporting, default on), `gateway.thmp.*` (TokenHub shadow/cutover, default off).
 
+**Embedded mode (spring-boot-starter)**: reference the starter in your own WebFlux application to assemble the gateway (published via JitPack, tag = version):
+
+```xml
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+
+<dependency>
+    <groupId>com.github.funcommons.token-gateway</groupId>
+    <artifactId>token-gateway-spring-boot-starter</artifactId>
+    <version>v0.2.0</version>
+</dependency>
+```
+
+The host must be on the **WebFlux stack** (the starter stays inactive in MVC hosts); `token-gateway.face = llm | task | all` grouping semantics apply, `token-gateway.enabled=false` turns it off, and `token-gateway.worker.enabled=true` also assembles the task-executing Worker into the host (a full embedded task-face loop — no separate Worker process). See "Embedded Mode" in [docs/en/user/quickstart.md](docs/en/user/quickstart.md).
+
 ## Documentation
 
 ### User Docs (Callers)

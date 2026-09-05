@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **嵌入模式 starter（`token-gateway-spring-boot-starter`）**：在自己的 WebFlux 应用引用 starter 即装配网关，装配口径与独立部署 app 完全同构（core 十包 + face 条件装配）
+  - 自动装配：`AutoConfiguration.imports` 注册 `TokenGatewayAutoConfiguration`（component-scan core 十包 → FaceLlmAssembly/FaceTaskAssembly 按 `token-gateway.face` 条件生效）
+  - **Worker 嵌入闭环**：`token-gateway.worker.enabled=true`（缺省关闭，face=task|all 生效）把任务执行 Worker 一并装进宿主进程——引用 starter 即完整 token-gateway，嵌入任务面无需另起 Worker 进程；`TokenGatewayProperties` 绑定 bean 双侧条件化（TaskFaceConfiguration/WorkerConfiguration，防同进程 BeanDefinitionOverrideException，独立部署零影响）
+  - 条件防御：仅 reactive web 宿主装配（MVC 宿主静默不装配）；`token-gateway.enabled=false` 一键关闭（缺省开启）
+  - **JitPack 发布**（同 framework4j 口径）：加 `.jitpack.yml`（jdk 17），用户引 `com.github.funcommons.token-gateway` + tag 即版本，零发布基础设施
+  - 测试 +9：ApplicationContextRunner 条件矩阵（face 分组 ×3/enabled/非法值 fail-fast[ISE 经 scan 包装为 BeanDefinitionStoreException，断言 cause 链最深处]/worker 开关 ×3）+ 真实宿主 @SpringBootTest 嵌入冒烟
+
 ## [0.2.0] - 2026-09-04
 
 ### 新增

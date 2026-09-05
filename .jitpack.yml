@@ -1,0 +1,8 @@
+# JitPack 构建配置
+# https://jitpack.io/docs/BUILDING/
+
+jdk:
+  - openjdk17
+
+# tag 即版本: com.github.funcommons.token-gateway:<artifactId>:<tag>
+# JitPack 默认 mvn install -DskipTests, 测试不参与发布构建

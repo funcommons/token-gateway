@@ -31,4 +31,6 @@ features:
     details: Redis 滑动窗口限流（四响应头）· Idempotency-Key 拒绝式去重 · 审核 fail-open · X-Trace-Id 全链路
   - title: 后端间灰度
     details: THMP 契约面影子双跑比对 + 确定性分桶切流 + 秒级回滚（[THMP-SHADOW] 埋点 + shadow-report.py 复用）
+  - title: 两种部署形态
+    details: 独立部署 fat-jar（同 jar 异配置 face=llm|task|all）或 WebFlux 应用嵌入 starter（JitPack 引用即装配，可含 Worker 执行闭环，token-gateway.enabled 一键开关）
 ---

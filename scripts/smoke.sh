@@ -7,7 +7,7 @@
 #   lotask4j    :8080     见 docs/开发文档/07_lotask4j租户开通手册.md
 #   demo-control-plane :9400   java -jar demo-control-plane/target/demo-control-plane-*.jar
 #   网关 + Worker          java -jar app/target/token-gateway-app-*.jar
-#                       java -jar task-worker/target/task-worker-*.jar
+#                       java -jar task-worker/target/task-worker-*-exec.jar
 #                        (网关/Worker 需配 LOTASK_URL/JWT 等环境变量, 见 07 手册冒烟节)
 #
 # 用法: bash scripts/smoke.sh

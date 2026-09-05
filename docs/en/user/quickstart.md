@@ -79,6 +79,47 @@ curl -s http://<gateway-host>:9401/v1/videos/T20260902... \
 curl -sL "http://<gateway-host>:9401<proxy URL>" -o out.mp4
 ```
 
+## Embedded Mode (starter)
+
+Skip the standalone fat-jar: reference the starter inside your own **WebFlux** application and the gateway endpoints assemble into the host process (published via JitPack, tag = version):
+
+```xml
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+
+<dependency>
+    <groupId>com.github.funcommons.token-gateway</groupId>
+    <artifactId>token-gateway-spring-boot-starter</artifactId>
+    <version>v0.2.0</version>
+</dependency>
+```
+
+Configuration matches the standalone deployment:
+
+```yaml
+token-gateway:
+  face: llm        # llm | task | all (same grouping semantics; illegal value fails fast at startup)
+  enabled: true    # false turns it off (on by default)
+  worker:
+    enabled: false # true also assembles the task-executing Worker into the host (effective with face=task|all) —
+                   # a full embedded task-face loop with no separate Worker process; off by default
+gateway:
+  backend:
+    url: http://localhost:9400
+```
+
+Constraints and limitations:
+
+- **The host must be on the WebFlux stack** (`spring-boot-starter-webflux`): the gateway pipeline is driven by WebFilters — in an MVC (servlet) host the starter stays silently inactive
+- Rate limiting/idempotency depend on Redis: the host's `spring.data.redis.*` connection config is reused as-is
+- `face=task` requires a resource cache volume + a reachable lotask4j platform (see the [Task Face Guide](./task-guide.md)); set `worker.enabled=true` to pull and execute tasks inside the host (Worker script dir / concurrency follow the `worker.*` config)
+- Gateway-internal beans are registered via component scanning and cannot be overridden with `@Bean` in the host; open an issue for customization needs
+- Operational endpoints (health checks) require the host to include `spring-boot-starter-actuator`
+
 ## What's next
 
 | You want to | Go to |

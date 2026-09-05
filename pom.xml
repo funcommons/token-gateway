@@ -29,6 +29,7 @@
         <module>face-task</module>
         <module>task-worker</module>
         <module>demo-control-plane</module>
+        <module>token-gateway-spring-boot-starter</module>
         <module>app</module>
     </modules>
 
@@ -59,6 +60,16 @@
             <dependency>
                 <groupId>fun.commons</groupId>
                 <artifactId>face-task</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.commons</groupId>
+                <artifactId>task-worker</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.commons</groupId>
+                <artifactId>token-gateway-spring-boot-starter</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

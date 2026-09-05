@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>fun.commons</groupId>
+        <artifactId>token-gateway</artifactId>
+        <version>0.3.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <!-- JaCoCo 门禁: 装配壳仅注解, 豁免 (同 app 先例) -->
+    <properties>
+        <jacoco.line.min>0.0</jacoco.line.min>
+    </properties>
+
+    <artifactId>token-gateway-spring-boot-starter</artifactId>
+    <name>token-gateway-spring-boot-starter</name>
+    <description>
+        token-gateway 嵌入模式 starter: 用户在自己的 WebFlux 应用引用本 starter
+        即可装配网关 (token-gateway.face = llm | task | all 部署分组同款语义).
+        经 JitPack 发布 (com.github.funcommons.token-gateway), tag 即版本.
+    </description>
+
+    <dependencies>
+        <!-- face 装配 (face 条件由 FaceLlmAssembly / FaceTaskAssembly 控制) -->
+        <dependency>
+            <groupId>fun.commons</groupId>
+            <artifactId>face-llm</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.commons</groupId>
+            <artifactId>face-task</artifactId>
+        </dependency>
+
+        <!-- 任务执行 Worker (嵌入任务面拉单执行; token-gateway.worker.enabled 显式开启) -->
+        <dependency>
+            <groupId>fun.commons</groupId>
+            <artifactId>task-worker</artifactId>
+        </dependency>
+
+        <!-- WebFlux + Netty (网关为 reactive 栈; MVC 宿主下 starter 不装配) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+
+        <!-- Redis (限流 / 幂等, 复用宿主应用的 Redis 连接配置) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- 健康检查 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

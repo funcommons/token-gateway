@@ -117,7 +117,7 @@ nohup env SERVER_PORT=9406 GATEWAY_BACKEND_URL=http://localhost:9405 \
   java -jar app/target/token-gateway-app-*.jar > /tmp/tgw-smoke/gateway.log 2>&1 &
 
 # worker :9411 (yml default port)
-nohup java -jar task-worker/target/task-worker-*.jar > /tmp/tgw-smoke/worker.log 2>&1 &
+nohup java -jar task-worker/target/task-worker-*-exec.jar > /tmp/tgw-smoke/worker.log 2>&1 &
 
 # ④ Full-chain smoke (defaults 9400/9401; pass env vars when ports are shifted)
 CP=http://localhost:9405 GW=http://localhost:9406 LOTASK=http://localhost:<port> bash scripts/smoke.sh
