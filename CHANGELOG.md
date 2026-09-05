@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-05
+
 ### 新增
 
 - **嵌入模式 starter（`token-gateway-spring-boot-starter`）**：在自己的 WebFlux 应用引用 starter 即装配网关，装配口径与独立部署 app 完全同构（core 十包 + face 条件装配）

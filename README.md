@@ -81,7 +81,7 @@ bash scripts/smoke.sh                                         # PASS/FAIL 矩阵
 <dependency>
     <groupId>com.github.funcommons.token-gateway</groupId>
     <artifactId>token-gateway-spring-boot-starter</artifactId>
-    <version>v0.2.0</version>
+    <version>v0.3.0</version>
 </dependency>
 ```
 
