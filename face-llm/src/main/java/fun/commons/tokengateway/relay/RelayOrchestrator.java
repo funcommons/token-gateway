@@ -293,6 +293,7 @@ public class RelayOrchestrator {
                         .cacheReadTokens(cachedTokens)
                         .success(true)
                         .requestId(prepared.requestId())
+                        .ownerPartyId(ownerPartyIdOf(prepared.token()))
                         .responseTimeMs(responseTimeMs);
         if (attempts != null && !attempts.isEmpty()) {
             builder.attempts(attempts);
@@ -461,6 +462,22 @@ public class RelayOrchestrator {
         /** 是否 token-route 路由 (report 三态回报可达). */
         public boolean reportable() {
             return routeEntryId != null;
+        }
+    }
+
+    /**
+     * ③⑦ 对账 owner 桥: token 侧 user_id → 结算主体 (数值化; 非数值/缺省返回 null =
+     * 旧语义, 计费后端落 0 占位), 与 pre-consume 的 userId 槽位同源同口径.
+     */
+    private static Long ownerPartyIdOf(TokenValidateVO token) {
+        if (token == null || token.getUserId() == null) {
+            return null;
+        }
+        try {
+            long id = Long.parseLong(token.getUserId().trim());
+            return id > 0 ? id : null;
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 

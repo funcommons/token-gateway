@@ -23,6 +23,12 @@ public class SettleRequest {
     private String errorMessage;
 
     /**
+     * 结算主体（token 侧 user_id，③⑦ 对账 owner 桥）: 计费后端落 tg_settlement_outbox
+     * owner_party_id 供差错池日报/对账按户核销; 缺省 null = 旧版本语义（后端落 0 占位）.
+     */
+    private Long ownerPartyId;
+
+    /**
      * 失败尝试明细 (G4, M1 版本化向后兼容增量: 可选字段, 旧计费后端忽略未知字段).
      * <p>每个可重试失败尝试一条 (不含最终成功结算的 MAIN 笔); 能力面按
      * {@code billed=true} 记 LOSS (路由损耗) 分录, 供毛利报表 (产品原型 §11.7/§14.2).

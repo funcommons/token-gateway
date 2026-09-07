@@ -434,6 +434,8 @@ class ChatCompletionControllerTest {
         assertThat(settleBody).isNotNull();
         assertThat(settleBody).contains("\"actualPromptTokens\":12");
         assertThat(settleBody).contains("\"actualCompletionTokens\":7");
+        // ③⑦ 对账 owner 桥: settle 契约携带 token 侧 user_id 数值化（userId:"2" → ownerPartyId:2）
+        assertThat(settleBody).contains("\"ownerPartyId\":2");
     }
 
     private MockResponse jsonOk() {
