@@ -115,9 +115,10 @@ class TokenRouteClientTest {
     }
 
     @Test
-    @DisplayName("AdapterSelector: 非法 adapter fail-fast; tokengo/openapi 走 token-route")
+    @DisplayName("AdapterSelector: 非法 adapter fail-fast; tokengo/openapi 且 table-id 非空走 token-route")
     void adapterSelectorValidation() {
         TokenGatewayProperties props = new TokenGatewayProperties();
+        props.getRoute().setTableId("tbl-llm-1");
         AdapterSelector selector = new AdapterSelector(props);
 
         props.setAdapter("bogus");
@@ -140,5 +141,32 @@ class TokenRouteClientTest {
 
         // DistributeVO 默认语义 (import 保留检查)
         assertThat(new DistributeVO()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("tableId 门控 (②⑦): token-route 族适配器但 route.table-id 空白 → 回落 distribute")
+    void blankTableIdFallsBackToDistribute() {
+        TokenGatewayProperties props = new TokenGatewayProperties();
+        props.setAdapter("tokengo");
+        props.getRoute().setTableId("");
+        AdapterSelector selector = new AdapterSelector(props);
+        selector.validate();
+
+        // 未配 table-id 不 fail-fast（部署面可先起进程），route 面回落 Mmagix distribute 契约
+        assertThat(selector.routeViaTokenRoute()).isFalse();
+
+        props.getRoute().setTableId("   ");
+        assertThat(selector.routeViaTokenRoute()).isFalse();
+
+        props.getRoute().setTableId(null);
+        assertThat(selector.routeViaTokenRoute()).isFalse();
+
+        props.getRoute().setTableId("tbl-llm-1");
+        assertThat(selector.routeViaTokenRoute()).isTrue();
+        selector.logActive();
+
+        // mmagix 族配了 table-id 也不走 token-route（适配器族仍是第一判据）
+        props.setAdapter("mmagix");
+        assertThat(selector.routeViaTokenRoute()).isFalse();
     }
 }

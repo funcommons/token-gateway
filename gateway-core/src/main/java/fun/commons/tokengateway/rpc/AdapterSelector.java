@@ -47,14 +47,32 @@ public class AdapterSelector {
                 + "' (允许 mmagix | tokenhub | tokengo | openapi | custom:<spiName>)");
     }
 
-    /** route 面是否走 token-route (resolve/report). */
+    /**
+     * route 面是否走 token-route (resolve/report).
+     *
+     * <p>②⑦ tableId 门控: 除适配器族判据外, 还要求 {@code token-gateway.route.table-id}
+     * 非空白——未配置时 route 面静默回落 distribute (Mmagix 契约), 保证部署面可先起进程
+     * (TokenGo 能力面 /api/v1/internal/channels/distribute 同契约), 配齐 table-id 后
+     * 重启即切 token-route。
+     */
     public boolean routeViaTokenRoute() {
-        return TOKEN_ROUTE_ADAPTERS.contains(spi.getAdapter());
+        if (!TOKEN_ROUTE_ADAPTERS.contains(spi.getAdapter())) {
+            return false;
+        }
+        String tableId = spi.getRoute() == null ? null : spi.getRoute().getTableId();
+        return tableId != null && !tableId.isBlank();
     }
 
     /** 启动期声明 (装配后调用一次, 显式暴露当前协议形状). */
     public void logActive() {
-        log.info("[Adapter] 协议形状: {}, route 面后端: {}", spi.getAdapter(),
-                routeViaTokenRoute() ? "token-route (resolve/report)" : "distribute (Mmagix 契约)");
+        String tableId = spi.getRoute() == null ? null : spi.getRoute().getTableId();
+        boolean viaTokenRoute = routeViaTokenRoute();
+        log.info("[Adapter] 协议形状: {}, route 面后端: {}, table-id: {}", spi.getAdapter(),
+                viaTokenRoute ? "token-route (resolve/report)" : "distribute (Mmagix 契约)",
+                viaTokenRoute ? tableId : "(未配置)");
+        if (!viaTokenRoute && TOKEN_ROUTE_ADAPTERS.contains(spi.getAdapter())) {
+            log.warn("[Adapter] adapter={} 属 token-route 族但 token-gateway.route.table-id 未配置,"
+                            + " route 面已回落 distribute; 配齐后重启生效", spi.getAdapter());
+        }
     }
 }
