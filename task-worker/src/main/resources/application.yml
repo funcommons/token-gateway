@@ -28,6 +28,18 @@ worker:
   max-task-duration: 3h               # 单任务最大时长 (网关超时钟另有兜底)
   egress-allowlist: ${WORKER_EGRESS_ALLOWLIST:}   # 逗号分隔 url 前缀; 空 = 全禁 (fail-closed)
 
+  # 脚本源 (issue #9): local = 本地目录扫描 (默认, 现状行为不变);
+  # remote = 控制层回调索取 (MMagiX 转接形态, 脚本真源 mmxp_model_script).
+  # remote 契约: GET {base-url}/{taskType} → {version, hooks}; 成功落本地副本
+  # (<scriptsDir>/.cache/), 控制层不可达降级用副本 + WARN; base-url/task-types
+  # 缺失启动 fail-fast. 鉴权 X-Internal-Token env 注入禁入仓.
+  script-source: ${WORKER_SCRIPT_SOURCE:local}
+  # script-remote:
+  #   base-url: http://mmagix:9400/api/v1/internal/work-scripts
+  #   internal-token: ${MMAGIX_INTERNAL_TOKEN:}
+  #   task-types: [video, image, tts]   # remote 无列表端点, 显式声明
+  #   cache-ttl: 60s                     # 版本比对节流 (窗口内不发 HTTP; 过期拉取比对)
+
 logging:
   level:
     root: INFO

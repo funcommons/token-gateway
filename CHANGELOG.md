@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **task-worker 远程脚本源**（issue #9，MMagiX 任务类模型转接形态）：`worker.script-source: local | remote`（默认 local，行为与现状 100% 一致，现有部署零感知）
+  - remote 契约：`GET {base-url}/{taskType}` → 信封 `{version, hooks}`（单文件 Groovy 三钩子）；`cache-ttl`（**默认 60s 可配**）窗口内跳过 HTTP，过期拉取比对版本，不变不落盘
+  - **降级自举**：成功拉取落本地副本（`<scriptsDir>/.cache/<taskType>/v-<version>.groovy`，原子写）；控制层不可达时降级用最后副本 + WARN，已在跑的 taskType 不中断；首启控制层不可达亦可从磁盘缓存自举
+  - **fail-fast**：remote 模式 `base-url` / `task-types` 缺失即启动报错（误配裸地址跑成空脚本比报错更糟）；鉴权 `X-Internal-Token` env 注入
+  - **任务内版本锁定澄清**：runTask 开始即持有不可变 `ScriptAsset` 引用，热载只换索引——create/poll/resultMapping 恒同版本；跨 Worker 重启重领任务整体重跑 create（lotask 既有语义）
+  - 测试 +10（拉取/鉴权头/ttl 节流+版本跳过/版本切换+旧副本清理/宕机降级+恢复/磁盘自举/fail-fast ×2/信封无效/local 不索引 .cache）
+
 ## [0.4.0] - 2026-09-05
 
 ### 新增（TokenGo 组件化改造 G1-G6）

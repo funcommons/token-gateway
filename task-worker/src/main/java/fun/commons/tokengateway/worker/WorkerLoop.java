@@ -92,6 +92,8 @@ public class WorkerLoop {
     /** 单任务执行 (虚拟线程; 脚本钩子经 ScriptExecutor 超时收口). */
     void runTask(ClaimedTask task) {
         try {
+            // 任务开始即锁定脚本版本 (ScriptAsset 为不可变 record, 本地变量全程持有):
+            // 期间 ScriptLoader 热载只换索引, create/poll/resultMapping 恒同版本 (issue #9)
             ScriptAsset script = scriptLoader.forType(task.type())
                     .orElseThrow(() -> new IllegalStateException("无脚本: " + task.type()));
             Map<String, Object> ctx = buildCtx(task);
