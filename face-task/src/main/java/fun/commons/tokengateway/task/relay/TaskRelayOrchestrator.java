@@ -99,7 +99,7 @@ public class TaskRelayOrchestrator {
                         return Mono.error(new RelayException(401, "invalid token"));
                     }
                     TokenValidateVO token = tokenResp.getData();
-                    return resolveRoute(token, model)
+                    return resolveRoute(token, model, idemKey)
                             .flatMap(channel -> submitWithSaga(modality, token, channel,
                                     model, body,
                                     idemKey != null ? idemKey : requestId,
@@ -112,7 +112,7 @@ public class TaskRelayOrchestrator {
      * <p>G5: adapter=tokengo|openapi 时走 token-route resolve (data_json 契约字段映射),
      * 路由快照随 submit 载荷下发 Worker 的链路不变.
      */
-    private Mono<DistributeVO> resolveRoute(TokenValidateVO token, String model) {
+    private Mono<DistributeVO> resolveRoute(TokenValidateVO token, String model, String idempotencyKey) {
         if (adapterSelector.routeViaTokenRoute()) {
             return tokenRouteClient.resolve(model, null, 0, 0, null);
         }
@@ -121,7 +121,8 @@ public class TaskRelayOrchestrator {
                         .userId(token.getUserId())
                         .apiKeyId(token.getTokenId())
                         .groupId(token.getGroupId())
-                        .model(model).build())
+                        .model(model)
+                        .idempotencyKey(idempotencyKey).build())
                 .flatMap(distResp -> {
                     if (distResp == null || !distResp.isSuccess() || distResp.getData() == null) {
                         String reason = distResp == null ? "no response"
