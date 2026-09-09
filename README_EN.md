@@ -42,8 +42,8 @@ Maven multi-module (design doc §9; faces independently deployable):
 Prerequisites: backend capability services reachable (e.g. MMagiX monolith on :9400); Redis reachable (default localhost:6379).
 
 ```bash
-mvn verify                                                    # 369 tests + coverage gate
-java -jar app/target/token-gateway-app-0.2.0.jar              # listens on :9401
+mvn verify                                                    # 402 tests + coverage gate
+java -jar app/target/token-gateway-app-0.5.0.jar              # listens on :9401
 ```
 
 **Full-chain smoke** (LLM face + task face positive/negative paths + notify + reconciliation, 11 steps / 28 assertions — 29 with notify verify keys configured on both sides, five processes, zero real dependencies):
@@ -71,7 +71,7 @@ Key configuration (`app/src/main/resources/application.yml`): `gateway.backend.u
 <dependency>
     <groupId>com.github.funcommons.token-gateway</groupId>
     <artifactId>token-gateway-spring-boot-starter</artifactId>
-    <version>v0.3.0</version>
+    <version>v0.5.0</version>
 </dependency>
 ```
 
