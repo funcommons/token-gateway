@@ -14,6 +14,18 @@ token-gateway:
   face: all
   # 协议形状适配器 (全局单选): mmagix | tokenhub | tokengo | openapi | custom:<spiName>
   adapter: mmagix
+  # ---- MMagiX task 面接入 (#12): 三控制面同指 bootstrap, 预铸 JWT env 注入 (#R1: jwt 态
+  # ---- X-Internal-Token=jwt-secret 字段值原样, 故此处配完整 JWT 而非 HS256 secret)
+  route:
+    distribute-path: ${TOKEN_GATEWAY_ROUTE_DISTRIBUTE_PATH:/api/v1/internal/work-channels/distribute}
+    auth: ${TOKEN_GATEWAY_ROUTE_AUTH:jwt}
+    jwt-secret: ${TOKEN_GATEWAY_ROUTE_JWT_SECRET:}
+  token-validate:
+    auth: ${TOKEN_GATEWAY_TOKEN_VALIDATE_AUTH:jwt}
+    jwt-secret: ${TOKEN_GATEWAY_TOKEN_VALIDATE_JWT_SECRET:}
+  billing:
+    auth: ${TOKEN_GATEWAY_BILLING_AUTH:jwt}
+    jwt-secret: ${TOKEN_GATEWAY_BILLING_JWT_SECRET:}
   # ---- 能力面寻址 (G1 SPI 装配收尾, 设计方案 §5.1): 每类服务独立 url/auth/超时,
   # ---- 可分离部署也可同指单体. 未配置 url 的面回退 gateway.backend.* (兼容窗口,
   # ---- 存量部署零配置迁移; 全部显式配置后可删 gateway.backend.*).
