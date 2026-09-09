@@ -59,6 +59,65 @@ public class ScriptHttpClient {
                 .block(timeout);
     }
 
+    /**
+     * multipart 表单提交 (#11): parts 元素两种形态 ——
+     * 标量字段 {@code [name: 'model', value: 'gpt-image-2']} 与
+     * 文件零件 {@code [name: 'image[]', bytes: byte[], filename: 'ref.png', contentType: 'image/png']}.
+     * 响应与 {@link #post} 同构 (JSON 解析); 出网白名单同样约束.
+     */
+    public Resp postMultipart(Object url, Map<?, ?> headers, List<?> parts) {
+        String u = String.valueOf(url);
+        checkEgress(u);
+        org.springframework.http.client.MultipartBodyBuilder builder =
+                new org.springframework.http.client.MultipartBodyBuilder();
+        if (parts != null) {
+            for (Object partObj : parts) {
+                if (!(partObj instanceof Map<?, ?> rawPart)) {
+                    continue;
+                }
+                java.util.Map<String, Object> part = new java.util.HashMap<>();
+                rawPart.forEach((k, v) -> part.put(String.valueOf(k), v));
+                String name = String.valueOf(part.get("name"));
+                if (part.get("bytes") instanceof byte[] bytes) {
+                    builder.part(name, new org.springframework.core.io.ByteArrayResource(bytes) {
+                        @Override
+                        public String getFilename() {
+                            return String.valueOf(part.getOrDefault("filename", "file"));
+                        }
+                    });
+                } else {
+                    builder.part(name, String.valueOf(part.get("value")));
+                }
+            }
+        }
+        WebClient.RequestHeadersSpec<?> spec = webClient.post().uri(u)
+                .contentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA)
+                .bodyValue(builder.build());
+        applyHeaders(spec, headers);
+        return exchange(spec);
+    }
+
+    /**
+     * 二进制下载 (#11): 参考图下载等场景; 返回原始字节 (不做 JSON 解析), 白名单同样约束.
+     */
+    public ByteResp getBytes(Object url, Map<?, ?> headers) {
+        String u = String.valueOf(url);
+        checkEgress(u);
+        WebClient.RequestHeadersSpec<?> spec = webClient.get().uri(u);
+        applyHeaders(spec, headers);
+        return spec.exchangeToMono(resp -> resp.bodyToMono(byte[].class)
+                        .defaultIfEmpty(new byte[0])
+                        .map(bytes -> new ByteResp(resp.statusCode().value(), bytes,
+                                resp.statusCode().is2xxSuccessful())))
+                .block(timeout);
+    }
+
+    /**
+     * 二进制响应视图: {status, bytes, ok}.
+     */
+    public record ByteResp(int status, byte[] bytes, boolean ok) {
+    }
+
     private void checkEgress(String url) {
         String host = URI.create(url).getHost();
         boolean allowed = host != null && egressAllowlist.stream()

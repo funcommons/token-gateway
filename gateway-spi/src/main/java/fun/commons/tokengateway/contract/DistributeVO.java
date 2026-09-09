@@ -31,4 +31,10 @@ public class DistributeVO {
      */
     @Builder.Default
     private OwnerType ownerType = OwnerType.PLATFORM;
+
+
+    /**
+     * 接入方定价透传 (#12: 全额积分语义, work 域分发端点回传; null=走 token 估算).
+     */
+    private Integer priceQuote;
 }

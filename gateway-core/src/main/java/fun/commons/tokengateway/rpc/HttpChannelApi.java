@@ -31,7 +31,7 @@ public class HttpChannelApi {
 
     public Mono<ApiResponse<DistributeVO>> distribute(DistributeRequest request) {
         WebClient.RequestHeadersSpec<?> req = webClientBuilder.build().post()
-                .uri(endpoints.route().getUrl() + "/api/v1/internal/channels/distribute")
+                .uri(endpoints.route().getUrl() + endpoints.route().getPath())
                 .bodyValue(request);
         internalAuth.attachTo(req, endpoints.route());
         return req.retrieve()

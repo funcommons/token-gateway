@@ -30,4 +30,10 @@ public class EndpointConfig {
 
     /** 本面独立超时预算 (SPI 铁律 3: 实现方不得自带超时覆盖). */
     private Duration timeout;
+
+
+    /**
+     * 能力面方法路径 (#12: route 分发端点可配置; 默认 chat 端点, 行为不变).
+     */
+    private String path = "/api/v1/internal/channels/distribute";
 }

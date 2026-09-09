@@ -45,6 +45,16 @@ public class TaskBillingSaga {
      */
     public Mono<String> preConsumeFull(TokenValidateVO token, String channelId, String ownerType,
                                        String model, String requestId) {
+        return preConsumeFull(token, channelId, ownerType, model, requestId, null);
+    }
+
+    /**
+     * 全额预扣 (重载, #12): amount 非空时透传接入方定价 (全额积分语义),
+     * requestId 即接入方 Idempotency-Key (= MMagiX workId), 接入方凭它幂等对账;
+     * amount=null 走 token 估算, 行为与原版一致.
+     */
+    public Mono<String> preConsumeFull(TokenValidateVO token, String channelId, String ownerType,
+                                       String model, String requestId, Integer amount) {
         return billingApi.preConsume(PreConsumeRequest.builder()
                         .tenantId(token.getTenantId())
                         .userId(token.getUserId())
@@ -55,6 +65,7 @@ public class TaskBillingSaga {
                         .estimatedPromptTokens(0)
                         .estimatedCompletionTokens(0)
                         .requestId(requestId)
+                        .amount(amount)
                         .build())
                 .map(resp -> {
                     if (resp == null || !resp.isSuccess() || resp.getData() == null

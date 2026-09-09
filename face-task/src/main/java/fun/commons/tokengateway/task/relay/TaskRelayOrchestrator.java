@@ -71,6 +71,16 @@ public class TaskRelayOrchestrator {
      */
     public Mono<Map<String, Object>> create(String modality, String apiKey,
                                             Map<String, Object> body, String traceId) {
+        return create(modality, apiKey, body, traceId, null);
+    }
+
+    /**
+     * create (重载, #12): idempotencyKey 即接入方 Idempotency-Key, 优先作为 billing requestId
+     * (接入方幂等键透传); amount=渠道分发响应的 priceQuote (全额语义).
+     */
+    public Mono<Map<String, Object>> create(String modality, String apiKey,
+                                            Map<String, Object> body, String traceId,
+                                            String idempotencyKey) {
         String model = body == null ? null : (String) body.get("model");
         if (model == null || model.isBlank()) {
             return Mono.error(new RelayException(400, ApiCode.REQUIRED_MISSING.getCode(),
@@ -81,6 +91,7 @@ public class TaskRelayOrchestrator {
                     "缺少 bearer token"));
         }
         String requestId = traceId != null ? traceId : java.util.UUID.randomUUID().toString();
+        final String idemKey = idempotencyKey;
         return tokenApi.validate(TokenValidateRequest.builder().apiKey(apiKey).model(model).build())
                 .flatMap(tokenResp -> {
                     if (tokenResp == null || !tokenResp.isSuccess() || tokenResp.getData() == null
@@ -90,7 +101,9 @@ public class TaskRelayOrchestrator {
                     TokenValidateVO token = tokenResp.getData();
                     return resolveRoute(token, model)
                             .flatMap(channel -> submitWithSaga(modality, token, channel,
-                                    model, body, requestId));
+                                    model, body,
+                                    idemKey != null ? idemKey : requestId,
+                                    channel.getPriceQuote()));
                 });
     }
 
@@ -126,10 +139,11 @@ public class TaskRelayOrchestrator {
 
     private Mono<Map<String, Object>> submitWithSaga(String modality, TokenValidateVO token,
                                                      DistributeVO channel, String model,
-                                                     Map<String, Object> body, String requestId) {
+                                                     Map<String, Object> body, String requestId,
+                                                     Integer amount) {
         String ownerType = channel.getOwnerType() != null
                 ? channel.getOwnerType().name() : "PLATFORM";
-        return billingSaga.preConsumeFull(token, channel.getChannelId(), ownerType, model, requestId)
+        return billingSaga.preConsumeFull(token, channel.getChannelId(), ownerType, model, requestId, amount)
                 .flatMap(preConsumeId -> {
                     String taskNo = generateTaskNo();
                     Map<String, Object> payload = buildPayload(model, body, channel);

@@ -14,6 +14,21 @@ import java.util.List;
 @EqualsAndHashCode(callSuper = true)
 public class RouteFaceConfig extends EndpointConfig {
 
+    /**
+     * 渠道分发端点路径 (#12: face=task 可指向接入方 work 域分发端点;
+     * 默认 chat 端点, 行为不变).
+     */
+    private String distributePath = "/api/v1/internal/channels/distribute";
+
+    public String getDistributePath() {
+        return distributePath == null || distributePath.isBlank()
+                ? "/api/v1/internal/channels/distribute" : distributePath;
+    }
+
+    public void setDistributePath(String distributePath) {
+        this.distributePath = distributePath;
+    }
+
     /** 模型绑定: 先命中先得, 支持通配 (如 ["gpt-*", "claude-*", "*"]). */
     private List<ModelBinding> routes = new ArrayList<>();
 

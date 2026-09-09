@@ -32,8 +32,9 @@ public class TaskController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
             @RequestHeader(value = "X-Trace-Id", required = false) String traceId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody Map<String, Object> body) {
-        return orchestrator.create("video", extractApiKey(authorization, xApiKey), body, traceId);
+        return orchestrator.create("video", extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
     }
 
     @PostMapping("/v1/images")
@@ -41,8 +42,9 @@ public class TaskController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
             @RequestHeader(value = "X-Trace-Id", required = false) String traceId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody Map<String, Object> body) {
-        return orchestrator.create("image", extractApiKey(authorization, xApiKey), body, traceId);
+        return orchestrator.create("image", extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
     }
 
     @PostMapping("/v1/audios")
@@ -50,8 +52,9 @@ public class TaskController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
             @RequestHeader(value = "X-Trace-Id", required = false) String traceId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody Map<String, Object> body) {
-        return orchestrator.create("audio", extractApiKey(authorization, xApiKey), body, traceId);
+        return orchestrator.create("audio", extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
     }
 
     @PostMapping("/v1/tts")
@@ -59,8 +62,9 @@ public class TaskController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
             @RequestHeader(value = "X-Trace-Id", required = false) String traceId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody Map<String, Object> body) {
-        return orchestrator.create("tts", extractApiKey(authorization, xApiKey), body, traceId);
+        return orchestrator.create("tts", extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
     }
 
     @GetMapping("/v1/videos/{taskNo}")

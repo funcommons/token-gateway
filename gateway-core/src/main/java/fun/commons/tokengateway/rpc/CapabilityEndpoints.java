@@ -24,8 +24,10 @@ public class CapabilityEndpoints {
 
     /** 路由/分发面 (distribute). */
     public EndpointConfig route() {
-        return resolve(spi.getRoute().getUrl(), spi.getRoute().getTimeout(),
+        EndpointConfig endpoint = resolve(spi.getRoute().getUrl(), spi.getRoute().getTimeout(),
                 spi.getRoute().getAuth(), keyOf(spi.getRoute()));
+        endpoint.setPath(spi.getRoute().getDistributePath());
+        return endpoint;
     }
 
     /** 凭证校验面. */
