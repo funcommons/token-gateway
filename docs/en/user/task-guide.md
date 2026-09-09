@@ -76,6 +76,11 @@ token-gateway:
     resource-cache-dir: /data/tgw-cache  # Resource proxy cache directory (disk mounted on face=task instances)
     resource-sign-key: ${TGW_RESOURCE_SIGN_KEY}
     notify-retry: 1m,10m,1h              # notify re-send backoff tiers
+    submit-task-type: modality           # Dispatch granularity: modality (default, zero change)
+                                         # | model = dispatch tasks by request-body model code
+                                         # (required when Worker scripts claim by modelCode, else
+                                         # tasks stay PENDING unclaimed; after switching, timeouts
+                                         # keys must be built per model code)
 ```
 
 Scheduling backstops: the timeout clock (deadline → requery terminal state → EXPIRED + refund) and pre-charge–terminal reconciliation are owned by the gateway (TimeoutClockJob / ReconcileJob); the task state machine / retry / zombie reaping are hosted by lotask4j.

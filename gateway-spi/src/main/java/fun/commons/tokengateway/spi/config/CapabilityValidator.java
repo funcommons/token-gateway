@@ -91,6 +91,13 @@ public final class CapabilityValidator {
             warnings.add("task.lotask auth=none 但 url 非 localhost (" + lotask.getUrl()
                     + "): none 仅限同机隔离, 跨主机请改用 jwt/key (安全契约 §3)");
         }
+        boolean granularityKnown = "modality".equalsIgnoreCase(task.getSubmitTaskType())
+                || "model".equalsIgnoreCase(task.getSubmitTaskType());
+        if (!granularityKnown) {
+            warnings.add("task.submit-task-type 非法值 \"" + task.getSubmitTaskType()
+                    + "\" (仅 modality|model): 已回退 modality 建单——若意图配 model (remote Worker"
+                    + " 按模型编码拉单), 拼错即任务无人认领永 PENDING (issue #13)");
+        }
     }
 
     /** auth=none + 非 localhost url → 启动告警 (安全契约 §3.3: 白名单不构成认证). */

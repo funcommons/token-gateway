@@ -77,6 +77,8 @@ graph TB
   → 网关: Redis 幂等去重（task_no 已存在 → 直接返回已建任务, 网关侧补偿 R2）
   → 网关: lotask4j submit {task_type: video, idempotency_key: task_no,
                            payload: {params, notify_url, route 快照(网关侧 AES-GCM 加密)}}
+       ‑ task_type 粒度可配: token-gateway.task.submit-task-type = modality(默认, 端点模态)
+         | model(取 body.model —— remote Worker 脚本以 modelCode 索引拉单时用, issue #13)
        ‑ 独占租户分区内 idempotency_key 唯一 + 网关侧去重 ⇒ 端到端幂等
   → 调用方 ← {task_no, PENDING, poll_url}   （submit 失败 → 全额退款 + 10004）
 ```

@@ -58,6 +58,9 @@ token-gateway:
       webhook-callback-url: ${LOTASK_WEBHOOK_CALLBACK_URL:}
     snapshot-cipher-key: ${TGW_SNAPSHOT_CIPHER_KEY:}
     resource-sign-key: ${TGW_RESOURCE_SIGN_KEY:}
+    # lotask submit 的 task_type 粒度: modality(默认, 零感知) | model (remote Worker 按
+    # modelCode 拉单时配 model, issue #13; 切换后 timeouts 键须同步按模型编码建)
+    # submit-task-type: modality
     timeouts:
       video: 2h
       image: 30m

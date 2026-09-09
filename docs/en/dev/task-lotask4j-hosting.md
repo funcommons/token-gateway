@@ -77,6 +77,9 @@ Caller POST /v1/videos {model, params, notify_url}
   → Gateway: Redis idempotency dedup (task_no already exists → return the existing task; gateway-side compensation for R2)
   → Gateway: lotask4j submit {task_type: video, idempotency_key: task_no,
                            payload: {params, notify_url, route snapshot (AES-GCM encrypted gateway-side)}}
+       ‑ task_type granularity is configurable: token-gateway.task.submit-task-type = modality
+         (default, endpoint modality) | model (body.model — for remote Workers whose scripts
+         are indexed by modelCode, issue #13)
        ‑ idempotency_key unique within the dedicated tenant partition + gateway-side dedup ⇒ end-to-end idempotence
   → Caller ← {task_no, PENDING, poll_url}   (submit failure → full refund + 10004)
 ```

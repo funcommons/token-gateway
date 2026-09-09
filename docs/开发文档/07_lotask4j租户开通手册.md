@@ -16,7 +16,7 @@
 | 租户 `name` | — | 接入方身份（如 `token-gateway`） |
 | 租户 `tenantSecret`（一次性明文） | `LOTASK_JWT_SECRET` 的登录凭据 + `LOTASK_SIGN_KEY` + `LOTASK_TENANT_SECRET`（同一个值，见 §4 认证说明） | client_credentials 登录 / 写端点 HMAC / webhook 验签 |
 | 租户 `name`（创建时指定） | `LOTASK_ACCESS_KEY` + `LOTASK_TENANT_NAME` | 写端点 `X-Access-Key` 头（平台 DbSecretProvider **按租户 name** 查钥，**不是 id**）；登录 client_id |
-| task_type 配置 | Worker 拉单类型 | `video`（超时/并发/重试在平台侧配置） |
+| task_type 配置 | Worker 拉单类型 | `video`（超时/并发/重试在平台侧配置）。网关 submit 粒度由 `token-gateway.task.submit-task-type` 决定：默认按**模态**注册（video/image/audio/tts）；配 `model` 时按**模型编码**注册（须与 Worker 侧 `worker.script-remote.task-types` 声明的编码一一对应，见 §2.3 注） |
 
 > 凭证纪律：`tenantSecret` 明文只在创建/重置响应出现一次，**立即入密钥管理系统/环境变量，不入仓不入聊天记录**。
 
@@ -59,6 +59,8 @@ curl -s -X POST http://<lotask>:8080/api/v1/admin/types \
 ```
 
 > `timeoutSeconds` 与网关侧 `token-gateway.task.timeouts.video` 对齐（网关超时钟兜底，平台超时双保险）。image/audio/tts 同理按需注册。
+>
+> **model 粒度（issue #13）**：网关配 `token-gateway.task.submit-task-type: model` 时，lotask 任务的 `type` = 请求体 `model`（模型编码）。此时 `typeKey` 须按模型编码注册（如 `runninghub-gptimage2-text-to-image`），且与 task-worker 的 `worker.script-remote.task-types`（remote 脚本源按 modelCode 索引拉单的声明集合）一致——任何一侧缺失该编码，任务入队后无人认领永 PENDING。网关侧 `timeouts` 键也须同步按模型编码建。
 
 ### 2.4 配置 webhook 回调（终态事件 → 网关）
 

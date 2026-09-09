@@ -62,7 +62,8 @@ public class LotaskTaskClient {
     /**
      * 提交任务, 返回 lotask 任务 ID (OpenID 字符串).
      *
-     * @param taskType       任务类型 (video/image/audio/tts, 决定 Worker 脚本与超时档)
+     * @param taskType       任务类型 (video/image/audio/tts, 决定 Worker 拉单与超时档;
+     *                       submit-task-type=model 时为模型编码, issue #13)
      * @param idempotencyKey 外部幂等键 (= 网关 task_no; 平台租户分区内唯一)
      * @param payload        任务载荷 (params + notify_url + 加密路由快照)
      * @param callbackUrl    终态 webhook 地址 (网关 /internal/lotask/webhook)

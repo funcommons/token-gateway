@@ -112,6 +112,23 @@ class CapabilityValidatorTest {
     }
 
     @Test
+    @DisplayName("submit-task-type 非法值 → warning (回退 modality, 防 model 拼错永 PENDING); 合法值不告警")
+    void taskFaceInvalidSubmitTaskTypeWarns() {
+        TokenGatewayProperties props = new TokenGatewayProperties();
+        props.setFace(Face.TASK);
+        props.getTask().getLotask().setUrl("http://localhost:8080");
+        props.getTask().setResourceSignKey("k");
+        props.getTask().getLotask().setTenantSecret("s");
+        props.getTask().setSubmitTaskType("models"); // 拼错: 意图 model 实则回退 modality
+        List<String> warnings = CapabilityValidator.validate(props, FULL);
+        assertThat(warnings).anyMatch(w -> w.contains("submit-task-type"));
+
+        props.getTask().setSubmitTaskType("model");
+        assertThat(CapabilityValidator.validate(props, FULL))
+                .noneMatch(w -> w.contains("submit-task-type"));
+    }
+
+    @Test
     @DisplayName("auth=none + 非 localhost url → 启动告警 (安全契约 §3.3); localhost 不告警")
     void noneAuthNonLocalhostWarns() {
         TokenGatewayProperties props = new TokenGatewayProperties();

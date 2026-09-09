@@ -16,7 +16,7 @@
 | Tenant `name` | — | Integrator identity (e.g. `token-gateway`) |
 | Tenant `tenantSecret` (one-time plaintext) | The credential behind `LOTASK_JWT_SECRET` + `LOTASK_SIGN_KEY` + `LOTASK_TENANT_SECRET` (same value — see §4) | client_credentials login / write-endpoint HMAC / webhook verification |
 | Tenant `name` (chosen at creation) | `LOTASK_ACCESS_KEY` + `LOTASK_TENANT_NAME` | Write-endpoint `X-Access-Key` header (platform DbSecretProvider looks up by tenant **name**, **not id**) and login client_id |
-| task_type config | Worker claim type | `video` (timeout/concurrency/retries configured platform-side) |
+| task_type config | Worker claim type | `video` (timeout/concurrency/retries configured platform-side). Gateway submit granularity is set by `token-gateway.task.submit-task-type`: default registers per **modality** (video/image/audio/tts); with `model` it registers per **model code** (must match the codes declared in the Worker's `worker.script-remote.task-types`, see the §2.3 note) |
 
 > Credential discipline: the `tenantSecret` plaintext appears exactly once (create/reset response) — **store it in your secret manager / environment immediately; never in git or chat logs**.
 
@@ -59,6 +59,8 @@ curl -s -X POST http://<lotask>:8080/api/v1/admin/types \
 ```
 
 > Align `timeoutSeconds` with the gateway's `token-gateway.task.timeouts.video` (gateway timeout clock as primary, platform timeout as backstop). Register image/audio/tts similarly as needed.
+>
+> **Model granularity (issue #13)**: when the gateway sets `token-gateway.task.submit-task-type: model`, the lotask task `type` = the request body `model` (model code). `typeKey` must then be registered per model code (e.g. `runninghub-gptimage2-text-to-image`) and must match task-worker's `worker.script-remote.task-types` (the claim set for the remote script source, indexed by modelCode) — a code missing on either side leaves the task enqueued but forever unclaimed (PENDING). The gateway-side `timeouts` keys must also move to model codes.
 
 ### 2.4 Webhook callback (terminal events → gateway)
 

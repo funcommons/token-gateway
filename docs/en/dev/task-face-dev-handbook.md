@@ -27,13 +27,13 @@ M2.5 delivers three deployment units plus one script asset class:
 | `task.controller` | `TaskController` | Four-modality create/poll endpoints (contract = `04` yaml; envelope uses ApiCode business codes) |
 | | `ResourceProxyController` | `GET /v1/resources/{task_no}/{index}?exp=&sig=` streaming origin fetch + cache disk |
 | | `LotaskWebhookController` | `POST /internal/lotask/webhook`: three-header signature-verifying receiver for terminal events (§3.3) |
-| `task.relay` | `TaskRelayOrchestrator` | create pipeline: key validation (control plane) → route resolve pricing (control plane) → full pre-charge → Redis idempotency dedup → lotask4j submit (route snapshot encrypted into payload) → full refund on failure |
+| `task.relay` | `TaskRelayOrchestrator` | create pipeline: key validation (control plane) → route resolve pricing (control plane) → full pre-charge → Redis idempotency dedup → lotask4j submit (task_type granularity set by `submit-task-type`, route snapshot encrypted into payload) → full refund on failure |
 | `task.lotask` | `LotaskTaskClient` | lotask4j client API wrapper (§3.1): submit/get/cancel; jwt + HMAC four headers (reusing core signing capability) |
 | | `RouteSnapshotCipher` | Route snapshot AES-GCM encrypt/decrypt (key held only by the Worker and this class, injected from environment) |
 | `task.billing` | `TaskBillingSaga` | Pre-charge/refund/pre-charge-to-consumption; all idempotent by `pre_consume_id` |
 | `task.notify` | `NotifyDispatcher` | notify_url callback (X-THMP-Signature + 1m/10m/1h backoff) |
 | | `WebhookVerifier` | Three-header checks: constant-time signature verify + ±5min timestamp window + Event-Id dedup (reusing `RedisIdempotencyStore`); unsigned/invalid → verify-then-act requery |
-| `task.schedule` | `TimeoutClockJob` | Timeout clock: scan in-flight tasks by task_type deadline → requery lotask4j terminal state at deadline → EXPIRED mapping + refund (R6 gateway-side compensation) |
+| `task.schedule` | `TimeoutClockJob` | Timeout clock: scan in-flight tasks by the create-time deadline (granularity follows `submit-task-type`) → requery lotask4j terminal state at deadline → EXPIRED mapping + refund (R6 gateway-side compensation) |
 | | `ReconcileJob` | Reconciliation fallback: find unclosed pre-charges by pre_consume_id → requery lotask4j terminal state and compensate (orphan pre-charge release) |
 | `task.state` | `TaskStateMapper` | lotask4j state → gateway five-state mapping (05 §6) |
 | `task.config` | `TaskFaceConfiguration` | face-task assembly (under the FaceTaskAssembly scan) |
@@ -92,14 +92,21 @@ token-gateway:
       tenant-secret: ${LOTASK_TENANT_SECRET}   # webhook verification (= platform-side tenant_secret)
       connect-timeout: 3s
       read-timeout: 5s
+    submit-task-type: modality      # lotask task_type granularity: modality (default, zero
+                                    # change) | model = body.model (required when remote Worker
+                                    # scripts are indexed by modelCode and worker.script-remote.
+                                    # task-types declares modelCodes, else tasks stay PENDING
+                                    # forever unclaimed, issue #13)
     timeouts:                       # timeout clock: per-task_type override of the default window
-      video: 2h
-      image: 30m
+      video: 2h                     #   (key granularity follows submit-task-type: modality keys
+      image: 30m                    #    in modality mode, modelCode keys in model mode)
 ```
 
 Worker-specific config (task-worker module): `lotask.url/jwt-secret`, `worker.id`, `worker.poll-interval`, `worker.scripts-dir`, `snapshot-cipher-key` (= RouteSnapshotCipher key), upstream egress whitelist.
 
-CapabilityValidator addition: with `face=task`, validate `lotask.url/tenant-secret/resource-sign-key` non-empty (missing → fail-fast; auth=none + non-localhost → warning, following existing rules).
+CapabilityValidator addition: with `face=task`, validate `lotask.url/tenant-secret/resource-sign-key` non-empty (missing → fail-fast; auth=none + non-localhost → warning, following existing rules); `submit-task-type` outside `modality|model` → warning (falls back to modality — guards against a typo'd `model` leaving tasks forever unclaimed, issue #13).
+
+`submit-task-type` semantics (issue #13): affects only the lotask submit `type` plus the same-keyed `timeouts`/`TaskMeta.modality` (timeout clock and terminal-state TTL resolve at the same granularity); the gateway API surface is unchanged (`poll_url` stays `/v1/{modality}s/{taskNo}`). With `model` granularity but missing/blank body.model → falls back to modality (fail-safe). After switching to `model`, `timeouts` keys must be built per model code — modality keys silently stop matching (fall back to `expire-scan`).
 
 ## 5. M2.5 Task Breakdown
 

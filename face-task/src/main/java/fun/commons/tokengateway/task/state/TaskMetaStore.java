@@ -36,7 +36,11 @@ public class TaskMetaStore {
 
     private final ReactiveStringRedisTemplate redis;
 
-    /** 任务元数据 (create 时刻写入; deadlineEpochMs = 超时钟判定线). */
+    /**
+     * 任务元数据 (create 时刻写入; deadlineEpochMs = 超时钟判定线).
+     * <p>modality 存的是 submit task_type (默认模态; submit-task-type=model 时为模型编码,
+     * issue #13)——终态 TTL/超时钟按同键解析. 字段名与 Redis JSON 键不改 (存量兼容).
+     */
     public record TaskMeta(String lotaskId, String preConsumeId, String modality,
                            String notifyUrl, long deadlineEpochMs, String upstreamApiKey) {
     }

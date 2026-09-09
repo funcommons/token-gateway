@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **submit-task-type 非法值启动告警**（#13 补强，v0.5.0 后置）：`CapabilityValidator` 对 `task.submit-task-type` 非 `modality|model` 输出 warning（仍回退 modality 建单，不阻断）——防「意图配 model 拼错 → 静默回退 → 任务无人认领永 PENDING」；配套文档收口（05/06/07 开发手册 + 用户任务面接入手册，中英）与 app yml 配置示例注释
+  - 测试 +1（validator 非法值告警 / 合法值不告警）；v0.5.0 tag 内测试 +2（粒度解析 / 编排器 model 粒度）
+
 ## [0.5.0] - 2026-09-09
 
 ### 新增

@@ -27,13 +27,13 @@ M2.5 交付三个部署单元 + 一类脚本资产：
 | `task.controller` | `TaskController` | 四模态 create/poll 端点（契约=《04》yaml；信封 ApiCode 业务码） |
 | | `ResourceProxyController` | `GET /v1/resources/{task_no}/{index}?exp=&sig=` 流式回源 + 缓存盘 |
 | | `LotaskWebhookController` | `POST /internal/lotask/webhook`：三头验签接收终态事件（§3.3） |
-| `task.relay` | `TaskRelayOrchestrator` | create 管线：key 验证（控制层）→ route resolve 定价（控制层）→ 全额预扣 → Redis 幂等去重 → lotask4j submit（路由快照加密入载荷）→ 失败全额退款 |
+| `task.relay` | `TaskRelayOrchestrator` | create 管线：key 验证（控制层）→ route resolve 定价（控制层）→ 全额预扣 → Redis 幂等去重 → lotask4j submit（task_type 粒度由 `submit-task-type` 决定，路由快照加密入载荷）→ 失败全额退款 |
 | `task.lotask` | `LotaskTaskClient` | lotask4j client API 封装（§3.1）：submit/get/cancel；jwt + HMAC 四头（复用 core 签名能力） |
 | | `RouteSnapshotCipher` | 路由快照 AES-GCM 加解密（密钥仅 Worker 与本类持有，环境注入） |
 | `task.billing` | `TaskBillingSaga` | 预扣/退款/预扣转消费；全部按 `pre_consume_id` 幂等 |
 | `task.notify` | `NotifyDispatcher` | notify_url 回调（X-THMP-Signature + 1m/10m/1h 退避） |
 | | `WebhookVerifier` | 三头校验：恒定时间验签 + ±5min 时间窗 + Event-Id 去重（复用 `RedisIdempotencyStore`）；无签名/验签失败 → verify-then-act 回查 |
-| `task.schedule` | `TimeoutClockJob` | 超时钟：按 task_type deadline 扫描在途任务 → 到期反查 lotask4j 终态 → EXPIRED 映射 + 退款（R6 网关侧补偿） |
+| `task.schedule` | `TimeoutClockJob` | 超时钟：按 create 时固化的 deadline（粒度随 `submit-task-type`）扫描在途任务 → 到期反查 lotask4j 终态 → EXPIRED 映射 + 退款（R6 网关侧补偿） |
 | | `ReconcileJob` | 对账兜底：按 pre_consume_id 查未闭环预扣 → 反查 lotask4j 终态补偿（孤儿预扣释放） |
 | `task.state` | `TaskStateMapper` | lotask4j 状态 → 网关五态映射（《05》§6） |
 | `task.config` | `TaskFaceConfiguration` | face-task 装配（挂到 FaceTaskAssembly 扫描下） |
@@ -92,14 +92,20 @@ token-gateway:
       tenant-secret: ${LOTASK_TENANT_SECRET}   # webhook 验签（= 平台侧 tenant_secret）
       connect-timeout: 3s
       read-timeout: 5s
-    timeouts:                       # 超时钟：按 task_type 覆盖默认窗口
-      video: 2h
+    submit-task-type: modality      # lotask task_type 粒度: modality(默认,零感知) | model
+                                    # model = 取 body.model (remote Worker 脚本以 modelCode
+                                    # 索引、worker.script-remote.task-types 声明 modelCode 时
+                                    # 须配, 否则任务无人认领永 PENDING, issue #13)
+    timeouts:                       # 超时钟: 按 task_type 覆盖默认窗口 (键粒度随 submit-task-type:
+      video: 2h                     #   modality 模式按模态建键, model 模式按模型编码建键)
       image: 30m
 ```
 
 Worker 独立配置（task-worker 模块）：`lotask.url/jwt-secret`、`worker.id`、`worker.poll-interval`、`worker.scripts-dir`、`snapshot-cipher-key`（= RouteSnapshotCipher 密钥）、上游出网白名单。
 
-CapabilityValidator 增补：`face=task` 时校验 `lotask.url/tenant-secret/resource-sign-key` 非空（缺 → fail-fast；auth=none + 非 localhost → warning，沿用现有规则）。
+CapabilityValidator 增补：`face=task` 时校验 `lotask.url/tenant-secret/resource-sign-key` 非空（缺 → fail-fast；auth=none + 非 localhost → warning，沿用现有规则）；`submit-task-type` 非 `modality|model` → warning（已回退 modality 建单，防拼错 model 致任务无人认领，issue #13）。
+
+`submit-task-type` 语义（issue #13）：仅影响 lotask submit 的 `type` 及同键的 `timeouts`/`TaskMeta.modality`（超时钟、终态 TTL 同粒度解析）；网关 API 面不变（`poll_url` 仍 `/v1/{modality}s/{taskNo}`）。`model` 粒度但 body.model 缺失/空白 → 回退模态建单（fail-safe）。切换到 `model` 后 `timeouts` 须按模型编码建键，模态键将不再命中（静默回退 `expire-scan`）。
 
 ## 5. M2.5 任务分解
 
