@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-09
+
 ### 新增
 
 - **task-worker 远程脚本源**（issue #9，MMagiX 任务类模型转接形态）：`worker.script-source: local | remote`（默认 local，行为与现状 100% 一致，现有部署零感知）
@@ -12,6 +14,26 @@
   - **fail-fast**：remote 模式 `base-url` / `task-types` 缺失即启动报错（误配裸地址跑成空脚本比报错更糟）；鉴权 `X-Internal-Token` env 注入
   - **任务内版本锁定澄清**：runTask 开始即持有不可变 `ScriptAsset` 引用，热载只换索引——create/poll/resultMapping 恒同版本；跨 Worker 重启重领任务整体重跑 create（lotask 既有语义）
   - 测试 +10（拉取/鉴权头/ttl 节流+版本跳过/版本切换+旧副本清理/宕机降级+恢复/磁盘自举/fail-fast ×2/信封无效/local 不索引 .cache）
+
+- **任务面 submit task_type 粒度可配**（issue #13）：`token-gateway.task.submit-task-type: modality | model`（默认 modality 现状不变）
+  - remote Worker 脚本以 modelCode 索引（`worker.script-remote.task-types`）时须配 `model`，否则 lotask 任务按模态建单、Worker 按模型编码拉单，无人认领永 PENDING（MMagiX E2E 实测发现）
+  - 仅影响 lotask 侧 task_type 及同键的 `timeouts`/`TaskMeta.modality`（超时钟、终态 TTL 同粒度解析）；网关 API 面不变（`poll_url` 仍 `/v1/{modality}s/{taskNo}`）
+  - fail-safe：`model` 粒度但 body.model 缺失/空白、或配置非法值，一律回退模态，不阻塞建单
+
+- **face-task 分发端点配置化 + 接入方幂等键/全额透传**（issue #12，MMagiX T3 切流硬依赖）：
+  - `token-gateway.route.distribute-path`：route 控制面分发端点可指（默认 chat 端点行为不变），MMagiX work 域指向 `/api/v1/internal/work-channels/distribute`
+  - `DistributeVO.priceQuote` → `PreConsumeRequest.amount`：接入方分发响应回传全额积分，billing pre-consume 透传（null = 既有 token 估算行为不变）；`TaskBillingSaga.preConsumeFull` 重载
+  - `TaskController` 四 create 端点接收 `Idempotency-Key` → `DistributeRequest.idempotencyKey` 携带至分发端点（MMagiX work-distribute 凭它=workId 回读快照价与渠道粘性），并优先作为 billing requestId（对账闭环）；chat 路径不传行为不变
+  - app yml 固化接入形态：route/token-validate/billing 三面 `auth=jwt` + `jwt-secret` env 注入（`GATEWAY_BACKEND_INTERNAL_TOKEN`）
+  - 测试 +9（distributePath 透传 / priceQuote→amount 透传 / 幂等键优先 / idempotencyKey 契约）
+
+- **ScriptHttpClient multipart 与二进制下载**（issue #11，脚本素材上传/下载主路径）：
+  - `http.postMultipart(url, parts)`：标量 + bytes 零件（ByteArrayResource 携 filename），图片/视频素材表单提交
+  - `http.getBytes(url)`：二进制下载（参考图取回），出网白名单同约束
+  - Worker 契约测试 +4（multipart 零件结构 / bytes 往返）
+
+- **route 面走 token-route 的 table-id 门控**：`AdapterSelector.routeViaTokenRoute()` 除适配器族（tokengo|openapi）外还要求 `token-gateway.route.table-id` 非空白——未配置时静默回落 distribute 契约，部署面可先起进程、配齐重启即切 token-route
+- **settle 契约补 owner**：`SettleRequest.ownerPartyId`（缺省 null = 旧语义，计费后端落 0 占位）；face-llm settle 自 token.user_id 数值化透传（非数值/≤0 → null 不误导对账），与 pre-consume userId 同源同口径
 
 ## [0.4.0] - 2026-09-05
 
