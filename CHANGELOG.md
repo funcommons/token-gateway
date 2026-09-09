@@ -9,6 +9,12 @@
 - **submit-task-type 非法值启动告警**（#13 补强，v0.5.0 后置）：`CapabilityValidator` 对 `task.submit-task-type` 非 `modality|model` 输出 warning（仍回退 modality 建单，不阻断）——防「意图配 model 拼错 → 静默回退 → 任务无人认领永 PENDING」；配套文档收口（05/06/07 开发手册 + 用户任务面接入手册，中英）与 app yml 配置示例注释
   - 测试 +1（validator 非法值告警 / 合法值不告警）；v0.5.0 tag 内测试 +2（粒度解析 / 编排器 model 粒度）
 
+### 修复
+
+- **billing 面三端点路径前缀可配**（issue #14，接 #12 同款机制）：`token-gateway.billing.path-prefix`（默认 `/api/v1/internal/billing` chat 契约不变），任务面接入方指 `/v1/internal/billing/task` 接自有计费变体；E2E 实测此前 task 计费请求误入 chat 端点被幂等吞掉
+- **ScriptHttpClient 显式 Content-Type 覆盖语义**（issue #15）：原 `spec.header` 追加致 `application/json,application/json` 重复头，严格上游 400；`get/post/postMultipart/getBytes` 四路径一致，测试 +2
+- **资源代理回源 URI 重载**（issue #16）：`uri(String)` 模板模式对预编码签名 URL（OSS `Signature=%2B...`）重复编码致上游 403，改 `URI.create` 绕过模板处理
+
 ## [0.5.0] - 2026-09-09
 
 ### 新增
