@@ -57,6 +57,24 @@ class SpiModelsTest {
     }
 
     @Test
+    void taskFaceConfig_submitTaskTypeResolution() {
+        TaskFaceConfig cfg = new TaskFaceConfig();
+        // 默认 modality: 现状行为, 恒取模态
+        assertThat(cfg.getSubmitTaskType()).isEqualTo("modality");
+        assertThat(cfg.submitTaskTypeOf("image", "sd-xl")).isEqualTo("image");
+        // model 粒度: 取 body.model (remote Worker 按 modelCode 拉单, issue #13)
+        cfg.setSubmitTaskType("model");
+        assertThat(cfg.submitTaskTypeOf("image", "runninghub-gptimage2-text-to-image"))
+                .isEqualTo("runninghub-gptimage2-text-to-image");
+        // model 粒度但 model 缺失/空白 → 回退模态
+        assertThat(cfg.submitTaskTypeOf("image", null)).isEqualTo("image");
+        assertThat(cfg.submitTaskTypeOf("image", "  ")).isEqualTo("image");
+        // 非法值 → 回退模态 (fail-safe, 不因误配阻塞建单)
+        cfg.setSubmitTaskType("bogus");
+        assertThat(cfg.submitTaskTypeOf("image", "sd-xl")).isEqualTo("image");
+    }
+
+    @Test
     void taskFaceConfig_timeoutOfOverrideAndFallback() {
         TaskFaceConfig cfg = new TaskFaceConfig();
         // 无覆盖 → expireScan 默认 24h

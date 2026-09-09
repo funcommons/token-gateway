@@ -146,20 +146,23 @@ public class TaskRelayOrchestrator {
                 ? channel.getOwnerType().name() : "PLATFORM";
         return billingSaga.preConsumeFull(token, channel.getChannelId(), ownerType, model, requestId, amount)
                 .flatMap(preConsumeId -> {
+                    // issue #13: lotask 侧 task_type 粒度可配 (modality 默认 | model);
+                    // timeouts/TaskMeta 同键解析, 网关 API 面 (poll_url 等) 维持模态
+                    String submitTaskType = props.getTask().submitTaskTypeOf(modality, model);
                     String taskNo = generateTaskNo();
                     Map<String, Object> payload = buildPayload(model, body, channel);
                     String callbackUrl = props.getTask().getLotask().getWebhookCallbackUrl();
-                    return lotaskClient.submit(modality, taskNo, payload, callbackUrl)
+                    return lotaskClient.submit(submitTaskType, taskNo, payload, callbackUrl)
                             .flatMap(lotaskId -> {
-                                Duration ttl = props.getTask().timeoutOf(modality)
+                                Duration ttl = props.getTask().timeoutOf(submitTaskType)
                                         .plus(Duration.ofHours(24));
                                 long deadline = System.currentTimeMillis()
-                                        + props.getTask().timeoutOf(modality).toMillis();
+                                        + props.getTask().timeoutOf(submitTaskType).toMillis();
                                 Object notifyUrl = body.get("notify_url");
                                 return mappingStore.put(taskNo, lotaskId, ttl)
                                         .then(metaStore.onCreated(taskNo,
                                                 new TaskMetaStore.TaskMeta(lotaskId, preConsumeId,
-                                                        modality,
+                                                        submitTaskType,
                                                         notifyUrl == null ? null : notifyUrl.toString(),
                                                         deadline, channel.getApiKey()), ttl))
                                         .thenReturn(createdView(modality, taskNo));

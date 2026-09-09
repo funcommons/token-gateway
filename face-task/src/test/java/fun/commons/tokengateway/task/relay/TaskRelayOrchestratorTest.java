@@ -59,6 +59,7 @@ class TaskRelayOrchestratorTest {
     private TaskNoMappingStore mappingStore;
     private TaskMetaStore metaStore;
     private RouteSnapshotCipher cipher;
+    private TokenGatewayProperties props;
 
     private static final String CIPHER_KEY = Base64.getEncoder().encodeToString(new byte[32]);
 
@@ -94,6 +95,7 @@ class TaskRelayOrchestratorTest {
         TokenGatewayProperties props = new TokenGatewayProperties();
         props.getTask().getLotask().setWebhookCallbackUrl("http://gw/internal/lotask/webhook");
         props.getTask().setResourceSignKey("test-sign-key");
+        this.props = props;
 
         orchestrator = new TaskRelayOrchestrator(
                 new HttpTokenApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), gwProps), auth),
@@ -153,6 +155,33 @@ class TaskRelayOrchestratorTest {
         JSONObject decrypted = JSON.parseObject(cipher.decrypt(snapshot));
         assertThat(decrypted.getString("baseUrl")).isEqualTo("https://up");
         assertThat(decrypted.getString("apiKey")).isEqualTo("sk-upstream");
+    }
+
+    @Test
+    @DisplayName("issue #13: submit-task-type=model → lotask task_type 取 body.model; poll_url 仍模态")
+    void createModelGranularitySubmitType() {
+        props.getTask().setSubmitTaskType("model");
+        enqueueHappyControlPlane(backend);
+        String modelCode = "runninghub-gptimage2-text-to-image";
+        when(lotaskClient.submit(eq(modelCode), anyString(), any(), anyString()))
+                .thenReturn(Mono.just("YeirYkxHuQ"));
+        when(mappingStore.put(anyString(), eq("YeirYkxHuQ"), any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(orchestrator.create("image", "sk-caller",
+                        Map.of("model", modelCode), null))
+                .assertNext(view -> {
+                    String taskNo = (String) view.get("task_no");
+                    // 网关 API 面不变: poll_url 仍按模态构造
+                    assertThat(view.get("poll_url")).isEqualTo("/v1/images/" + taskNo);
+                })
+                .verifyComplete();
+
+        // lotask task_type = 模型编码 (remote Worker 按 modelCode 认领的前提)
+        verify(lotaskClient).submit(eq(modelCode), anyString(), any(), anyString());
+        // TaskMeta.modality 同键 (终态 TTL/超时钟按同粒度解析)
+        ArgumentCaptor<TaskMetaStore.TaskMeta> meta = ArgumentCaptor.forClass(TaskMetaStore.TaskMeta.class);
+        verify(metaStore).onCreated(anyString(), meta.capture(), any());
+        assertThat(meta.getValue().modality()).isEqualTo(modelCode);
     }
 
     @Test
