@@ -129,10 +129,22 @@ public class ScriptHttpClient {
 
     private static void applyHeaders(WebClient.RequestHeadersSpec<?> spec,
                                      Map<?, ?> headers) {
-        if (headers != null) {
-            // Groovy GString 键值统一 String 化 (脚本侧 "Bearer ${key}" 是 GString)
-            headers.forEach((k, v) -> spec.header(String.valueOf(k), String.valueOf(v)));
+        if (headers == null) {
+            return;
         }
+        // Groovy GString 键值统一 String 化 (脚本侧 "Bearer ${key}" 是 GString)
+        headers.forEach((k, v) -> {
+            String name = String.valueOf(k);
+            String value = String.valueOf(v);
+            // issue #15: Content-Type 覆盖默认值而非追加 (spec.header 会拼重复头,
+            // 严格上游如 DashScope 以 400 拒收 "application/json,application/json")
+            if (spec instanceof WebClient.RequestBodySpec bodySpec
+                    && "Content-Type".equalsIgnoreCase(name)) {
+                bodySpec.contentType(MediaType.parseMediaType(value));
+            } else {
+                spec.header(name, value);
+            }
+        });
     }
 
     private static Object parse(String raw) {

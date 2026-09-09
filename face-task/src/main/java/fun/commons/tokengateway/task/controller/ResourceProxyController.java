@@ -100,7 +100,9 @@ public class ResourceProxyController {
         } catch (Exception e) {
             return Mono.error(new RelayException(500, ApiCode.SYSTEM_BUSY.getCode(), "缓存盘不可用"));
         }
-        WebClient.RequestHeadersSpec<?> spec = webClientBuilder.build().get().uri(upstreamUrl);
+        // issue #16: 预编码签名 URL 须走 URI 重载, uri(String) 模板模式会重复编码 %2B 等序列致上游 403
+        WebClient.RequestHeadersSpec<?> spec = webClientBuilder.build().get()
+                .uri(java.net.URI.create(upstreamUrl));
         if (upstreamApiKey != null && !upstreamApiKey.isBlank()) {
             spec.header(org.springframework.http.HttpHeaders.AUTHORIZATION,
                     "Bearer " + upstreamApiKey);

@@ -36,10 +36,12 @@ public class CapabilityEndpoints {
                 spi.getTokenValidate().getAuth(), keyOf(spi.getTokenValidate()));
     }
 
-    /** 计费面 (预扣/结算/退款). */
+    /** 计费面 (预扣/结算/退款; path=三端点路径前缀, issue #14). */
     public EndpointConfig billing() {
-        return resolve(spi.getBilling().getUrl(), spi.getBilling().getTimeout(),
+        EndpointConfig endpoint = resolve(spi.getBilling().getUrl(), spi.getBilling().getTimeout(),
                 spi.getBilling().getAuth(), keyOf(spi.getBilling()));
+        endpoint.setPath(spi.getBilling().getPathPrefix());
+        return endpoint;
     }
 
     /** 内容审核面. */

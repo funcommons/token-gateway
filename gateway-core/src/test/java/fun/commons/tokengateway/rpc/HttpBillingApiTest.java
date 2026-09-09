@@ -47,6 +47,35 @@ class HttpBillingApiTest {
     }
 
     @Test
+    @DisplayName("issue #14: billing path-prefix 可配 → 三端点前缀切换 (默认 chat 路径不变)")
+    void billingPathPrefixConfigurable() throws Exception {
+        var spi = new TokenGatewayProperties();
+        spi.getBilling().setPathPrefix("/v1/internal/billing/task");
+        var legacy = new GatewayProperties();
+        legacy.setUrl(backend.url("/").toString().replaceAll("/$", ""));
+        api = new HttpBillingApi(WebClient.builder(),
+                new CapabilityEndpoints(spi, legacy), new RpcInternalAuth(legacy));
+
+        backend.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"preConsumeId\":\"pc-2\",\"success\":true}}"));
+        backend.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":null}"));
+        backend.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":null}"));
+
+        StepVerifier.create(api.preConsume(PreConsumeRequest.builder().userId("u1").build()))
+                .assertNext(resp -> assertThat(resp.isSuccess()).isTrue()).verifyComplete();
+        StepVerifier.create(api.settle(SettleRequest.builder().preConsumeId("pc-2").build()))
+                .expectNextCount(1).verifyComplete();
+        StepVerifier.create(api.refund(RefundRequest.builder().preConsumeId("pc-2").build()))
+                .expectNextCount(1).verifyComplete();
+
+        assertThat(backend.takeRequest().getPath()).isEqualTo("/v1/internal/billing/task/pre-consume");
+        assertThat(backend.takeRequest().getPath()).isEqualTo("/v1/internal/billing/task/settle");
+        assertThat(backend.takeRequest().getPath()).isEqualTo("/v1/internal/billing/task/refund");
+    }
+
+    @Test
     @DisplayName("preConsume 成功: 200 + preConsumeId/estimatedQuota 透传")
     void preConsumeSuccess() throws Exception {
         backend.enqueue(new MockResponse()

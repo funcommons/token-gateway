@@ -14,7 +14,8 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
 /**
- * BillingApi HTTP 实现 (调主应用 /api/v1/internal/billing/* 端点).
+ * BillingApi HTTP 实现 (调主应用计费三端点, 路径前缀可配 — issue #14;
+ * 默认 /api/v1/internal/billing, 任务面接入方可指 /v1/internal/billing/task).
  *
  * <p>Saga 流程: preConsume (预扣) → 上游调用 → settle (结算) / refund (退款).
  * <p>所有 RPC 失败统一 onErrorResume 降级, 不向上抛异常 (避免阻塞请求).
@@ -39,7 +40,7 @@ public class HttpBillingApi {
 
     public Mono<ApiResponse<PreConsumeVO>> preConsume(PreConsumeRequest request) {
         WebClient.RequestHeadersSpec<?> req = webClientBuilder.build().post()
-                .uri(endpoints.billing().getUrl() + "/api/v1/internal/billing/pre-consume")
+                .uri(endpoints.billing().getUrl() + endpoints.billing().getPath() + "/pre-consume")
                 .bodyValue(request);
         internalAuth.attachTo(req, endpoints.billing());
         return req.retrieve()
@@ -54,7 +55,7 @@ public class HttpBillingApi {
 
     public Mono<ApiResponse<SettleVO>> settle(SettleRequest request) {
         WebClient.RequestHeadersSpec<?> req = webClientBuilder.build().post()
-                .uri(endpoints.billing().getUrl() + "/api/v1/internal/billing/settle")
+                .uri(endpoints.billing().getUrl() + endpoints.billing().getPath() + "/settle")
                 .bodyValue(request);
         internalAuth.attachTo(req, endpoints.billing());
         return req.retrieve().bodyToMono(SETTLE_TYPE)
@@ -68,7 +69,7 @@ public class HttpBillingApi {
 
     public Mono<ApiResponse<Void>> refund(RefundRequest request) {
         WebClient.RequestHeadersSpec<?> req = webClientBuilder.build().post()
-                .uri(endpoints.billing().getUrl() + "/api/v1/internal/billing/refund")
+                .uri(endpoints.billing().getUrl() + endpoints.billing().getPath() + "/refund")
                 .bodyValue(request);
         internalAuth.attachTo(req, endpoints.billing());
         return req.retrieve().bodyToMono(VOID_TYPE)
