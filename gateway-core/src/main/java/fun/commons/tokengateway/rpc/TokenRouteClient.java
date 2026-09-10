@@ -28,8 +28,10 @@ import java.util.Map;
  * </pre>
  *
  * <p><b>data_json 契约</b> (部署方在 token-route 表 entry 里配置, 与 DistributeVO
- * 字段同名): channelId / baseUrl / apiKey / protocol / modelMapping — 网关按
- * OpenAI 兼容直通语义消费, 不感知 TokenGo 内部拓扑。
+ * 字段同名): channelId / baseUrl / apiKey / protocol / modelMapping / price_quotes —
+ * 网关按 OpenAI 兼容直通语义消费, 不感知 TokenGo 内部拓扑。price_quotes 为
+ * G5 解锁① (2026-09-10 裁决) 的任务售价扩展段: {物理模型码: 任务价整数积分},
+ * 源自 TokenGo supply FEED 导出 (data_json 全程原样透传, token-route 零感知)。
  *
  * <p>report 全部 fire-and-forget: 失败仅记日志, 不影响主链路 (路由面降级不阻断数据面).
  */
@@ -96,12 +98,13 @@ public class TokenRouteClient {
                     if (resp == null || !resp.isSuccess() || resp.getData() == null
                             || resp.getData().getEntryId() == null) {
                         String reason = resp == null || resp.getData() == null
-                                || resp.getData().getReason() == null ? "no entry" : resp.getData().getReason();
+                                || resp.getData().reasonText() == null
+                                ? "no entry" : resp.getData().reasonText();
                         return Mono.error(new fun.commons.tokengateway.exception.RelayException(
                                 502, "token-route resolve 无可用候选: " + reason));
                     }
                     ResolveResponse r = resp.getData();
-                    return Mono.just(new Resolved(toDistribute(r), r.getEntryId(), r.getLeaseId()));
+                    return Mono.just(new Resolved(toDistribute(r, model), r.getEntryId(), r.getLeaseId()));
                 })
                 .doOnError(e -> log.error("[TokenRoute] resolve 失败: model={}, err={}", model, e.getMessage()));
     }
@@ -143,8 +146,10 @@ public class TokenRouteClient {
                 .then();
     }
 
-    /** data_json 契约字段 → DistributeVO (同名映射; 缺失字段走 DistributeVO 默认语义). */
-    private DistributeVO toDistribute(ResolveResponse r) {
+    /** data_json 契约字段 → DistributeVO (同名映射; 缺失字段走 DistributeVO 默认语义).
+     *  G5 解锁① (2026-09-10 裁决): data_json.price_quotes {物理模型码: 任务价整数积分}
+     *  (TokenGo supply FEED 扩展段) 按 model 取值 → priceQuote (任务面全额计费语义). */
+    private DistributeVO toDistribute(ResolveResponse r, String model) {
         Map<String, Object> d = r.dataJson == null ? Map.of() : r.dataJson;
         DistributeVO vo = new DistributeVO();
         vo.setChannelId(str(d.get("channelId"), r.entryId));
@@ -155,6 +160,9 @@ public class TokenRouteClient {
             Map<String, String> mapping = new java.util.HashMap<>();
             mm.forEach((k, v) -> mapping.put(String.valueOf(k), String.valueOf(v)));
             vo.setModelMapping(mapping);
+        }
+        if (d.get("price_quotes") instanceof Map<?, ?> quotes && quotes.get(model) instanceof Number n) {
+            vo.setPriceQuote(n.intValue());
         }
         return vo;
     }
@@ -172,7 +180,17 @@ public class TokenRouteClient {
         private Map<String, Object> dataJson;
         @com.fasterxml.jackson.annotation.JsonProperty("lease_id")
         private String leaseId;
+        /** token-route TrResolveResponse 实际字段是 reasons[]; 保留 reason 兼容旧形态. */
+        @com.fasterxml.jackson.annotation.JsonProperty("reasons")
+        private java.util.List<String> reasons;
         private String reason;
+
+        String reasonText() {
+            if (reasons != null && !reasons.isEmpty()) {
+                return String.join(",", reasons);
+            }
+            return reason;
+        }
     }
 
     @lombok.Data

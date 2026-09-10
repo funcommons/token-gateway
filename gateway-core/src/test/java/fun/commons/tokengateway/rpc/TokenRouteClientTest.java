@@ -78,6 +78,49 @@ class TokenRouteClientTest {
     }
 
     @Test
+    @DisplayName("G5 解锁①: data_json.price_quotes 按 model 映射 priceQuote (任务面全额语义)")
+    void resolveMapsPriceQuote() throws Exception {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"entry_id\":\"e-9\",\"lease_id\":\"l-9\","
+                        + "\"data_json\":{\"channelId\":\"tg-ch\",\"baseUrl\":\"http://tokengo:3000\","
+                        + "\"apiKey\":\"sk-tg\",\"price_quotes\":{\"video-pro\":3,\"img-pro\":5}}}}"));
+
+        StepVerifier.create(client.resolveFull("video-pro", null, 0, 0, null))
+                .assertNext(r -> {
+                    assertThat(r.channel().getPriceQuote()).isEqualTo(3);
+                    assertThat(r.entryId()).isEqualTo("e-9");
+                })
+                .verifyComplete();
+
+        // model 不在 price_quotes 键空间 → priceQuote=null (任务面 fail-closed 语义)
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"entry_id\":\"e-9\",\"lease_id\":\"l-9\","
+                        + "\"data_json\":{\"price_quotes\":{\"video-pro\":3}}}}"));
+
+        StepVerifier.create(client.resolveFull("audio-pro", null, 0, 0, null))
+                .assertNext(r -> assertThat(r.channel().getPriceQuote()).isNull())
+                .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("resolve 空候选: token-route 实际返回 reasons[] → 错误消息透出排除原因")
+    void resolveEmptyMapsReasonsArray() throws Exception {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"entry_id\":null,"
+                        + "\"reasons\":[\"ALL_FILTERED\",\"CAPACITY_EXHAUSTED\"]}}"));
+
+        StepVerifier.create(client.resolve("gpt-4o", null, 0, 0, null))
+                .expectErrorSatisfies(e -> assertThat(e)
+                        .isInstanceOf(RelayException.class)
+                        .hasMessageContaining("ALL_FILTERED")
+                        .hasMessageContaining("CAPACITY_EXHAUSTED"))
+                .verify();
+    }
+
+    @Test
     @DisplayName("resolve 空结果 (TABLE_EMPTY) → RelayException 502")
     void resolveEmptyFails() {
         server.enqueue(new MockResponse()
