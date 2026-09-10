@@ -25,7 +25,11 @@ public class ScriptHttpClient {
     private final Duration timeout;
 
     public ScriptHttpClient(WebClient.Builder builder, WorkerProperties props) {
-        this.webClient = builder.build();
+        // issue #17: 任务面资源常态为数 MB (gpt-image 系列恒回 b64_json, 图片/音频二进制),
+        // WebClient 默认 256KB 缓冲直接抛 ExceededLimitException —— 放宽到 32MB
+        this.webClient = builder
+                .codecs(c -> c.defaultCodecs().maxInMemorySize(32 * 1024 * 1024))
+                .build();
         this.egressAllowlist = props.getEgressAllowlist();
         this.timeout = props.getHookTimeout();
     }

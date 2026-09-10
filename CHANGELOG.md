@@ -18,6 +18,7 @@
 - **billing 面三端点路径前缀可配**（issue #14，接 #12 同款机制）：`token-gateway.billing.path-prefix`（默认 `/api/v1/internal/billing` chat 契约不变），任务面接入方指 `/v1/internal/billing/task` 接自有计费变体；E2E 实测此前 task 计费请求误入 chat 端点被幂等吞掉
 - **ScriptHttpClient 显式 Content-Type 覆盖语义**（issue #15）：原 `spec.header` 追加致 `application/json,application/json` 重复头，严格上游 400；`get/post/postMultipart/getBytes` 四路径一致，测试 +2
 - **资源代理回源 URI 重载**（issue #16）：`uri(String)` 模板模式对预编码签名 URL（OSS `Signature=%2B...`）重复编码致上游 403，改 `URI.create` 绕过模板处理
+- **ScriptHttpClient 响应缓冲放宽 32MB**（issue #17）：WebClient 默认 256KB 对任务面资源（gpt-image 系列恒回数 MB b64_json、图片/音频二进制）必超限，`Exceeded limit on max bytes to buffer` 显式失败
 
 ## [0.5.0] - 2026-09-09
 

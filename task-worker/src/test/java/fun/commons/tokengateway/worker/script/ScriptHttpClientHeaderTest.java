@@ -70,4 +70,25 @@ class ScriptHttpClientHeaderTest {
         assertThat(values).hasSize(1);
         assertThat(values.get(0)).isEqualTo("application/json");
     }
+
+    @Test
+    @DisplayName("issue #17: 大响应 (b64_json 数 MB) 不触发 256KB 默认缓冲上限")
+    void largeResponseWithinRaisedLimit() throws Exception {
+        byte[] big = new byte[4 * 1024 * 1024];
+        java.util.Arrays.fill(big, (byte) 'a');
+        String bigBody = "{\"data\":[{\"b64_json\":\"" + new String(big) + "\"}]}";
+        upstream.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json").setBody(bigBody));
+
+        var resp = http.post(upstream.url("/img"), Map.of(), Map.of("model", "gpt-image-2"));
+
+        assertThat(resp.ok()).isTrue();
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> body = (java.util.Map<String, Object>) resp.body();
+        @SuppressWarnings("unchecked")
+        java.util.List<Object> data = (java.util.List<Object>) body.get("data");
+        @SuppressWarnings("unchecked")
+        String b64 = ((java.util.Map<String, Object>) data.get(0)).get("b64_json") instanceof String s ? s : "";
+        assertThat(b64).hasSize(4 * 1024 * 1024);
+    }
 }
