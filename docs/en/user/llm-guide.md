@@ -4,7 +4,7 @@
 |---|---|
 | Document | LLM Face Onboarding Guide (chat / embeddings / synchronous image generation / model catalog + backend onboarding + adapter development) |
 | Companion | Task face: see `./task-guide.md` (**planned M2.5, not yet implemented**); API contract: [07_LLM面API契约.yaml](https://github.com/funcommons/token-gateway/blob/main/docs/用户文档/07_LLM面API契约.yaml); design doc: see `../dev/design.md` |
-| Version | V1.2 (2026-08-31, split by face: LLM face / task face as separate volumes) |
+| Version | V1.3 (2026-09-10, add §2.5 Spring AI recipe; V1.2 split by face) |
 | Codebase | `fun.commons.tokengateway` (LLM face, port 9401, live endpoints exactly as written here) |
 
 ---
@@ -80,6 +80,37 @@ msg = client.messages.create(
     messages=[{"role": "user", "content": "Hello"}],
 )
 ```
+
+### 2.5 Spring AI (Java)
+
+Callers already on [Spring AI](https://docs.spring.io/spring-ai/reference/) need **zero gateway-side changes** — the gateway is an OpenAI/Anthropic-compatible endpoint; just point `base-url` at it. Routing/pricing, the billing saga, channel failover, moderation and rate limiting all apply to Spring AI traffic automatically.
+
+```yaml
+spring:
+  ai:
+    openai:
+      base-url: http://<gateway-host>:9401   # the gateway (the starter appends /v1/... itself)
+      api-key: ${TGW_CALLER_TOKEN}           # gateway caller credential (not an upstream key)
+      chat:
+        options:
+          model: gpt-4o-mini                 # must exist in the gateway catalog (GET /v1/models)
+```
+
+```java
+String reply = chatClient.prompt().user("Hello").call().content();
+
+// Streaming: standard SSE pass-through, chunk by chunk (the gateway never buffers the full response)
+Flux<String> stream = chatClient.prompt().user("Hello").stream().content();
+```
+
+`EmbeddingModel` points at the gateway the same way (`/v1/embeddings`), no extra configuration. The Anthropic starter also works (`spring.ai.anthropic.base-url` → gateway, `/v1/messages`) and additionally reaches OpenAI-family upstream channels via the gateway's protocol conversion.
+
+Notes:
+
+- `api-key` is the **gateway caller credential**; model names must exist in the gateway catalog, otherwise 10400.
+- Success responses are pass-through shapes (no envelope); errors are the 6-field envelope (`code != 0`, non-2xx) which Spring AI raises as exceptions — handle them per the error-code table in §7.
+- The framework does not send `Idempotency-Key` automatically; inject it at the HTTP client layer for non-idempotent-safe calls (e.g. synchronous image generation).
+- The **task face is outside Spring AI's scope** (async four-modality tasks, webhooks, resource proxying) — integrate via the task-face HTTP API (`./task-guide.md`).
 
 ---
 

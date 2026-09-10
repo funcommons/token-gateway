@@ -5,7 +5,7 @@
 | 文档 | LLM 同步面调用方手册（对话 / 向量 / 同步生图 / 模型目录） |
 | 前置阅读 | [产品简介](./01_产品简介.md) · [快速开始](./02_快速开始.md) · [通用约定](./03_通用约定.md)（认证/错误码/限流/幂等） |
 | 配套 | 任务面见[任务面接入手册](./05_任务面接入手册.md)；字段级契约见 `07_LLM面API契约.yaml` |
-| 版本 | V2.0（2026-09-02，阿里云文档风格重构；后端接入内容移至开发文档） |
+| 版本 | V2.1（2026-09-10，新增 §9 Spring AI 客户端接入；V2.0 阿里云文档风格重构） |
 
 ---
 
@@ -146,7 +146,51 @@ curl -s http://<gateway-host>:9401/v1/messages \
 - [ ] 流式消费按标准 SSE 解析，处理 `[DONE]` 与中途断连
 - [ ] 记录响应头 `X-Trace-Id` 用于排障
 
-## 9. 后端/平台方入口
+## 9. 框架客户端接入（Spring AI）
+
+Java 技术栈调用方若已使用 [Spring AI](https://docs.spring.io/spring-ai/reference/)，**网关侧零改动**——网关对调用方就是 OpenAI/Anthropic 兼容端点，base-url 指过来即可；路由定价、计费 saga、渠道 failover、审核、限流对 Spring AI 流量自动生效。
+
+**接入形态（OpenAI starter，推荐）**：
+
+```yaml
+spring:
+  ai:
+    openai:
+      base-url: http://<gateway-host>:9401   # 网关地址（/v1 路径由 starter 自行拼接）
+      api-key: ${TGW_CALLER_TOKEN}           # 网关调用方凭证（非上游真实 key）
+      chat:
+        options:
+          model: gpt-4o-mini                 # 模型名须在网关目录中（GET /v1/models 核对）
+```
+
+```java
+// ChatClient（builder 由 starter 自动装配）
+String reply = chatClient.prompt()
+        .user("你好")
+        .call()
+        .content();
+
+// 流式：标准 SSE 透传，逐 chunk 到达（网关不缓存完整响应）
+Flux<String> stream = chatClient.prompt()
+        .user("你好")
+        .stream()
+        .content();
+```
+
+EmbeddingModel 同样指向网关（`/v1/embeddings`），无需额外配置。
+
+**Anthropic starter 亦可**：`spring.ai.anthropic.base-url` 指网关，走 `/v1/messages`——还能借网关的协议转换打到 OpenAI 系上游渠道。
+
+**注意事项**：
+
+- `api-key` 填**网关调用方凭证**；模型名必须存在于网关模型目录，否则 10400
+- 成功响应为透传形状（无信封，Spring AI 正常反序列化）；错误为 6 字段信封（`code != 0`，HTTP 非 2xx），Spring AI 按异常抛出，处置对照 §7 错误码表
+- 框架不会自动携带 `Idempotency-Key`：非幂等安全调用（如同步生图）建议在 HTTP 客户端层统一注入该头（[通用约定 §6](./03_通用约定.md)）
+- **任务面不在 Spring AI 覆盖范围**（异步四模态任务、webhook、资源代理），仍按[任务面接入手册](./05_任务面接入手册.md) HTTP 接入
+
+---
+
+## 10. 后端/平台方入口
 
 后端服务接入（能力面 yml 配置、鉴权三式、适配器开发）不属于本文，见开发文档：
 [后端接入开发手册](../开发文档/02_后端接入开发手册.md) · [后端服务对接安全契约方案](../开发文档/04_后端服务对接安全契约方案.md) · [设计方案](../开发文档/01_设计方案.md)。

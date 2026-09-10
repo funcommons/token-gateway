@@ -9,6 +9,10 @@
 - **submit-task-type 非法值启动告警**（#13 补强，v0.5.0 后置）：`CapabilityValidator` 对 `task.submit-task-type` 非 `modality|model` 输出 warning（仍回退 modality 建单，不阻断）——防「意图配 model 拼错 → 静默回退 → 任务无人认领永 PENDING」；配套文档收口（05/06/07 开发手册 + 用户任务面接入手册，中英）与 app yml 配置示例注释
   - 测试 +1（validator 非法值告警 / 合法值不告警）；v0.5.0 tag 内测试 +2（粒度解析 / 编排器 model 粒度）
 
+### 文档
+
+- **LLM 面手册新增「Spring AI 客户端接入」**（中英）：Spring AI OpenAI/Anthropic starter 指网关 base-url 即接入，网关能力（路由定价/计费 saga/failover/审核/限流）对流经的 Spring AI 流量自动生效；含凭证语义、模型目录核对、错误信封处置、Idempotency-Key 注入与任务面边界注意事项
+
 ### 修复
 
 - **billing 面三端点路径前缀可配**（issue #14，接 #12 同款机制）：`token-gateway.billing.path-prefix`（默认 `/api/v1/internal/billing` chat 契约不变），任务面接入方指 `/v1/internal/billing/task` 接自有计费变体；E2E 实测此前 task 计费请求误入 chat 端点被幂等吞掉
