@@ -37,6 +37,18 @@ public class TaskController {
         return orchestrator.create("video", extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
     }
 
+    /** 同步生图 (OpenAI 请求/响应形状): 内部 create+轮询, 60s 超时降级 PROCESSING+poll_url. */
+    @PostMapping("/v1/images/sync")
+    public Mono<Map<String, Object>> createImageGenerations(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestHeader(value = "x-api-key", required = false) String xApiKey,
+            @RequestHeader(value = "X-Trace-Id", required = false) String traceId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestBody Map<String, Object> body) {
+        return orchestrator.createImageGenerations(
+                extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
+    }
+
     @PostMapping("/v1/images")
     public Mono<Map<String, Object>> createImage(
             @RequestHeader(value = "Authorization", required = false) String authorization,

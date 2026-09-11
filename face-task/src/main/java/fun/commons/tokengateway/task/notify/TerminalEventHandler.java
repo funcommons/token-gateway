@@ -131,6 +131,15 @@ public class TerminalEventHandler {
 
     /** 由 lotask 任务视图构造终态处理入参 (verify-then-act 回查/超时钟/对账共用). */
     public Mono<Void> onTerminalView(String taskNo, TaskMeta meta, LotaskTaskView view) {
+        if (TaskStateMapper.map(view.status()) == TaskStatus.FAILED
+                && (view.result() == null || view.result().isEmpty())
+                && (view.errorCode() != null || view.errorMessage() != null)) {
+            // FAILED 无结果但有错误字段: 错误对象作载体透传 (notify/poll 的 error 契约)
+            Map<String, Object> error = new LinkedHashMap<>();
+            error.put("code", view.errorCode());
+            error.put("message", view.errorMessage());
+            return onTerminal(taskNo, meta, view.status(), error);
+        }
         return onTerminal(taskNo, meta, view.status(), view.result());
     }
 }

@@ -28,4 +28,10 @@ public class DistributeRequest {
      * work 域分发端点凭它回读快照价; chat 路径不传, 行为不变.
      */
     private String idempotencyKey;
+
+    /**
+     * 生成参数 (size/ratio/resolution, 协议面 openapi 生图的计价依据; work 域分发端点用).
+     * chat 路径不传, 行为不变.
+     */
+    private java.util.Map<String, Object> params;
 }

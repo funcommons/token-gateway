@@ -95,10 +95,27 @@ public class LotaskWebhookController {
 
     /** 验签通过: 直接按载荷处理终态 (result 取载荷子对象). */
     private Mono<Void> handleVerified(String lotaskId, String status, JSONObject payload) {
+        JSONObject result = payload.getJSONObject("result");
+        if ("FAILED".equalsIgnoreCase(status) && (result == null || result.isEmpty())) {
+            // lotask webhook 载荷只快照 result, 不携带错误字段 (worker 报的 lastErrorCode/
+            // lastErrorMessage 在任务行里) — FAILED 且无结果时回查详情补齐错误信息,
+            // 避免消费方收到 {code=null, message=null} 空错误
+            return lotaskClient.get(lotaskId)
+                    .flatMap(view -> metaStore.findTaskNo(lotaskId)
+                            .flatMap(taskNo -> metaStore.getMeta(taskNo)
+                                    .flatMap(meta -> terminalEventHandler.onTerminalView(
+                                            taskNo, meta, view))))
+                    .onErrorResume(e -> {
+                        log.error("[Webhook] FAILED 回查补错误失败 (对账兜底补偿): lotaskId={}, err={}",
+                                lotaskId, e.getMessage());
+                        return Mono.empty();
+                    })
+                    .doOnSuccess(v -> log.info("[Webhook] 验签通过已处理 (FAILED 回查): lotaskId={}", lotaskId));
+        }
         return metaStore.findTaskNo(lotaskId)
                 .flatMap(taskNo -> metaStore.getMeta(taskNo)
                         .flatMap(meta -> terminalEventHandler.onTerminal(
-                                taskNo, meta, status, payload.getJSONObject("result"))))
+                                taskNo, meta, status, result)))
                 .doOnSuccess(v -> log.info("[Webhook] 验签通过已处理: lotaskId={}", lotaskId));
     }
 

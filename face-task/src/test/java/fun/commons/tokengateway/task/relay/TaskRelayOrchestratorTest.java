@@ -114,6 +114,83 @@ class TaskRelayOrchestratorTest {
         backend.shutdown();
     }
 
+    @Test
+    @DisplayName("generations 同步封装: 轮询至 SUCCEEDED → {created, data:[{url}]}")
+    void generationsSuccessReturnsDataUrls() {
+        TaskRelayOrchestrator spy = org.mockito.Mockito.spy(orchestrator);
+        Map<String, Object> processing = new java.util.LinkedHashMap<>();
+        processing.put("task_no", "T1");
+        processing.put("status", "PROCESSING");
+        Map<String, Object> success = new java.util.LinkedHashMap<>();
+        success.put("task_no", "T1");
+        success.put("status", "SUCCEEDED");
+        success.put("result", Map.of("resources", List.of("https://gw/v1/resources/T1/0?exp=1&sig=x")));
+        org.mockito.Mockito.doReturn(Mono.just(processing)).doReturn(Mono.just(success))
+                .when(spy).poll("image", "T1", "key");
+
+        StepVerifier.create(spy.pollUntilTerminal("image", "T1", "key",
+                        java.time.Instant.now().plusSeconds(5), java.time.Duration.ofMillis(10)))
+                .assertNext(resp -> {
+                    assertThat(resp.get("created")).isNotNull();
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> data = (List<Map<String, Object>>) resp.get("data");
+                    assertThat(data.get(0).get("url").toString()).contains("/v1/resources/T1/0");
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("generations 同步封装: 超时降级 {status=PROCESSING, task_no, poll_url}")
+    void generationsTimeoutFallsBackToProcessing() {
+        TaskRelayOrchestrator spy = org.mockito.Mockito.spy(orchestrator);
+        Map<String, Object> processing = new java.util.LinkedHashMap<>();
+        processing.put("task_no", "T2");
+        processing.put("status", "PROCESSING");
+        org.mockito.Mockito.doReturn(Mono.just(processing)).when(spy).poll("image", "T2", "key");
+
+        StepVerifier.create(spy.pollUntilTerminal("image", "T2", "key",
+                        java.time.Instant.now().minusSeconds(1), java.time.Duration.ofMillis(10)))
+                .assertNext(resp -> {
+                    assertThat(resp.get("status")).isEqualTo("PROCESSING");
+                    assertThat(resp.get("task_no")).isEqualTo("T2");
+                    assertThat(resp.get("poll_url")).isEqualTo("/v1/images/T2");
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("generations 同步封装: 上游 FAILED → 502 透出错误消息")
+    void generationsFailedPropagatesMessage() {
+        TaskRelayOrchestrator spy = org.mockito.Mockito.spy(orchestrator);
+        Map<String, Object> failed = new java.util.LinkedHashMap<>();
+        failed.put("task_no", "T3");
+        failed.put("status", "FAILED");
+        failed.put("error", Map.of("code", "SCRIPT_ERROR", "message", "waibibabo HTTP 502"));
+        org.mockito.Mockito.doReturn(Mono.just(failed)).when(spy).poll("image", "T3", "key");
+
+        StepVerifier.create(spy.pollUntilTerminal("image", "T3", "key",
+                        java.time.Instant.now().plusSeconds(5), java.time.Duration.ofMillis(10)))
+                .expectErrorSatisfies(e -> {
+                    org.assertj.core.api.Assertions.assertThat(e)
+                            .isInstanceOf(fun.commons.tokengateway.exception.RelayException.class);
+                    org.assertj.core.api.Assertions.assertThat(e.getMessage()).contains("HTTP 502");
+                })
+                .verify();
+    }
+
+    @Test
+    @DisplayName("generations: n>1 直接拒绝 (任务面单图语义)")
+    void generationsRejectsMultiImage() {
+        StepVerifier.create(orchestrator.createImageGenerations("key",
+                        Map.of("model", "waibibabo-gpt-image-2", "prompt", "x", "n", 2), null, null))
+                .expectErrorSatisfies(e -> {
+                    org.assertj.core.api.Assertions.assertThat(e)
+                            .isInstanceOf(fun.commons.tokengateway.exception.RelayException.class);
+                    org.assertj.core.api.Assertions.assertThat(e.getMessage()).contains("仅支持 n=1");
+                })
+                .verify();
+    }
+
     private static MockResponse json(String body) {
         return new MockResponse().setHeader("Content-Type", "application/json").setBody(body);
     }

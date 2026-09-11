@@ -98,6 +98,25 @@ class LotaskWebhookControllerTest {
     }
 
     @Test
+    @DisplayName("验签通过但 FAILED 无 result: lotask webhook 载荷不带错误字段, 回查补齐")
+    void verifiedFailedWithoutResultRefetches() {
+        String raw = "{\"id\":\"lotask-3\",\"status\":\"FAILED\"}";
+        String[] parts = sig(raw).split("\\|");
+        when(lotaskClient.get("lotask-3")).thenReturn(Mono.just(
+                new LotaskTaskView("lotask-3", "FAILED", null, "SCRIPT_ERROR", "boom")));
+        when(metaStore.findTaskNo("lotask-3")).thenReturn(Mono.just("T3"));
+        when(metaStore.getMeta("T3")).thenReturn(Mono.just(
+                new TaskMeta("lotask-3", "pc3", "video", null, 0L, null)));
+
+        StepVerifier.create(controller.receive("evt-3", parts[0], parts[1], raw))
+                .assertNext(resp -> assertThat(resp.getBody()).containsEntry("mode", "verified"))
+                .verifyComplete();
+        verify(lotaskClient).get("lotask-3");
+        verify(terminalEventHandler).onTerminalView(eq("T3"), any(), any());
+        verify(terminalEventHandler, never()).onTerminal(anyString(), any(), anyString(), any());
+    }
+
+    @Test
     @DisplayName("无签名 → 不拒收, verify-then-act 回查平台核实后处理")
     void unsignedVerifyThenAct() {
         String raw = body("lotask-2", "FAILED");

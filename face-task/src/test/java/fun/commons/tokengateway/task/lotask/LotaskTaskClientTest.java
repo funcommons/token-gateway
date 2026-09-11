@@ -84,18 +84,18 @@ class LotaskTaskClientTest {
     }
 
     @Test
-    @DisplayName("get 成功: 映射 status/result/error 字段 (camelCase)")
+    @DisplayName("get 成功: 映射 status/result; 错误字段读 lotask4j 的 errorMsg")
     void getSuccess() {
         lotask.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
-                .setBody("{\"code\":0,\"data\":{\"id\":\"YeirYkxHuQ\",\"status\":\"SUCCESS\","
-                        + "\"result\":{\"resources\":[\"https://up/v.mp4\"],\"usage\":{\"seconds\":5}},"
-                        + "\"errorCode\":null,\"errorMessage\":null}}"));
+                .setBody("{\"code\":0,\"data\":{\"id\":\"YeirYkxHuQ\",\"status\":\"FAILED\","
+                        + "\"result\":null,"
+                        + "\"errorMsg\":\"钩子异常: waibibabo image generation failed: HTTP 502\"}}"));
 
         StepVerifier.create(client.get("YeirYkxHuQ"))
                 .assertNext(view -> {
-                    assertThat(view.status()).isEqualTo("SUCCESS");
-                    assertThat(view.result().get("resources")).isEqualTo(
-                            java.util.List.of("https://up/v.mp4"));
+                    assertThat(view.status()).isEqualTo("FAILED");
+                    assertThat(view.errorMessage())
+                            .contains("waibibabo image generation failed: HTTP 502");
                 })
                 .verifyComplete();
     }

@@ -27,6 +27,8 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -90,7 +92,10 @@ public class TaskRelayOrchestrator {
             return Mono.error(new RelayException(401, ApiCode.UNAUTHORIZED.getCode(),
                     "缺少 bearer token"));
         }
-        String requestId = traceId != null ? traceId : java.util.UUID.randomUUID().toString();
+        // billing requestId 必须数字 (MMagiX credit related_id BIGINT); 接入方数字幂等键优先
+        String requestId = traceId != null && traceId.matches("\\d+") ? traceId
+                : String.valueOf(System.currentTimeMillis() * 1000
+                        + java.util.concurrent.ThreadLocalRandom.current().nextInt(1000));
         final String idemKey = idempotencyKey;
         return tokenApi.validate(TokenValidateRequest.builder().apiKey(apiKey).model(model).build())
                 .flatMap(tokenResp -> {
@@ -99,7 +104,7 @@ public class TaskRelayOrchestrator {
                         return Mono.error(new RelayException(401, "invalid token"));
                     }
                     TokenValidateVO token = tokenResp.getData();
-                    return resolveRoute(token, model, idemKey)
+                    return resolveRoute(token, model, idemKey, body)
                             .flatMap(channel -> submitWithSaga(modality, token, channel,
                                     model, body,
                                     idemKey != null ? idemKey : requestId,
@@ -112,7 +117,16 @@ public class TaskRelayOrchestrator {
      * <p>G5: adapter=tokengo|openapi 时走 token-route resolve (data_json 契约字段映射),
      * 路由快照随 submit 载荷下发 Worker 的链路不变.
      */
-    private Mono<DistributeVO> resolveRoute(TokenValidateVO token, String model, String idempotencyKey) {
+    private Mono<DistributeVO> resolveRoute(TokenValidateVO token, String model, String idempotencyKey,
+                                            Map<String, Object> body) {
+        Map<String, Object> priceParams = new LinkedHashMap<>();
+        if (body != null) {
+            for (String k : new String[]{"size", "ratio", "resolution"}) {
+                if (body.get(k) != null) {
+                    priceParams.put(k, body.get(k));
+                }
+            }
+        }
         if (adapterSelector.routeViaTokenRoute()) {
             return tokenRouteClient.resolve(model, null, 0, 0, null);
         }
@@ -122,6 +136,7 @@ public class TaskRelayOrchestrator {
                         .apiKeyId(token.getTokenId())
                         .groupId(token.getGroupId())
                         .model(model)
+                        .params(priceParams)
                         .idempotencyKey(idempotencyKey).build())
                 .flatMap(distResp -> {
                     if (distResp == null || !distResp.isSuccess() || distResp.getData() == null) {
@@ -238,6 +253,90 @@ public class TaskRelayOrchestrator {
         if (entry.get("error") != null) {
             out.put("error", entry.get("error"));
         }
+        return out;
+    }
+
+    /**
+     * OpenAI 协议同步封装 (POST /v1/images/sync; LLM 面 /v1/images/generations 已被 face-llm 占用): create + 轮询至终态.
+     * <p>成功 → {created, data:[{url}]} (url=网关签名代理, 24h); 上游失败 → 502 + 上游错误消息;
+     * 同步等待超时 (默认 60s) → 降级 {status=PROCESSING, task_no, poll_url} (HTTP 200, 接入方按 status 分流).
+     * <p>仅支持 n=1 (任务面单图语义); size 原生透传 (gpt-image 3 档/auto), ratio 扩展 (9:16 等).
+     */
+    public Mono<Map<String, Object>> createImageGenerations(String apiKey, Map<String, Object> body,
+                                                            String traceId, String idempotencyKey) {
+        Object n = body == null ? null : body.get("n");
+        if (n instanceof Number num && num.intValue() > 1) {
+            return Mono.error(new RelayException(400, ApiCode.REQUIRED_MISSING.getCode(),
+                    "仅支持 n=1 (任务面单图语义)"));
+        }
+        // 任务面契约: 业务参数在 body.params (buildPayload 取 params/input 两个子对象)
+        Map<String, Object> inner = new LinkedHashMap<>();
+        inner.put("prompt", body == null ? null : body.get("prompt"));
+        if (body != null && body.get("size") != null) {
+            inner.put("size", body.get("size"));
+        }
+        if (body != null && body.get("ratio") != null) {
+            inner.put("ratio", body.get("ratio"));
+        }
+        if (body != null && body.get("resolution") != null) {
+            inner.put("resolution", body.get("resolution"));
+        }
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("model", body == null ? null : body.get("model"));
+        params.put("params", inner);
+        java.time.Instant deadline = java.time.Instant.now().plus(GENERATIONS_SYNC_TIMEOUT);
+        return create("image", apiKey, params, traceId, idempotencyKey)
+                .flatMap(created -> {
+                    String taskNo = String.valueOf(created.get("task_no"));
+                    return pollUntilTerminal("image", taskNo, apiKey, deadline, GENERATIONS_POLL_INTERVAL);
+                });
+    }
+
+    private static final java.time.Duration GENERATIONS_SYNC_TIMEOUT = java.time.Duration.ofSeconds(60);
+    private static final java.time.Duration GENERATIONS_POLL_INTERVAL = java.time.Duration.ofSeconds(2);
+
+    Mono<Map<String, Object>> pollUntilTerminal(String modality, String taskNo, String apiKey,
+                                                        java.time.Instant deadline,
+                                                        java.time.Duration interval) {
+        return poll(modality, taskNo, apiKey)
+                .flatMap(view -> {
+                    String status = String.valueOf(view.get("status"));
+                    if ("SUCCEEDED".equals(status)) {
+                        return Mono.just(generationsSuccessBody(view));
+                    }
+                    if ("FAILED".equals(status) || "EXPIRED".equals(status)) {
+                        Object error = view.get("error");
+                        String msg = error instanceof Map<?, ?> m && m.get("message") != null
+                                ? String.valueOf(m.get("message")) : "task " + status;
+                        return Mono.error(new RelayException(502, ApiCode.THIRD_PARTY_ERROR.getCode(), msg));
+                    }
+                    if (java.time.Instant.now().isAfter(deadline)) {
+                        return Mono.just(processingFallbackBody(taskNo));
+                    }
+                    return Mono.delay(interval).then(pollUntilTerminal(modality, taskNo, apiKey, deadline, interval));
+                });
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> generationsSuccessBody(Map<String, Object> pollView) {
+        List<Map<String, Object>> data = new ArrayList<>();
+        Object result = pollView.get("result");
+        if (result instanceof Map<?, ?> r && r.get("resources") instanceof List<?> resources) {
+            for (Object url : resources) {
+                data.add(Map.of("url", String.valueOf(url)));
+            }
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("created", java.time.Instant.now().getEpochSecond());
+        out.put("data", data);
+        return out;
+    }
+
+    private Map<String, Object> processingFallbackBody(String taskNo) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("status", "PROCESSING");
+        out.put("task_no", taskNo);
+        out.put("poll_url", "/v1/images/" + taskNo);
         return out;
     }
 

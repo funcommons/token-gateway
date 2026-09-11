@@ -88,6 +88,25 @@ class TerminalEventHandlerTest {
     }
 
     @Test
+    @DisplayName("onTerminalView FAILED 无 result 但有错误字段: 错误转 {code,message} 载体透传")
+    void viewFailedCarriesError() {
+        var view = new fun.commons.tokengateway.task.lotask.LotaskTaskView(
+                "lotask-1", "FAILED", null, "SCRIPT_ERROR",
+                "钩子异常: waibibabo image generation failed: HTTP 502");
+
+        StepVerifier.create(handler.onTerminalView("T1", META, view)).verifyComplete();
+
+        org.mockito.ArgumentCaptor<Map<String, Object>> carried =
+                org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(notifyDispatcher).dispatch(eq("T1"), eq("https://caller/cb"), carried.capture());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> error = (Map<String, Object>) carried.getValue().get("error");
+        assertThat(error).isNotNull();
+        assertThat(String.valueOf(error.get("code"))).isEqualTo("SCRIPT_ERROR");
+        assertThat(String.valueOf(error.get("message"))).contains("HTTP 502");
+    }
+
+    @Test
     @DisplayName("EXPIRED (超时钟): 退款 + 终态条目 status=EXPIRED + notify")
     void expiredViaTimeoutClock() {
         StepVerifier.create(handler.onExpired("T1", META)).verifyComplete();

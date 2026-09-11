@@ -138,8 +138,10 @@ public class LotaskTaskClient {
                             d.getString("id"),
                             d.getString("status"),
                             d.getJSONObject("result"),
-                            d.getString("errorCode"),
-                            d.getString("errorMessage"));
+                            null,
+                            // lotask4j TaskDetailResponse 的错误字段是 errorMsg (无 errorCode)
+                            d.getString("errorMsg") != null ? d.getString("errorMsg")
+                                    : d.getString("errorMessage"));
                 })
                 .onErrorResume(e -> e instanceof RelayException re
                         ? Mono.error(re)
