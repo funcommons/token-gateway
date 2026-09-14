@@ -24,7 +24,7 @@ security:
   - apiKeyHeader: []
 
 paths:
-  /v1/videos:
+  /v1/onetoken/videos:
     post:
       tags: [task]
       operationId: createVideoTask
@@ -52,7 +52,7 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
 
-  /v1/images:
+  /v1/onetoken/images:
     post:
       tags: [task]
       operationId: createImageTask
@@ -74,7 +74,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TaskCreated'
 
-  /v1/images/sync:
+  /v1/onetoken/images/sync:
     post:
       tags: [task]
       operationId: createImageGenerationsSync
@@ -121,7 +121,7 @@ paths:
         '502':
           description: 上游失败/EXPIRED（10004 信封，已自动全额退款）
 
-  /v1/audios:
+  /v1/onetoken/audios:
     post:
       tags: [task]
       operationId: createAudioTask
@@ -143,7 +143,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TaskCreated'
 
-  /v1/tts:
+  /v1/onetoken/tts:
     post:
       tags: [task]
       operationId: createTtsTask
@@ -165,7 +165,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TaskCreated'
 
-  /v1/videos/{task_no}:
+  /v1/onetoken/videos/{task_no}:
     get:
       tags: [task]
       operationId: pollVideoTask
@@ -361,7 +361,7 @@ components:
           description: 轮询端点相对路径
     ImagesGenerationsResult:
       type: object
-      description: /v1/images/sync 成功响应（OpenAI images 形状；url 为网关签名代理 URL，24h 有效）
+      description: /v1/onetoken/images/sync 成功响应（OpenAI images 形状；url 为网关签名代理 URL，24h 有效）
       required: [created, data]
       properties:
         created:
@@ -375,7 +375,7 @@ components:
                 type: string
     ImagesSyncProcessing:
       type: object
-      description: /v1/images/sync 同步窗超时降级（HTTP 200；按 poll_url 继续异步轮询）
+      description: /v1/onetoken/images/sync 同步窗超时降级（HTTP 200；按 poll_url 继续异步轮询）
       required: [status, task_no, poll_url]
       properties:
         status:

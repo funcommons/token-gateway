@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 变更（Breaking）
+
+- **任务面端点迁移 `/v1/onetoken/*`（issue #20，硬切）**：网关自有任务协议与 OpenAI 官方端点解耦——`/v1/*` 只留 OpenAI/Anthropic 官方形状（SDK 兼容面），四模态 create/poll 与同步生图封装挂 `/v1/onetoken/*`（`/v1/onetoken/{videos,images,audios,tts}`、`/v1/onetoken/images/sync`）；`poll_url` 字段值同步。旧路径移除（调用方双侧可控）；`/v1/resources/**` 原路径保留（在途 sig URL 不断）。为 #19（OpenAI `background:true` 轮询透传）腾出 `GET /v1/images/generations/{id}`
+
 ### 文档
 
 - **任务面手册补「同步生图封装」`POST /v1/images/sync`**（中英 + 08 契约 yaml）：OpenAI 形状请求/三出口（成功 data/[url]、502 上游失败已退款、60s 超时降级 PROCESSING+poll_url）、n=1 语义、计费/幂等同任务面口径——v0.6.0 引入的端点此前零文档

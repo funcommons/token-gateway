@@ -153,7 +153,7 @@ class TaskRelayOrchestratorTest {
                 .assertNext(resp -> {
                     assertThat(resp.get("status")).isEqualTo("PROCESSING");
                     assertThat(resp.get("task_no")).isEqualTo("T2");
-                    assertThat(resp.get("poll_url")).isEqualTo("/v1/images/T2");
+                    assertThat(resp.get("poll_url")).isEqualTo("/v1/onetoken/images/T2");
                 })
                 .verifyComplete();
     }
@@ -217,7 +217,7 @@ class TaskRelayOrchestratorTest {
                     String taskNo = (String) view.get("task_no");
                     assertThat(taskNo).startsWith("T");
                     assertThat(view.get("status")).isEqualTo("PENDING");
-                    assertThat(view.get("poll_url")).isEqualTo("/v1/videos/" + taskNo);
+                    assertThat(view.get("poll_url")).isEqualTo("/v1/onetoken/videos/" + taskNo);
                 })
                 .verifyComplete();
 
@@ -249,7 +249,7 @@ class TaskRelayOrchestratorTest {
                 .assertNext(view -> {
                     String taskNo = (String) view.get("task_no");
                     // 网关 API 面不变: poll_url 仍按模态构造
-                    assertThat(view.get("poll_url")).isEqualTo("/v1/images/" + taskNo);
+                    assertThat(view.get("poll_url")).isEqualTo("/v1/onetoken/images/" + taskNo);
                 })
                 .verifyComplete();
 

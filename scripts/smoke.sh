@@ -113,7 +113,7 @@ ENVELOPE=$(curl -s "$GW/v1/chat/completions" \
   -H "Authorization: Bearer $DEMO_KEY" -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"这是一句违禁词测试"}]}')
 assert_eq "内容含违禁词 → 信封 10106" "$(echo "$ENVELOPE" | jsonfield code)" "10106"
-ENVELOPE=$(curl -s "$GW/v1/videos" \
+ENVELOPE=$(curl -s "$GW/v1/onetoken/videos" \
   -H "Authorization: Bearer sk-poor-xxx" -H "Content-Type: application/json" \
   -H "Idempotency-Key: smoke-poor-$(date +%s)" \
   -d '{"model":"vid-mock-1"}')
@@ -121,7 +121,7 @@ assert_eq "sk-poor 任务创建 → 信封 10617 (不产生任务)" "$(echo "$EN
 
 step "4. 任务面 — create → 执行 → SUCCEEDED (token-mock 自然节奏 ~60s)"
 IDEM="smoke-$(date +%s)"
-CREATE=$(curl -s "$GW/v1/videos" \
+CREATE=$(curl -s "$GW/v1/onetoken/videos" \
   -H "Authorization: Bearer $DEMO_KEY" -H "Content-Type: application/json" \
   -H "Idempotency-Key: $IDEM" \
   -d "{\"model\":\"vid-mock-1\",\"params\":{\"resolution\":\"720p\"},\"input\":\"冒烟视频\",\"notify_url\":\"$CP/callback\"}")
@@ -132,7 +132,7 @@ assert_eq "create 初始 PENDING" "$(echo "$CREATE" | jsonfield status)" "PENDIN
 STATUS=""
 for i in $(seq 1 30); do   # 30 × 5s = 150s 上限
   sleep 5
-  POLL=$(curl -s "$GW/v1/videos/$TASK_NO" -H "Authorization: Bearer $DEMO_KEY")
+  POLL=$(curl -s "$GW/v1/onetoken/videos/$TASK_NO" -H "Authorization: Bearer $DEMO_KEY")
   STATUS=$(echo "$POLL" | jsonfield status)
   echo "  ... poll[$i] status=$STATUS"
   [ "$STATUS" = "SUCCEEDED" ] || [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "EXPIRED" ] && break
@@ -158,15 +158,15 @@ CODE=$(curl -s -o /dev/null -w '%{http_code}' "$GW$TAMPER")
 assert_eq "篡改 sig → 400" "$CODE" "400"
 
 step "6. 任务面 — 未知任务 poll (404 + 业务码 10400)"
-CODE=$(curl -s -o /dev/null -w '%{http_code}' "$GW/v1/audios/T0000000000000000000" \
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$GW/v1/onetoken/audios/T0000000000000000000" \
   -H "Authorization: Bearer $DEMO_KEY")
 assert_eq "未知 task_no poll → HTTP 404" "$CODE" "404"
-ENVELOPE=$(curl -s "$GW/v1/audios/T0000000000000000000" -H "Authorization: Bearer $DEMO_KEY")
+ENVELOPE=$(curl -s "$GW/v1/onetoken/audios/T0000000000000000000" -H "Authorization: Bearer $DEMO_KEY")
 assert_eq "未知 task_no poll → 信封 10400" "$(echo "$ENVELOPE" | jsonfield code)" "10400"
 
 step "7. 负路径 — webhook 篡改 (伪造 FAILED 不得生效; 无验签走 verify-then-act 回查)"
 # audio 模态无 Worker 脚本 → 平台任务恒 QUEUED (确定性零竞态), 同时承载 7/8 两步
-EXP_T=$(curl -s "$GW/v1/audios" \
+EXP_T=$(curl -s "$GW/v1/onetoken/audios" \
   -H "Authorization: Bearer $DEMO_KEY" -H "Content-Type: application/json" \
   -H "Idempotency-Key: smoke-exp-$(date +%s)" \
   -d "{\"model\":\"vid-mock-1\",\"input\":\"篡改/超时演练\",\"notify_url\":\"$CP/callback\"}" \
@@ -182,7 +182,7 @@ FORGE=$(curl -s -X POST "$GW/internal/lotask/webhook" \
   -d "{\"task_id\":\"$LOTASK_ID\",\"status\":\"FAILED\",\"result\":{\"error\":\"forged\"}}")
 assert_contains "篡改签名 → 拒载荷 + 回查平台 (mode=reconciled)" "$FORGE" "reconciled"
 sleep 3
-FORGE_STATUS=$(curl -s "$GW/v1/audios/$EXP_T" -H "Authorization: Bearer $DEMO_KEY" | jsonfield status)
+FORGE_STATUS=$(curl -s "$GW/v1/onetoken/audios/$EXP_T" -H "Authorization: Bearer $DEMO_KEY" | jsonfield status)
 if [ "$FORGE_STATUS" = "FAILED" ]; then
   bad "伪造 FAILED 生效 (状态污染!)"
 else
@@ -201,7 +201,7 @@ $REDIS_CLI ZADD tgw:task:deadlines $(( $(date +%s) * 1000 - 1000 )) "$EXP_T" > /
 EXP_POLL=""; EXP_STATUS=""
 for i in $(seq 1 24); do   # 24 × 5s = 120s 上限 (超时钟扫描周期 60s)
   sleep 5
-  EXP_POLL=$(curl -s "$GW/v1/audios/$EXP_T" -H "Authorization: Bearer $DEMO_KEY")
+  EXP_POLL=$(curl -s "$GW/v1/onetoken/audios/$EXP_T" -H "Authorization: Bearer $DEMO_KEY")
   EXP_STATUS=$(echo "$EXP_POLL" | jsonfield status)
   echo "  ... poll[$i] status=$EXP_STATUS"
   [ "$EXP_STATUS" = "EXPIRED" ] && break
@@ -246,7 +246,7 @@ OPEN=$(curl -s "$CP/demo/state" | jsonfield openHolds)
 assert_eq "控制层账本无未闭环预扣 (openHolds 空)" "$OPEN" "{}"
 
 step "11. 幂等 — 同 Idempotency-Key 重复 create 被拒绝式去重"
-DUP=$(curl -s -o /dev/null -w '%{http_code}' "$GW/v1/videos" \
+DUP=$(curl -s -o /dev/null -w '%{http_code}' "$GW/v1/onetoken/videos" \
   -H "Authorization: Bearer $DEMO_KEY" -H "Content-Type: application/json" \
   -H "Idempotency-Key: $IDEM" \
   -d '{"model":"vid-mock-1"}')

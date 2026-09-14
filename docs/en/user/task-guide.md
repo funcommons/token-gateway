@@ -30,14 +30,14 @@
 
 | # | Endpoint | Method | Description |
 |---|---|---|---|
-| 1 | `/v1/videos` · `/v1/images` · `/v1/audios` · `/v1/tts` | POST | Create a task (isomorphic across the four modalities) |
-| 2 | `/v1/videos/{task_no}` (isomorphic across the four modalities) | GET | Poll task status |
-| 3 | `/v1/images/sync` | POST | Synchronous image generation wrapper (OpenAI shape; create + poll-to-terminal internally) |
+| 1 | `/v1/onetoken/videos` · `/v1/onetoken/images` · `/v1/onetoken/audios` · `/v1/onetoken/tts` | POST | Create a task (isomorphic across the four modalities) |
+| 2 | `/v1/onetoken/videos/{task_no}` (isomorphic across the four modalities) | GET | Poll task status |
+| 3 | `/v1/onetoken/images/sync` | POST | Synchronous image generation wrapper (OpenAI shape; create + poll-to-terminal internally) |
 | 4 | `/v1/resources/{task_no}/{index}?exp=&sig=` | GET | Resource proxy (no credential required; sig is the capability credential) |
 
-> Note: `/v1/images` (asynchronous task), `/v1/images/sync` (synchronous wrapper) and the LLM face's `/v1/images/generations` (synchronous pass-through) are three different endpoints — do not confuse them.
+> Note: task-face endpoints live under `/v1/onetoken/*` since v0.8.0 (issue #20, decoupled from OpenAI official endpoints); `/v1/onetoken/images` (async task), `/v1/onetoken/images/sync` (sync wrapper) and the LLM face's `/v1/images/generations` (sync pass-through) are three different endpoints — do not confuse them.
 
-### 2.1 Synchronous Image Generation Wrapper (`POST /v1/images/sync`)
+### 2.1 Synchronous Image Generation Wrapper (`POST /v1/onetoken/images/sync`)
 
 An OpenAI-Images-shaped **synchronous** entry: the gateway internally creates an image task and polls it to a terminal state, so the caller gets the result in one request. Body: `model` + `prompt` (required), `size` / `ratio` / `resolution` (optional, passed through), `n` (**only 1** supported — task-face single-image semantics, >1 → 400). Supports `Idempotency-Key`.
 
@@ -56,13 +56,13 @@ Billing/idempotency follow the standard task semantics (full pre-deduction on cr
 ```bash
 # ① Create (synchronously returns task_no: control-plane key validation → routing-table resolve
 #    for pricing → full pre-deduction per the routed model; insufficient balance → 10617, no task created)
-curl -s http://localhost:9401/v1/videos \
+curl -s http://localhost:9401/v1/onetoken/videos \
   -H "Authorization: Bearer <credential>" -H "Content-Type: application/json" \
   -d '{"model":"vid-1.5","params":{"duration":5,"resolution":"720p"},"notify_url":"https://you/callback"}'
-# → {"task_no":"T20260831...","status":"PENDING","poll_url":"/v1/videos/T20260831..."}
+# → {"task_no":"T20260831...","status":"PENDING","poll_url":"/v1/onetoken/videos/T20260831..."}
 
 # ② Poll (driven by the caller every 3–5s; terminal states are idempotent — repeated polling neither touches upstream nor triggers duplicate refunds)
-curl -s http://localhost:9401/v1/videos/T20260831... -H "Authorization: Bearer <credential>"
+curl -s http://localhost:9401/v1/onetoken/videos/T20260831... -H "Authorization: Bearer <credential>"
 # → {"status":"SUCCEEDED","result":{"resources":["<proxy URL>"],"usage":{...}}}
 
 # ③ Resource fetch (result.resources contains gateway proxy URLs carrying a 24h-valid exp+sig; browsers/download clients can fetch directly without credentials)

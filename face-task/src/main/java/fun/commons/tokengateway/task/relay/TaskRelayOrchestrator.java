@@ -257,7 +257,7 @@ public class TaskRelayOrchestrator {
     }
 
     /**
-     * OpenAI 协议同步封装 (POST /v1/images/sync; LLM 面 /v1/images/generations 已被 face-llm 占用): create + 轮询至终态.
+     * OpenAI 协议同步封装 (POST /v1/onetoken/images/sync; LLM 面 /v1/images/generations 已被 face-llm 占用): create + 轮询至终态.
      * <p>成功 → {created, data:[{url}]} (url=网关签名代理, 24h); 上游失败 → 502 + 上游错误消息;
      * 同步等待超时 (默认 60s) → 降级 {status=PROCESSING, task_no, poll_url} (HTTP 200, 接入方按 status 分流).
      * <p>仅支持 n=1 (任务面单图语义); size 原生透传 (gpt-image 3 档/auto), ratio 扩展 (9:16 等).
@@ -336,7 +336,7 @@ public class TaskRelayOrchestrator {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("status", "PROCESSING");
         out.put("task_no", taskNo);
-        out.put("poll_url", "/v1/images/" + taskNo);
+        out.put("poll_url", "/v1/onetoken/images/" + taskNo);
         return out;
     }
 
@@ -363,7 +363,7 @@ public class TaskRelayOrchestrator {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("task_no", taskNo);
         out.put("status", TaskStatus.PENDING.name());
-        out.put("poll_url", "/v1/" + modality + "s/" + taskNo);
+        out.put("poll_url", "/v1/onetoken/" + modality + "s/" + taskNo);
         return out;
     }
 

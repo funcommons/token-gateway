@@ -15,8 +15,9 @@ import java.util.Map;
 /**
  * 任务面四模态端点 (契约 = docs/用户文档/04_任务面API契约.yaml, M2.5a).
  *
- * <p>create: POST /v1/{videos|images|audios|tts} → {task_no, status, poll_url};
- * poll: GET /v1/{videos|images|audios|tts}/{task_no} → {task_no, status, result?, error?}.
+ * <p>issue #20: 网关自有任务协议挂 /v1/onetoken/* (与 OpenAI 官方端点解耦, 硬切);
+ * create: POST /v1/onetoken/{videos|images|audios|tts} → {task_no, status, poll_url};
+ * poll: GET /v1/onetoken/{videos|images|audios|tts}/{task_no} → {task_no, status, result?, error?}.
  * 鉴权双头 (Bearer 优先, 同 LLM 面); 信封/错误码经 GlobalExceptionHandler 统一 (ApiCode 业务码).
  *
  * <p>M2.5a 范围: create/poll; 资源代理 /v1/resources/** 与 notify/webhook 为 M2.5c.
@@ -27,7 +28,7 @@ public class TaskController {
 
     private final TaskRelayOrchestrator orchestrator;
 
-    @PostMapping("/v1/videos")
+    @PostMapping("/v1/onetoken/videos")
     public Mono<Map<String, Object>> createVideo(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
@@ -38,7 +39,7 @@ public class TaskController {
     }
 
     /** 同步生图 (OpenAI 请求/响应形状): 内部 create+轮询, 60s 超时降级 PROCESSING+poll_url. */
-    @PostMapping("/v1/images/sync")
+    @PostMapping("/v1/onetoken/images/sync")
     public Mono<Map<String, Object>> createImageGenerations(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
@@ -49,7 +50,7 @@ public class TaskController {
                 extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
     }
 
-    @PostMapping("/v1/images")
+    @PostMapping("/v1/onetoken/images")
     public Mono<Map<String, Object>> createImage(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
@@ -59,7 +60,7 @@ public class TaskController {
         return orchestrator.create("image", extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
     }
 
-    @PostMapping("/v1/audios")
+    @PostMapping("/v1/onetoken/audios")
     public Mono<Map<String, Object>> createAudio(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
@@ -69,7 +70,7 @@ public class TaskController {
         return orchestrator.create("audio", extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
     }
 
-    @PostMapping("/v1/tts")
+    @PostMapping("/v1/onetoken/tts")
     public Mono<Map<String, Object>> createTts(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
@@ -79,7 +80,7 @@ public class TaskController {
         return orchestrator.create("tts", extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
     }
 
-    @GetMapping("/v1/videos/{taskNo}")
+    @GetMapping("/v1/onetoken/videos/{taskNo}")
     public Mono<Map<String, Object>> pollVideo(
             @PathVariable String taskNo,
             @RequestHeader(value = "Authorization", required = false) String authorization,
@@ -87,7 +88,7 @@ public class TaskController {
         return orchestrator.poll("video", taskNo, extractApiKey(authorization, xApiKey));
     }
 
-    @GetMapping("/v1/images/{taskNo}")
+    @GetMapping("/v1/onetoken/images/{taskNo}")
     public Mono<Map<String, Object>> pollImage(
             @PathVariable String taskNo,
             @RequestHeader(value = "Authorization", required = false) String authorization,
@@ -95,7 +96,7 @@ public class TaskController {
         return orchestrator.poll("image", taskNo, extractApiKey(authorization, xApiKey));
     }
 
-    @GetMapping("/v1/audios/{taskNo}")
+    @GetMapping("/v1/onetoken/audios/{taskNo}")
     public Mono<Map<String, Object>> pollAudio(
             @PathVariable String taskNo,
             @RequestHeader(value = "Authorization", required = false) String authorization,
@@ -103,7 +104,7 @@ public class TaskController {
         return orchestrator.poll("audio", taskNo, extractApiKey(authorization, xApiKey));
     }
 
-    @GetMapping("/v1/tts/{taskNo}")
+    @GetMapping("/v1/onetoken/tts/{taskNo}")
     public Mono<Map<String, Object>> pollTts(
             @PathVariable String taskNo,
             @RequestHeader(value = "Authorization", required = false) String authorization,
