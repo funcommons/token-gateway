@@ -125,4 +125,19 @@ class LotaskTaskClientTest {
         lotask = new MockWebServer(); // tearDown 幂等
         lotask.start();
     }
+
+    @Test
+    @DisplayName("get 大响应: 任务视图 >256KB 不炸 (DataBufferLimit 回归; 真实载荷含大 result)")
+    void getBigBodyOver256k() {
+        String bigResult = "{\"code\":0,\"message\":\"ok\",\"data\":{\"id\":\"T1\",\"status\":\"SUCCEEDED\",\"result\":{\"payload\":\""
+                + "x".repeat(300 * 1024) + "\"}}}";
+        lotask.enqueue(new MockResponse().setHeader("Content-Type", "application/json").setBody(bigResult));
+
+        StepVerifier.create(client.get("T1"))
+                .assertNext(view -> {
+                    assertThat(view.id()).isEqualTo("T1");
+                    assertThat(view.status()).isEqualTo("SUCCEEDED");
+                })
+                .verifyComplete();
+    }
 }

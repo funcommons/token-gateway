@@ -59,7 +59,8 @@ public class ResourceProxyController {
                     "资源签名无效或已过期"));
         }
         Path cacheFile = cacheFile(taskNo, index);
-        if (Files.exists(cacheFile)) {
+        // 命中判定要求非空: write-through 半途失败会留 0 字节文件, 视为未命中走回源 (防空文件毒化)
+        if (Files.exists(cacheFile) && fileSizeOrZero(cacheFile) > 0) {
             return Mono.just(ResponseEntity.ok()
                     .contentType(MediaType.APPLICATION_OCTET_STREAM)
                     .body(DataBufferUtils.readByteChannel(
@@ -100,6 +101,15 @@ public class ResourceProxyController {
         } catch (Exception e) {
             return Mono.error(new RelayException(500, ApiCode.SYSTEM_BUSY.getCode(), "缓存盘不可用"));
         }
+        // data: URI (上游同步 API 经 url 字段直回内联 base64, OpenAI 兼容面实测形态):
+        // 无源可回 — 直解码写缓存盘, 不走 WebClient (否则 URI 无 host 炸 "Host is not specified")
+        if (upstreamUrl.startsWith("data:")) {
+            return decodeDataUri(upstreamUrl)
+                    .flatMap(bytes -> Mono.fromCallable(() -> {
+                        Files.write(cacheFile, bytes);
+                        return serveCacheFile(cacheFile);
+                    }));
+        }
         // issue #16: 预编码签名 URL 须走 URI 重载, uri(String) 模板模式会重复编码 %2B 等序列致上游 403
         WebClient.RequestHeadersSpec<?> spec = webClientBuilder.build().get()
                 .uri(java.net.URI.create(upstreamUrl));
@@ -124,6 +134,33 @@ public class ResourceProxyController {
                 });
     }
 
+    /**
+     * data:[&lt;mediatype&gt;][;base64],&lt;data&gt; 解码; 仅接受 base64 形态, 非法即 502 口径拒绝.
+     */
+    private Mono<byte[]> decodeDataUri(String uri) {
+        int comma = uri.indexOf(',');
+        String metaPart = comma > 5 ? uri.substring(5, comma) : "";
+        if (comma < 0 || !metaPart.contains(";base64")) {
+            return Mono.error(new RelayException(502, ApiCode.THIRD_PARTY_ERROR.getCode(),
+                    "上游资源为不支持的 data URI 形态 (仅支持 base64)"));
+        }
+        try {
+            return Mono.just(java.util.Base64.getDecoder().decode(uri.substring(comma + 1)));
+        } catch (IllegalArgumentException e) {
+            return Mono.error(new RelayException(502, ApiCode.THIRD_PARTY_ERROR.getCode(),
+                    "上游资源 data URI base64 非法"));
+        }
+    }
+
+    private ResponseEntity<Flux<DataBuffer>> serveCacheFile(Path cacheFile) {
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .body(DataBufferUtils.readByteChannel(
+                        () -> Files.newByteChannel(cacheFile),
+                        new org.springframework.core.io.buffer.DefaultDataBufferFactory(),
+                        8192));
+    }
+
     @SuppressWarnings("unchecked")
     private static String resourceAt(java.util.Map<String, Object> result, int index) {
         if (result == null || !(result.get("resources") instanceof List<?> list)
@@ -132,6 +169,14 @@ public class ResourceProxyController {
         }
         Object v = list.get(index);
         return v instanceof String s ? s : null;
+    }
+
+    private long fileSizeOrZero(Path file) {
+        try {
+            return Files.size(file);
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private Path cacheFile(String taskNo, int index) {

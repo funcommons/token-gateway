@@ -213,4 +213,61 @@ class ResourceProxyControllerTest {
         RecordedRequest req = upstream.takeRequest(3, TimeUnit.SECONDS);
         assertThat(req.getHeader("Authorization")).isNull();
     }
+
+    @Test
+    void dataUriDecodedInlineWithoutUpstream() throws Exception {
+        // 上游同步 API 经 url 字段回 data: URI (OpenAI 兼容面实测形态) — 不回源, 直解码落盘
+        allow();
+        byte[] png = new byte[]{ (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+        String dataUri = "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(png);
+        mappedTask("SUCCESS", Map.of("resources", List.of(dataUri), "usage", Map.of()), "sk-x");
+
+        StepVerifier.create(fetch())
+                .assertNext(resp -> {
+                    assertThat(resp.getStatusCode().value()).isEqualTo(200);
+                    String body = DataBufferUtils.join(resp.getBody())
+                            .map(db -> {
+                                byte[] b = new byte[db.readableByteCount()];
+                                db.read(b);
+                                DataBufferUtils.release(db);
+                                return new String(b, java.nio.charset.StandardCharsets.ISO_8859_1);
+                            })
+                            .block();
+                    assertThat(body.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1)).isEqualTo(png);
+                })
+                .verifyComplete();
+        // data URI 无上游调用
+        assertThat(upstream.getRequestCount()).isZero();
+        // 落盘缓存生效: 内容一致
+        assertThat(Files.readAllBytes(cacheDir.resolve(TASK_NO).resolve("0"))).isEqualTo(png);
+    }
+
+    @Test
+    void dataUriMalformedRejects() {
+        allow();
+        mappedTask("SUCCESS", Map.of("resources", List.of("data:image/png;base64,!!!非法!!!"), "usage", Map.of()), null);
+        StepVerifier.create(fetch())
+                .expectErrorSatisfies(e -> {
+                    assertThat(e).isInstanceOf(RelayException.class);
+                })
+                .verify();
+    }
+
+    @Test
+    void emptyCacheFileDoesNotPoison() throws Exception {
+        // write-through 半途失败会留 0 字节缓存 — 不得视为命中 (否则永发空文件), 须回源重拉
+        allow();
+        Path file = cacheDir.resolve(TASK_NO).resolve("0");
+        Files.createDirectories(file.getParent());
+        Files.write(file, new byte[0]);
+        byte[] png = new byte[]{ (byte) 0x89, 0x50, 0x4E, 0x47 };
+        mappedTask("SUCCESS",
+                Map.of("resources", List.of(upstream.url("/") + "img.png"), "usage", Map.of()), "sk-x");
+        upstream.enqueue(new MockResponse().setHeader("Content-Type", "image/png").setBody(new okio.Buffer().write(png)));
+
+        StepVerifier.create(fetch())
+                .assertNext(resp -> assertThat(resp.getStatusCode().value()).isEqualTo(200))
+                .verifyComplete();
+        assertThat(Files.readAllBytes(file)).isEqualTo(png);
+    }
 }

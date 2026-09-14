@@ -45,6 +45,18 @@ public class LotaskTaskClient {
     }
 
     /**
+     * 大响应缓冲 client (任务视图含大 result 载荷, 默认 256KB 会炸 DataBufferLimit;
+     * 8MB 对齐 task-worker ScriptHttpClient 的 32MB 先例收紧档, 仅 get 用).
+     */
+    private WebClient bigBufferClient() {
+        return webClientBuilder
+                .exchangeStrategies(org.springframework.web.reactive.function.client.ExchangeStrategies.builder()
+                        .codecs(c -> c.defaultCodecs().maxInMemorySize(8 * 1024 * 1024))
+                        .build())
+                .build();
+    }
+
+    /**
      * 401 自愈 (令牌被平台撤销, 如 reset-secret 轮换): 清共享缓存后重试一次,
      * 重订阅重新登录取新 token. 限一次防与平台状态异常死循环.
      */
@@ -113,7 +125,7 @@ public class LotaskTaskClient {
      */
     public Mono<LotaskTaskView> get(String lotaskId) {
         String path = "/api/v1/client/tasks/" + lotaskId;
-        return withKickRetry(Mono.defer(() -> authSigner.authorize(webClientBuilder.build().get()
+        return withKickRetry(Mono.defer(() -> authSigner.authorize(bigBufferClient().get()
                         .uri(cfg().getUrl() + path)))
                 .flatMap(spec -> spec.retrieve()
                         .bodyToMono(String.class)
