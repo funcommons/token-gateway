@@ -36,6 +36,10 @@ public class FormatConverter {
 
     /**
      * OpenAI Chat 请求 → Anthropic Messages 请求.
+     * <p>issue #18: 补 tools/tool_choice 转换与 tool 历史拼装——
+     * assistant tool_calls → tool_use 块; 连续 role=tool 消息合并为
+     * tool_result 块并挂到紧随的 user 轮 (Anthropic 契约: tool_result 须在
+     * tool_use 的下一条 user 消息 content 内); stop → stop_sequences.
      */
     public Map<String, Object> openaiToAnthropic(Map<String, Object> openai) {
         Map<String, Object> result = new LinkedHashMap<>();
@@ -45,13 +49,25 @@ public class FormatConverter {
         copyIfPresent(openai, result, "model");
         copyIfPresent(openai, result, "temperature");
         copyIfPresent(openai, result, "top_p");
-        copyIfPresent(openai, result, "stop_sequences");
+        // OpenAI 字段是 stop (string|array) → Anthropic stop_sequences (array);
+        // 直传 stop_sequences 键的存量调用保持透传兼容
+        Object stop = openai.get("stop");
+        if (stop != null) {
+            result.put("stop_sequences", stop instanceof String s ? List.of(s) : stop);
+        } else {
+            copyIfPresent(openai, result, "stop_sequences");
+        }
         Object maxTokens = openai.get("max_tokens");
+        if (maxTokens == null) {
+            // issue #18: 新版 OpenAI SDK 默认发 max_completion_tokens, 缺失回退防静默改写预算为 4096
+            maxTokens = openai.get("max_completion_tokens");
+        }
         result.put("max_tokens", maxTokens != null ? maxTokens : ANTHROPIC_DEFAULT_MAX_TOKENS);
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> openaiMessages = (List<Map<String, Object>>) openai.get("messages");
         List<Map<String, Object>> anthMessages = new ArrayList<>();
+        List<Map<String, Object>> pendingToolResults = new ArrayList<>();
         String systemText = null;
         if (openaiMessages != null) {
             for (Map<String, Object> msg : openaiMessages) {
@@ -72,22 +88,182 @@ public class FormatConverter {
                     }
                     continue;
                 }
+                if ("tool".equalsIgnoreCase(role)) {
+                    pendingToolResults.add(openaiToolMessageToToolResult(msg));
+                    continue;
+                }
+                if (!pendingToolResults.isEmpty()) {
+                    // tool_result 须并入紧随的 user 轮 (同轮 content 前置 tool_result 块);
+                    // 下一消息非 user (异常序列) 时独立成 user 轮兜底
+                    if ("user".equalsIgnoreCase(role)) {
+                        anthMessages.add(openaiUserMessageWithToolResults(pendingToolResults, msg));
+                        pendingToolResults = new ArrayList<>();
+                        continue;
+                    }
+                    anthMessages.add(userToolResultMessage(pendingToolResults));
+                    pendingToolResults = new ArrayList<>();
+                }
                 anthMessages.add(openaiMessageToAnthropic(msg));
             }
+        }
+        if (!pendingToolResults.isEmpty()) {
+            anthMessages.add(userToolResultMessage(pendingToolResults));
         }
         if (systemText != null) {
             result.put("system", systemText);
         }
         result.put("messages", anthMessages);
+
+        Object tools = openai.get("tools");
+        if (tools instanceof List<?> toolList && !toolList.isEmpty()) {
+            result.put("tools", convertOpenAiToolsToAnthropic(toolList));
+        }
+        Object toolChoice = openai.get("tool_choice");
+        if (toolChoice != null) {
+            result.put("tool_choice", convertOpenAiToolChoiceToAnthropic(toolChoice));
+        }
         return result;
+    }
+
+    /** OpenAI tools → Anthropic tools: function 型转换 ({function:{name,description,parameters}} → {name,description,input_schema}); 非 function 型原样透传 (保留上游报错可见). */
+    private static List<Map<String, Object>> convertOpenAiToolsToAnthropic(List<?> openaiTools) {
+        List<Map<String, Object>> result = new ArrayList<>(openaiTools.size());
+        for (Object t : openaiTools) {
+            if (!(t instanceof Map<?, ?> tool)) {
+                continue;
+            }
+            if ("function".equals(tool.get("type")) && tool.get("function") instanceof Map<?, ?> fn) {
+                Map<String, Object> anthropicTool = new LinkedHashMap<>();
+                if (fn.get("name") instanceof String n) {
+                    anthropicTool.put("name", n);
+                }
+                if (fn.get("description") instanceof String d) {
+                    anthropicTool.put("description", d);
+                }
+                Object parameters = fn.get("parameters");
+                if (parameters != null) {
+                    anthropicTool.put("input_schema", parameters);
+                }
+                result.add(anthropicTool);
+            } else {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> raw = (Map<String, Object>) tool;
+                result.add(raw);
+            }
+        }
+        return result;
+    }
+
+    /** OpenAI tool_choice → Anthropic tool_choice: "required"→"any", "none"→{type:none}, {function:{name}}→{type:tool,name}. */
+    private static Object convertOpenAiToolChoiceToAnthropic(Object toolChoice) {
+        if (toolChoice instanceof String s) {
+            return switch (s) {
+                case "required" -> (Object) "any";
+                case "none" -> Map.of("type", "none");
+                case "auto" -> "auto";
+                default -> toolChoice;
+            };
+        }
+        if (toolChoice instanceof Map<?, ?> tc && "function".equals(tc.get("type"))
+                && tc.get("function") instanceof Map<?, ?> fn && fn.get("name") != null) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("type", "tool");
+            out.put("name", fn.get("name"));
+            return out;
+        }
+        return toolChoice;
+    }
+
+    /** OpenAI role=tool 消息 → Anthropic tool_result 块. */
+    private static Map<String, Object> openaiToolMessageToToolResult(Map<String, Object> msg) {
+        Map<String, Object> block = new LinkedHashMap<>();
+        block.put("type", "tool_result");
+        block.put("tool_use_id", msg.get("tool_call_id"));
+        Object content = msg.get("content");
+        if (content != null) {
+            block.put("content", content);
+        }
+        return block;
+    }
+
+    /** tool_result 块独立成 user 轮 (后续无 user 消息可并入时的兜底). */
+    private static Map<String, Object> userToolResultMessage(List<Map<String, Object>> blocks) {
+        Map<String, Object> msg = new LinkedHashMap<>();
+        msg.put("role", "user");
+        msg.put("content", new ArrayList<>(blocks));
+        return msg;
+    }
+
+    /** tool_result 块前置并入紧随的 user 消息 (Anthropic: tool_result 与后续内容同轮). */
+    private static Map<String, Object> openaiUserMessageWithToolResults(
+            List<Map<String, Object>> toolResults, Map<String, Object> userMsg) {
+        List<Object> content = new ArrayList<>(toolResults);
+        Object c = userMsg.get("content");
+        if (c instanceof String s && !s.isEmpty()) {
+            Map<String, Object> text = new LinkedHashMap<>();
+            text.put("type", "text");
+            text.put("text", s);
+            content.add(text);
+        } else if (c instanceof List<?> parts) {
+            content.addAll(parts);
+        }
+        Map<String, Object> msg = new LinkedHashMap<>();
+        msg.put("role", "user");
+        msg.put("content", content);
+        return msg;
+    }
+
+    /** OpenAI tool_call → Anthropic tool_use 块 (arguments JSON 串 → input 对象, 解析失败兜底空 Map). */
+    private static Map<String, Object> openaiToolCallToToolUse(Map<?, ?> call) {
+        Map<String, Object> block = new LinkedHashMap<>();
+        block.put("type", "tool_use");
+        Object id = call.get("id");
+        block.put("id", id != null ? id : "toolu_" + System.nanoTime());
+        if (call.get("function") instanceof Map<?, ?> fn) {
+            if (fn.get("name") instanceof String n) {
+                block.put("name", n);
+            }
+            block.put("input", parseToolInput(
+                    fn.get("arguments") instanceof String a ? a : null));
+        }
+        return block;
     }
 
     /**
      * 单条 OpenAI 消息 → Anthropic 消息.
+     * <p>issue #18: assistant 带 tool_calls → content 块数组 (可选 text 块 + tool_use 块);
+     * role=tool 独立调用时兜底为 user 轮 tool_result 块 (主链路在 openaiToAnthropic 内
+     * 合并连续 tool 消息并入 user 轮, 此处仅保证单条调用不丢语义).
      */
     public Map<String, Object> openaiMessageToAnthropic(Map<String, Object> msg) {
         Map<String, Object> result = new LinkedHashMap<>();
         String role = String.valueOf(msg.get("role"));
+        Object toolCalls = msg.get("tool_calls");
+        if (toolCalls instanceof List<?> calls && !calls.isEmpty()) {
+            List<Object> blocks = new ArrayList<>();
+            Object content = msg.get("content");
+            if (content instanceof String s && !s.isEmpty()) {
+                Map<String, Object> text = new LinkedHashMap<>();
+                text.put("type", "text");
+                text.put("text", s);
+                blocks.add(text);
+            } else if (content instanceof List<?> parts) {
+                blocks.addAll(parts);
+            }
+            for (Object c : calls) {
+                if (c instanceof Map<?, ?> call) {
+                    blocks.add(openaiToolCallToToolUse(call));
+                }
+            }
+            result.put("role", "assistant");
+            result.put("content", blocks);
+            return result;
+        }
+        if ("tool".equalsIgnoreCase(role)) {
+            result.put("role", "user");
+            result.put("content", List.of(openaiToolMessageToToolResult(msg)));
+            return result;
+        }
         result.put("role", "assistant".equalsIgnoreCase(role) ? "assistant" : "user");
         Object content = msg.get("content");
         if (content instanceof String s) {
@@ -176,6 +352,7 @@ public class FormatConverter {
         result.put("model", model != null ? model : "");
 
         StringBuilder contentText = new StringBuilder();
+        List<Map<String, Object>> toolCalls = new ArrayList<>();
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> blocks = (List<Map<String, Object>>) anth.get("content");
         if (blocks != null) {
@@ -183,13 +360,24 @@ public class FormatConverter {
                 Object type = block.get("type");
                 if ("text".equals(type) && block.get("text") instanceof String t) {
                     contentText.append(t);
+                } else if ("tool_use".equals(type)) {
+                    // issue #18 (A3): tool_use 块 → message.tool_calls, 不再丢失
+                    toolCalls.add(anthropicToolUseToToolCall(block));
                 }
             }
         }
 
         Map<String, Object> message = new LinkedHashMap<>();
         message.put("role", "assistant");
-        message.put("content", contentText.toString());
+        // 仅 tool_calls 无文本时 content=null, 对齐 OpenAI 官方语义
+        if (!toolCalls.isEmpty() && contentText.length() == 0) {
+            message.put("content", null);
+        } else {
+            message.put("content", contentText.toString());
+        }
+        if (!toolCalls.isEmpty()) {
+            message.put("tool_calls", toolCalls);
+        }
 
         Map<String, Object> choice = new LinkedHashMap<>();
         choice.put("index", 0);
@@ -225,6 +413,7 @@ public class FormatConverter {
             case "end_turn", "stop_sequence" -> "stop";
             case "max_tokens" -> "length";
             case "tool_use" -> "tool_calls";
+            case "refusal" -> "content_filter";   // issue #18: 对齐流式转换器映射, 不再落 default
             default -> "stop";
         };
     }
@@ -546,6 +735,10 @@ public class FormatConverter {
     @SuppressWarnings("unchecked")
     private String anthropicImageSourceToDataUrl(Map<?, ?> source) {
         Object type = source.get("type");
+        // issue #18: URL 图直传 (OpenAI image_url 原生接受 URL), 不再静默丢弃
+        if ("url".equals(type) && source.get("url") instanceof String u) {
+            return u;
+        }
         if (!"base64".equals(type)) {
             return null;
         }
@@ -587,7 +780,7 @@ public class FormatConverter {
      *   <li>choices[0].finish_reason → stop_reason 映射</li>
      *   <li>usage.prompt_tokens → input_tokens, completion_tokens → output_tokens</li>
      * </ul>
-     * <p>tool_calls 响应转换在 Task #179 补.
+     * <p>tool_calls → tool_use 块转换已落地 (Task #179).
      */
     public Map<String, Object> openAiToAnthropicResponse(Map<String, Object> openaiResp) {
         Map<String, Object> result = new LinkedHashMap<>();
@@ -859,6 +1052,26 @@ public class FormatConverter {
         } catch (NumberFormatException e) {
             return 0;
         }
+    }
+
+    /**
+     * Anthropic tool_use 块 → OpenAI tool_call (input 对象 → arguments JSON 串).
+     * <p>issue #18 (A3): anthropicToOpenAIResponse 使用; input null → "{}".
+     */
+    private static Map<String, Object> anthropicToolUseToToolCall(Map<String, Object> block) {
+        Map<String, Object> function = new LinkedHashMap<>();
+        if (block.get("name") instanceof String n) {
+            function.put("name", n);
+        }
+        Object input = block.get("input");
+        function.put("arguments",
+                input == null ? "{}" : com.alibaba.fastjson2.JSON.toJSONString(input));
+        Map<String, Object> call = new LinkedHashMap<>();
+        Object id = block.get("id");
+        call.put("id", id != null ? id : "call_" + System.nanoTime());
+        call.put("type", "function");
+        call.put("function", function);
+        return call;
     }
 
     /**

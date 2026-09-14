@@ -123,9 +123,9 @@ class FormatConverterTest {
 
     @Test
     void anthropicToOpenAIResponse_stopReasonAndUsageVariants() {
-        // stop_reason 缺失 → stop; tool_use → tool_calls; end_turn/stop_sequence → stop; 未知 → stop
+        // stop_reason 缺失 → stop; tool_use → tool_calls; end_turn/stop_sequence → stop; refusal → content_filter (issue #18); 未知 → stop
         for (var e : Map.of("end_turn", "stop", "stop_sequence", "stop",
-                "tool_use", "tool_calls", "weird", "stop").entrySet()) {
+                "tool_use", "tool_calls", "refusal", "content_filter", "weird", "stop").entrySet()) {
             List<?> choices = (List<?>) converter.anthropicToOpenAIResponse(
                     Map.of("stop_reason", e.getKey())).get("choices");
             assertThat(((Map<?, ?>) choices.get(0)).get("finish_reason")).isEqualTo(e.getValue());
@@ -138,6 +138,118 @@ class FormatConverterTest {
                 Map.of("usage", Map.of("input_tokens", "3", "output_tokens", 1))).get("usage");
         assertThat(usage.get("total_tokens")).isEqualTo(4);
         org.assertj.core.api.Assertions.assertThat(usage.containsKey("prompt_tokens_details")).isFalse();
+    }
+
+    // ---------- issue #18: OpenAI → Anthropic tools 链路 ----------
+
+    @Test
+    void openaiToAnthropic_toolsAndToolChoiceAndStopConverted() {
+        Map<String, Object> out = converter.openaiToAnthropic(Map.of(
+                "model", "claude-x",
+                "max_completion_tokens", 512,   // issue #18 (R2): 新版 SDK 键回退
+                "stop", "END",                  // issue #18: stop → stop_sequences
+                "tools", List.of(Map.of(
+                        "type", "function",
+                        "function", Map.of("name", "get_weather", "description", "查天气",
+                                "parameters", Map.of("type", "object")))),
+                "tool_choice", "required",
+                "messages", List.of(Map.of("role", "user", "content", "北京天气"))));
+        assertThat(out).containsEntry("max_tokens", 512)
+                .containsEntry("stop_sequences", List.of("END"))
+                .containsEntry("tool_choice", "any");
+        Map<?, ?> tool = (Map<?, ?>) ((List<?>) out.get("tools")).get(0);
+        assertThat(tool.get("name")).isEqualTo("get_weather");
+        assertThat(tool.get("description")).isEqualTo("查天气");
+        assertThat(tool.get("input_schema")).isEqualTo(Map.of("type", "object"));
+        assertThat(tool.containsKey("function")).isFalse();
+
+        // 具名 tool_choice: {type:function,function:{name}} → {type:tool,name}
+        Map<String, Object> named = converter.openaiToAnthropic(Map.of(
+                "messages", List.of(),
+                "tool_choice", Map.of("type", "function",
+                        "function", Map.of("name", "get_weather"))));
+        assertThat(named.get("tool_choice"))
+                .isEqualTo(Map.of("type", "tool", "name", "get_weather"));
+    }
+
+    @Test
+    void openaiToAnthropic_toolHistoryConverted() {
+        Map<String, Object> assistant = new java.util.HashMap<>();
+        assistant.put("role", "assistant");
+        assistant.put("content", null);
+        assistant.put("tool_calls", List.of(Map.of(
+                "id", "call_1", "type", "function",
+                "function", Map.of("name", "get_weather", "arguments", "{\"city\":\"北京\"}"))));
+        Map<String, Object> out = converter.openaiToAnthropic(Map.of(
+                "messages", List.of(
+                        Map.of("role", "user", "content", "北京天气"),
+                        assistant,
+                        Map.of("role", "tool", "tool_call_id", "call_1", "content", "晴"),
+                        Map.of("role", "user", "content", "谢谢"))));
+
+        List<?> msgs = (List<?>) out.get("messages");
+        assertThat(msgs).hasSize(3);
+        // assistant: content = [tool_use 块], arguments JSON 串已解析为 input 对象
+        Map<?, ?> asst = (Map<?, ?>) msgs.get(1);
+        assertThat(asst.get("role")).isEqualTo("assistant");
+        Map<?, ?> toolUse = (Map<?, ?>) ((List<?>) asst.get("content")).get(0);
+        assertThat(toolUse.get("type")).isEqualTo("tool_use");
+        assertThat(toolUse.get("id")).isEqualTo("call_1");
+        assertThat(toolUse.get("name")).isEqualTo("get_weather");
+        assertThat(toolUse.get("input")).isEqualTo(Map.of("city", "北京"));
+        // 连续 tool 消息 → tool_result 块并入紧随 user 轮 (前置), tool_call_id 不丢
+        Map<?, ?> user = (Map<?, ?>) msgs.get(2);
+        assertThat(user.get("role")).isEqualTo("user");
+        List<?> blocks = (List<?>) user.get("content");
+        assertThat(blocks).hasSize(2);
+        assertThat(((Map<?, ?>) blocks.get(0)).get("type")).isEqualTo("tool_result");
+        assertThat(((Map<?, ?>) blocks.get(0)).get("tool_use_id")).isEqualTo("call_1");
+        assertThat(((Map<?, ?>) blocks.get(1)).get("type")).isEqualTo("text");
+        assertThat(((Map<?, ?>) blocks.get(1)).get("text")).isEqualTo("谢谢");
+    }
+
+    @Test
+    void anthropicToOpenAIResponse_toolUseToToolCalls() {
+        Map<String, Object> out = converter.anthropicToOpenAIResponse(Map.of(
+                "id", "msg_t", "model", "claude-x",
+                "content", List.of(
+                        Map.of("type", "text", "text", "查一下"),
+                        Map.of("type", "tool_use", "id", "toolu_1",
+                                "name", "get_weather", "input", Map.of("city", "北京"))),
+                "stop_reason", "tool_use"));
+        Map<?, ?> message = (Map<?, ?>) ((Map<?, ?>) ((List<?>) out.get("choices")).get(0)).get("message");
+        assertThat(message.get("content")).isEqualTo("查一下");
+        Map<?, ?> call = (Map<?, ?>) ((List<?>) message.get("tool_calls")).get(0);
+        assertThat(call.get("id")).isEqualTo("toolu_1");
+        assertThat(call.get("type")).isEqualTo("function");
+        assertThat(((Map<?, ?>) call.get("function")).get("name")).isEqualTo("get_weather");
+        assertThat(((Map<?, ?>) call.get("function")).get("arguments"))
+                .isEqualTo(com.alibaba.fastjson2.JSON.toJSONString(Map.of("city", "北京")));
+        assertThat(((Map<?, ?>) ((List<?>) out.get("choices")).get(0)).get("finish_reason"))
+                .isEqualTo("tool_calls");
+
+        // 仅 tool_use 无文本 → content=null (对齐 OpenAI 官方语义)
+        Map<String, Object> toolOnly = converter.anthropicToOpenAIResponse(Map.of(
+                "content", List.of(Map.of("type", "tool_use", "id", "t2",
+                        "name", "f", "input", Map.of())),
+                "stop_reason", "tool_use"));
+        Map<?, ?> toolOnlyMsg = (Map<?, ?>) ((Map<?, ?>) ((List<?>) toolOnly.get("choices")).get(0)).get("message");
+        assertThat(toolOnlyMsg.get("content")).isNull();
+        assertThat((List<?>) toolOnlyMsg.get("tool_calls")).hasSize(1);
+    }
+
+    @Test
+    void anthropicToOpenAiBody_urlImageKept() {
+        // issue #18 (R3): source.type=url 的图不再静默丢弃, 直传 image_url.url
+        Map<String, Object> out = converter.anthropicToOpenAiBody(Map.of(
+                "messages", List.of(Map.of("role", "user", "content", List.of(
+                        Map.of("type", "image", "source",
+                                Map.of("type", "url", "url", "https://img.example.com/a.png")))))));
+        Map<?, ?> msg = (Map<?, ?>) ((List<?>) out.get("messages")).get(0);
+        Map<?, ?> part = (Map<?, ?>) ((List<?>) msg.get("content")).get(0);
+        assertThat(part.get("type")).isEqualTo("image_url");
+        assertThat(((Map<?, ?>) part.get("image_url")).get("url"))
+                .isEqualTo("https://img.example.com/a.png");
     }
 
     // ---------- geminiToOpenAIResponse ----------

@@ -2,6 +2,20 @@
 
 格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 修复
+
+- **OpenAI 协议 tools 跨协议全链路丢失**（issue #18）：OpenAI 调用方带 `tools` 打到 `protocol: anthropic` 渠道时，请求/历史/响应/流式四断点全丢——
+  - A1 请求：`openaiToAnthropic` 补 `tools`（function 型 `{function:{name,description,parameters}}` → `{name,description,input_schema}`，非 function 型透传）与 `tool_choice`（`required`→`any` / `{function:{name}}`→`{type:tool,name}`）转换
+  - A2 历史：assistant `tool_calls` → `tool_use` 块（arguments JSON 串解析为 input 对象）；连续 `role=tool` 消息合并为 `tool_result` 块并入紧随 user 轮（`tool_call_id` 不丢）
+  - A3 响应（非流式）：`anthropicToOpenAIResponse` 补 `tool_use` → `message.tool_calls`（仅工具调用时 `content=null` 对齐 OpenAI 语义）；`stop_reason=refusal` → `finish_reason=content_filter`（对齐流式映射）
+  - A4/B3 流式双侧：`OpenAiSseConverter` 补 `content_block_start(tool_use)`/`input_json_delta` → `delta.tool_calls` 增量（Anthropic 块号 ↔ OpenAI tool 序号映射）；`AnthropicSseConverter` 补 `delta.tool_calls` → `tool_use` 块事件（关旧开新，参数增量 `input_json_delta`）
+  - 顺带三修：`stop` → `stop_sequences`（原拷贝不存在的键致静默丢参）；`max_completion_tokens` 回退（新版 OpenAI SDK 默认键，原恒落默认 4096）；Anthropic `source.type=url` 图片直传 `image_url.url`（原静默丢弃）
+  - B 方向流式 usage：`AnthropicSseConverter` 解析 OpenAI usage 末帧并入 `message_delta.output_tokens`（原调用方从 SSE 读到的 token 数恒 0；计费不受影响——settle 走独立 usageAcc）；`message_delta` 延迟到 usage 帧后发（OpenAI usage 在 finish 帧后到达，Anthropic 协议允许靠后）
+  - 测试 +7（A 方向请求/历史/响应 / R1 refusal 映射 / URL 图保留 / 双侧流式 tool 事件序列 / B 方向流式 usage）
+  - **已知有损面**（无对应物，不做映射，记录备查）：`presence/frequency_penalty`、`response_format`(JSON mode)、`n`、`seed`、`logprobs`（A 方向）；`top_k`、`thinking`、`tool_result.is_error`（B 方向）；gemini 转换器为未接线死代码
+
 ## [0.6.0] - 2026-09-10
 
 ### 新增
