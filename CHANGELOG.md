@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### 文档
+
+- **任务面手册补「同步生图封装」`POST /v1/images/sync`**（中英 + 08 契约 yaml）：OpenAI 形状请求/三出口（成功 data/[url]、502 上游失败已退款、60s 超时降级 PROCESSING+poll_url）、n=1 语义、计费/幂等同任务面口径——v0.6.0 引入的端点此前零文档
+- **开 issue #19**：OpenAI 官方 `background:true` 异步生图经网关 submit 通但轮询断链（face-llm 缺 `GET /v1/images/generations/{id}`），含计费点/幂等/job 渠道绑定四项待决口径
+
 ## [0.7.0] - 2026-09-14
 
 ### 修复

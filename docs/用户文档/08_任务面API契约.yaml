@@ -74,6 +74,53 @@ paths:
               schema:
                 $ref: '#/components/schemas/TaskCreated'
 
+  /v1/images/sync:
+    post:
+      tags: [task]
+      operationId: createImageGenerationsSync
+      summary: 同步生图封装（OpenAI 形状；内部创建图像任务+轮询至终态。同步窗默认 60s，超时降级 PROCESSING+poll_url）
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model, prompt]
+              properties:
+                model:
+                  type: string
+                prompt:
+                  type: string
+                size:
+                  type: string
+                  description: 原生透传（gpt-image 三档 / auto）
+                ratio:
+                  type: string
+                  description: 扩展参数（如 9:16）
+                resolution:
+                  type: string
+                n:
+                  type: integer
+                  description: 仅支持 1（任务面单图语义；>1 返回 400）
+      responses:
+        '200':
+          description: 成功（含同步窗超时降级）/ 超时降级 PROCESSING
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ImagesGenerationsResult'
+                  - $ref: '#/components/schemas/ImagesSyncProcessing'
+        '400':
+          description: n>1 或参数缺失
+        '402':
+          $ref: '#/components/responses/InsufficientBalance'
+        '502':
+          description: 上游失败/EXPIRED（10004 信封，已自动全额退款）
+
   /v1/audios:
     post:
       tags: [task]
@@ -312,6 +359,32 @@ components:
         poll_url:
           type: string
           description: 轮询端点相对路径
+    ImagesGenerationsResult:
+      type: object
+      description: /v1/images/sync 成功响应（OpenAI images 形状；url 为网关签名代理 URL，24h 有效）
+      required: [created, data]
+      properties:
+        created:
+          type: integer
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+    ImagesSyncProcessing:
+      type: object
+      description: /v1/images/sync 同步窗超时降级（HTTP 200；按 poll_url 继续异步轮询）
+      required: [status, task_no, poll_url]
+      properties:
+        status:
+          type: string
+          enum: [PROCESSING]
+        task_no:
+          type: string
+        poll_url:
+          type: string
     TaskStatus:
       type: object
       description: 轮询响应（透传形状；终态幂等）

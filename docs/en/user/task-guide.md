@@ -32,9 +32,24 @@
 |---|---|---|---|
 | 1 | `/v1/videos` · `/v1/images` · `/v1/audios` · `/v1/tts` | POST | Create a task (isomorphic across the four modalities) |
 | 2 | `/v1/videos/{task_no}` (isomorphic across the four modalities) | GET | Poll task status |
-| 3 | `/v1/resources/{task_no}/{index}?exp=&sig=` | GET | Resource proxy (no credential required; sig is the capability credential) |
+| 3 | `/v1/images/sync` | POST | Synchronous image generation wrapper (OpenAI shape; create + poll-to-terminal internally) |
+| 4 | `/v1/resources/{task_no}/{index}?exp=&sig=` | GET | Resource proxy (no credential required; sig is the capability credential) |
 
-> Note: `/v1/images` (asynchronous task) and the LLM face's `/v1/images/generations` (synchronous image generation) are two different endpoints — do not confuse them.
+> Note: `/v1/images` (asynchronous task), `/v1/images/sync` (synchronous wrapper) and the LLM face's `/v1/images/generations` (synchronous pass-through) are three different endpoints — do not confuse them.
+
+### 2.1 Synchronous Image Generation Wrapper (`POST /v1/images/sync`)
+
+An OpenAI-Images-shaped **synchronous** entry: the gateway internally creates an image task and polls it to a terminal state, so the caller gets the result in one request. Body: `model` + `prompt` (required), `size` / `ratio` / `resolution` (optional, passed through), `n` (**only 1** supported — task-face single-image semantics, >1 → 400). Supports `Idempotency-Key`.
+
+Three outcomes:
+
+| Case | HTTP | Response |
+|---|---|---|
+| Terminal success within the sync window (default 60s) | 200 | `{created, data:[{url}]}` — OpenAI images shape; `url` is a gateway-signed proxy URL (24h) |
+| Upstream failure / EXPIRED | 502 | Error envelope (10004 semantics) with the upstream message; fully refunded |
+| Sync window elapsed without a terminal state | 200 | `{status:"PROCESSING", task_no, poll_url}` — degrades to async: keep polling `poll_url` |
+
+Billing/idempotency follow the standard task semantics (full pre-deduction on create, refund on failure/expiry). OpenAI's official `background:true` async mode is not yet pass-through-pollable (see issue #19).
 
 ## 3. Call Flow (Four Steps, Video as Example)
 
