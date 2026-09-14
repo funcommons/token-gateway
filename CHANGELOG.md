@@ -4,13 +4,21 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **OpenAI 协议任务面（issue #19，任务面双协议）**：OpenAI job 形状挂任务引擎，OpenAI SDK 可直接调用；`id` = OneToken 协议 `task_no`，两协议互通
+  - 生视频：`POST /v1/videos`（sora 形状 prompt/seconds/size → `video_generation` job）+ `GET /v1/videos/{id}`（queued/in_progress/completed/failed）+ `GET /v1/videos/{id}/content`（307 至签名代理 URL）；face=task/all 均可用
+  - 异步生图：`POST /v1/images/generations` + `background:true` → `image_generation` job，`GET /v1/images/generations/{id}` completed 带 `output[].content[].image_url`（代理 URL）；缺省 background 走同步封装（与 `/v1/onetoken/images/sync` 同款三出口）；**仅 face=task 注册**（face=all 时该路径归 LLM 面透传，避免映射冲突）
+  - 状态映射：PENDING→queued / RUNNING→in_progress / SUCCEEDED→completed / FAILED+EXPIRED→failed(error)；计费/幂等/资源代理同任务面语义
+  - 新增《OpenAI 任务面接入手册》（中英，与 OneToken 手册同级；FAQ/契约 yaml 顺延重编号 07/08/09）；测试 +7（424→431）
+
 ### 变更（Breaking）
 
 - **任务面端点迁移 `/v1/onetoken/*`（issue #20，硬切）**：网关自有任务协议与 OpenAI 官方端点解耦——`/v1/*` 只留 OpenAI/Anthropic 官方形状（SDK 兼容面），四模态 create/poll 与同步生图封装挂 `/v1/onetoken/*`（`/v1/onetoken/{videos,images,audios,tts}`、`/v1/onetoken/images/sync`）；`poll_url` 字段值同步。旧路径移除（调用方双侧可控）；`/v1/resources/**` 原路径保留（在途 sig URL 不断）。为 #19（OpenAI `background:true` 轮询透传）腾出 `GET /v1/images/generations/{id}`
 
 ### 文档
 
-- **用户文档 OneToken 品牌化**：中文 01-06 手册与 EN 六篇 H1 标题统一冠「OneToken」（如「OneToken 任务面接入手册」），07/08 契约 yaml title 同步（`OneToken API · …`）；文件名与站内链接不动（避免全站链接翻修）
+- **用户文档协议命名纠正**：OneToken 是协议名（`/v1/onetoken/*`）而非产品名——任务面手册定名「OneToken 任务面接入手册」、08 契约「token-gateway API · OneToken 任务面」；其余文档不冠协议名。新增「OpenAI 任务面接入手册」与 OneToken 手册同级（OpenAI 协议异步生图/生视频，见下「新增」）
 - **任务面手册补「同步生图封装」`POST /v1/images/sync`**（中英 + 08 契约 yaml）：OpenAI 形状请求/三出口（成功 data/[url]、502 上游失败已退款、60s 超时降级 PROCESSING+poll_url）、n=1 语义、计费/幂等同任务面口径——v0.6.0 引入的端点此前零文档
 - **开 issue #19**：OpenAI 官方 `background:true` 异步生图经网关 submit 通但轮询断链（face-llm 缺 `GET /v1/images/generations/{id}`），含计费点/幂等/job 渠道绑定四项待决口径
 

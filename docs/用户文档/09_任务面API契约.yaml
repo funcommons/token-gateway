@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: OneToken API · 任务面
+  title: token-gateway API · OneToken 任务面
   version: 1.0.0
   description: |
     通用模型能力网关 · 任务面（videos / images / audios / tts 异步任务四模态）。
@@ -11,7 +11,7 @@ create 可受理但任务不会被执行。协议权威 = THMP 18 号 §3.7；�
 
     - 四段式：create（全额预扣）→ poll（3~5s 驱动，终态幂等）→ notify（HMAC 回调）
       → 资源代理（exp+sig 24h 能力凭证，上游原始 URL 永不透传）。
-    - 认证 / 限流 / 幂等 / 错误信封与 LLM 面一致（见 07_LLM面API契约.yaml components）。
+    - 认证 / 限流 / 幂等 / 错误信封与 LLM 面一致（见 08_LLM面API契约.yaml components）。
     - 接入手册见 docs/用户文档/05_任务面接入手册.md。
 servers:
   - url: http://localhost:9401

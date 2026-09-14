@@ -191,6 +191,107 @@ class TaskRelayOrchestratorTest {
                 .verify();
     }
 
+    // ---------- issue #19: OpenAI 协议 job 封装 ----------
+
+    @Test
+    @DisplayName("openai video job: 建单 → {id, object=video_generation, status=queued}")
+    void openAiVideoJobCreateReturnsQueued() {
+        enqueueHappyControlPlane(backend);
+        when(lotaskClient.submit(eq("video"), anyString(), any(), anyString()))
+                .thenReturn(Mono.just("vJob1"));
+        when(mappingStore.put(anyString(), eq("vJob1"), any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(orchestrator.createVideoJob("sk-caller",
+                        Map.of("model", "sora-2", "prompt", "猫滑滑板", "seconds", "8",
+                                "size", "1280x720"), "trace-v", null))
+                .assertNext(job -> {
+                    assertThat(String.valueOf(job.get("id"))).startsWith("T");
+                    assertThat(job.get("object")).isEqualTo("video_generation");
+                    assertThat(job.get("status")).isEqualTo("queued");
+                    assertThat(job.get("created_at")).isNotNull();
+                })
+                .verifyComplete();
+        // sora 参数 → 任务面 params 契约
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(lotaskClient).submit(eq("video"), anyString(), payload.capture(), anyString());
+        assertThat(payload.getValue().get("params"))
+                .isEqualTo(Map.of("prompt", "猫滑滑板", "seconds", "8", "size", "1280x720"));
+    }
+
+    @Test
+    @DisplayName("openai job 视图: 五态映射 + image completed 带 output 代理 URL + failed 带 error")
+    void openAiJobViewMapping() {
+        TaskRelayOrchestrator spy = org.mockito.Mockito.spy(orchestrator);
+        Map<String, Object> running = new java.util.LinkedHashMap<>();
+        running.put("task_no", "T9");
+        running.put("status", "RUNNING");
+        org.mockito.Mockito.doReturn(Mono.just(running)).when(spy).poll("video", "T9", "key");
+        StepVerifier.create(spy.videoJob("T9", "key"))
+                .assertNext(v -> assertThat(v.get("status")).isEqualTo("in_progress"))
+                .verifyComplete();
+
+        Map<String, Object> done = new java.util.LinkedHashMap<>();
+        done.put("task_no", "T9");
+        done.put("status", "SUCCEEDED");
+        done.put("result", Map.of("resources", List.of("/v1/resources/T9/0?exp=1&sig=x")));
+        org.mockito.Mockito.doReturn(Mono.just(done)).when(spy).poll("image", "T9", "key");
+        StepVerifier.create(spy.imageJob("T9", "key"))
+                .assertNext(img -> {
+                    assertThat(img.get("status")).isEqualTo("completed");
+                    assertThat(img.get("object")).isEqualTo("image_generation");
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> output = (List<Map<String, Object>>) img.get("output");
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> content = (Map<String, Object>) ((List<?>) output.get(0).get("content")).get(0);
+                    assertThat(content.get("type")).isEqualTo("output_image");
+                    assertThat(((Map<?, ?>) content.get("image_url")).get("url"))
+                            .isEqualTo("/v1/resources/T9/0?exp=1&sig=x");
+                })
+                .verifyComplete();
+
+        Map<String, Object> failed = new java.util.LinkedHashMap<>();
+        failed.put("task_no", "T9");
+        failed.put("status", "EXPIRED");
+        failed.put("error", Map.of("code", "TIMEOUT", "message", "任务超时"));
+        org.mockito.Mockito.doReturn(Mono.just(failed)).when(spy).poll("video", "T9", "key");
+        StepVerifier.create(spy.videoJob("T9", "key"))
+                .assertNext(v -> {
+                    assertThat(v.get("status")).isEqualTo("failed");
+                    assertThat(((Map<?, ?>) v.get("error")).get("code")).isEqualTo("TIMEOUT");
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("openai video content: SUCCEEDED→307 URL / RUNNING→409 / 无资源→404")
+    void openAiVideoContentUrlStates() {
+        TaskRelayOrchestrator spy = org.mockito.Mockito.spy(orchestrator);
+        Map<String, Object> done = new java.util.LinkedHashMap<>();
+        done.put("task_no", "T8");
+        done.put("status", "SUCCEEDED");
+        done.put("result", Map.of("resources", List.of("/v1/resources/T8/0?exp=1&sig=y")));
+        org.mockito.Mockito.doReturn(Mono.just(done)).when(spy).poll("video", "T8", "key");
+        StepVerifier.create(spy.videoContentUrl("T8", "key"))
+                .expectNext("/v1/resources/T8/0?exp=1&sig=y")
+                .verifyComplete();
+
+        Map<String, Object> running = new java.util.LinkedHashMap<>();
+        running.put("task_no", "T8");
+        running.put("status", "RUNNING");
+        org.mockito.Mockito.doReturn(Mono.just(running)).when(spy).poll("video", "T8", "key");
+        StepVerifier.create(spy.videoContentUrl("T8", "key"))
+                .expectErrorSatisfies(e -> assertThat(((RelayException) e).getHttpStatus()).isEqualTo(409))
+                .verify();
+
+        Map<String, Object> noRes = new java.util.LinkedHashMap<>();
+        noRes.put("task_no", "T8");
+        noRes.put("status", "SUCCEEDED");
+        org.mockito.Mockito.doReturn(Mono.just(noRes)).when(spy).poll("video", "T8", "key");
+        StepVerifier.create(spy.videoContentUrl("T8", "key"))
+                .expectErrorSatisfies(e -> assertThat(((RelayException) e).getHttpStatus()).isEqualTo(404))
+                .verify();
+    }
+
     private static MockResponse json(String body) {
         return new MockResponse().setHeader("Content-Type", "application/json").setBody(body);
     }

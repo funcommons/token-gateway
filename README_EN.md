@@ -88,9 +88,9 @@ The host must be on the **WebFlux stack** (the starter stays inactive in MVC hos
 | [Conventions (en)](https://funcommons.github.io/token-gateway/en/user/conventions) · [中文](docs/用户文档/03_通用约定.md) | Auth / error envelope & codes / rate limit / idempotency (**required**) |
 | [LLM Guide (en)](https://funcommons.github.io/token-gateway/en/user/llm-guide) · [中文](docs/用户文档/04_LLM面接入手册.md) | LLM face (6 endpoints + SDK examples + acceptance checklist) |
 | [Task Guide (en)](https://funcommons.github.io/token-gateway/en/user/task-guide) · [中文](docs/用户文档/05_任务面接入手册.md) | Task face (4-modality create/poll/notify/resource proxy + callback verification) |
-| [FAQ (en)](https://funcommons.github.io/token-gateway/en/user/faq) · [中文](docs/用户文档/06_FAQ.md) | Troubleshooting quick reference |
-| [LLM API Contract](docs/用户文档/07_LLM面API契约.yaml) | OpenAPI contract (6 endpoints) |
-| [Task API Contract](docs/用户文档/08_任务面API契约.yaml) | OpenAPI contract (M2.5 landed) |
+| [FAQ (en)](https://funcommons.github.io/token-gateway/en/user/faq) · [中文](docs/用户文档/07_FAQ.md) | Troubleshooting quick reference |
+| [LLM API Contract](docs/用户文档/08_LLM面API契约.yaml) | OpenAPI contract (6 endpoints) |
+| [Task API Contract](docs/用户文档/09_任务面API契约.yaml) | OpenAPI contract (M2.5 landed) |
 
 ### Developer Docs (Gateway / Backend Integrators)
 

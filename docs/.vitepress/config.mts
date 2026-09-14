@@ -30,15 +30,16 @@ export default defineConfig({
               { text: '快速开始', link: '/用户文档/02_快速开始' },
               { text: '通用约定（认证/错误码/限流/幂等）', link: '/用户文档/03_通用约定' },
               { text: 'LLM 面接入手册', link: '/用户文档/04_LLM面接入手册' },
-              { text: '任务面接入手册', link: '/用户文档/05_任务面接入手册' },
-              { text: '常见问题 FAQ', link: '/用户文档/06_FAQ' },
+              { text: '任务面 · OneToken 协议', link: '/用户文档/05_任务面接入手册' },
+              { text: '任务面 · OpenAI 协议', link: '/用户文档/06_OpenAI任务面接入手册' },
+              { text: '常见问题 FAQ', link: '/用户文档/07_FAQ' },
             ]
           },
           {
             text: 'API 契约',
             items: [
-              { text: 'LLM 面 API 契约（YAML）', link: `${githubBlob}/用户文档/07_LLM面API契约.yaml` },
-              { text: '任务面 API 契约（YAML）', link: `${githubBlob}/用户文档/08_任务面API契约.yaml` },
+              { text: 'LLM 面 API 契约（YAML）', link: `${githubBlob}/用户文档/08_LLM面API契约.yaml` },
+              { text: '任务面 API 契约（YAML）', link: `${githubBlob}/用户文档/09_任务面API契约.yaml` },
             ]
           },
           {
@@ -86,15 +87,16 @@ export default defineConfig({
               { text: 'Quickstart', link: '/en/user/quickstart' },
               { text: 'Conventions (Auth/Errors/RateLimit)', link: '/en/user/conventions' },
               { text: 'LLM Face Guide', link: '/en/user/llm-guide' },
-              { text: 'Task Face Guide', link: '/en/user/task-guide' },
+              { text: 'Task Face · OneToken Protocol', link: '/en/user/task-guide' },
+              { text: 'Task Face · OpenAI Protocol', link: '/en/user/openai-task-guide' },
               { text: 'FAQ', link: '/en/user/faq' },
             ]
           },
           {
             text: 'API Contracts',
             items: [
-              { text: 'LLM API Contract (YAML)', link: `${githubBlob}/用户文档/07_LLM面API契约.yaml` },
-              { text: 'Task API Contract (YAML)', link: `${githubBlob}/用户文档/08_任务面API契约.yaml` },
+              { text: 'LLM API Contract (YAML)', link: `${githubBlob}/用户文档/08_LLM面API契约.yaml` },
+              { text: 'Task API Contract (YAML)', link: `${githubBlob}/用户文档/09_任务面API契约.yaml` },
             ]
           },
           {

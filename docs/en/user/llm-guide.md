@@ -1,9 +1,9 @@
-# OneToken LLM Face Onboarding Guide
+# token-gateway LLM Face Onboarding Guide
 
 | Item | Content |
 |---|---|
 | Document | LLM Face Onboarding Guide (chat / embeddings / synchronous image generation / model catalog + backend onboarding + adapter development) |
-| Companion | Task face: see `./task-guide.md` (**planned M2.5, not yet implemented**); API contract: [07_LLM面API契约.yaml](https://github.com/funcommons/token-gateway/blob/main/docs/用户文档/07_LLM面API契约.yaml); design doc: see `../dev/design.md` |
+| Companion | Task face: see `./task-guide.md` (**planned M2.5, not yet implemented**); API contract: [08_LLM面API契约.yaml](https://github.com/funcommons/token-gateway/blob/main/docs/用户文档/08_LLM面API契约.yaml); design doc: see `../dev/design.md` |
 | Version | V1.3 (2026-09-10, add §2.5 Spring AI recipe; V1.2 split by face) |
 | Codebase | `fun.commons.tokengateway` (LLM face, port 9401, live endpoints exactly as written here) |
 
@@ -139,7 +139,7 @@ Notes:
 | 6 | `/v1/models` | GET | OpenAI | — |
 
 > Task-face endpoints (async tasks for videos/images/audios/tts) see `./task-guide.md` (planned M2.5).
-> For the full field contract see [07_LLM面API契约.yaml](https://github.com/funcommons/token-gateway/blob/main/docs/用户文档/07_LLM面API契约.yaml).
+> For the full field contract see [08_LLM面API契约.yaml](https://github.com/funcommons/token-gateway/blob/main/docs/用户文档/08_LLM面API契约.yaml).
 
 ### 4.1 Chat Completions Notes
 

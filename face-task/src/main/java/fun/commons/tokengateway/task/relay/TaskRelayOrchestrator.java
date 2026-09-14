@@ -269,23 +269,9 @@ public class TaskRelayOrchestrator {
             return Mono.error(new RelayException(400, ApiCode.REQUIRED_MISSING.getCode(),
                     "仅支持 n=1 (任务面单图语义)"));
         }
-        // 任务面契约: 业务参数在 body.params (buildPayload 取 params/input 两个子对象)
-        Map<String, Object> inner = new LinkedHashMap<>();
-        inner.put("prompt", body == null ? null : body.get("prompt"));
-        if (body != null && body.get("size") != null) {
-            inner.put("size", body.get("size"));
-        }
-        if (body != null && body.get("ratio") != null) {
-            inner.put("ratio", body.get("ratio"));
-        }
-        if (body != null && body.get("resolution") != null) {
-            inner.put("resolution", body.get("resolution"));
-        }
-        Map<String, Object> params = new LinkedHashMap<>();
-        params.put("model", body == null ? null : body.get("model"));
-        params.put("params", inner);
+        // 任务面契约: 业务参数在 body.params (openAiImagesParams 统一拼装, 与异步 job 共用)
         java.time.Instant deadline = java.time.Instant.now().plus(GENERATIONS_SYNC_TIMEOUT);
-        return create("image", apiKey, params, traceId, idempotencyKey)
+        return create("image", apiKey, openAiImagesParams(body), traceId, idempotencyKey)
                 .flatMap(created -> {
                     String taskNo = String.valueOf(created.get("task_no"));
                     return pollUntilTerminal("image", taskNo, apiKey, deadline, GENERATIONS_POLL_INTERVAL);
@@ -338,6 +324,176 @@ public class TaskRelayOrchestrator {
         out.put("task_no", taskNo);
         out.put("poll_url", "/v1/onetoken/images/" + taskNo);
         return out;
+    }
+
+    // ===== OpenAI 协议任务封装 (issue #19: OpenAI job 形状挂任务引擎, 任务面双协议) =====
+
+    /**
+     * OpenAI 协议创建视频任务 (POST /v1/videos, sora 形状): prompt/seconds/size → video 任务,
+     * 返回 OpenAI video_generation job 对象 (id=task_no, status=queued).
+     */
+    public Mono<Map<String, Object>> createVideoJob(String apiKey, Map<String, Object> body,
+                                                    String traceId, String idempotencyKey) {
+        Map<String, Object> inner = new LinkedHashMap<>();
+        if (body != null) {
+            inner.put("prompt", body.get("prompt"));
+            for (String k : List.of("seconds", "size")) {
+                if (body.get(k) != null) {
+                    inner.put(k, body.get(k));
+                }
+            }
+        }
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("model", body == null ? null : body.get("model"));
+        params.put("params", inner);
+        if (body != null && body.get("notify_url") != null) {
+            params.put("notify_url", body.get("notify_url"));
+        }
+        return create("video", apiKey, params, traceId, idempotencyKey)
+                .map(created -> openAiJobCreated(created, "video_generation"));
+    }
+
+    /**
+     * OpenAI 协议异步生图 (POST /v1/images/generations + background:true, issue #19):
+     * 建图像任务返回 image_generation job 对象; n 仅支持 1 (任务面单图语义).
+     */
+    public Mono<Map<String, Object>> createImageJob(String apiKey, Map<String, Object> body,
+                                                    String traceId, String idempotencyKey) {
+        Object n = body == null ? null : body.get("n");
+        if (n instanceof Number num && num.intValue() > 1) {
+            return Mono.error(new RelayException(400, ApiCode.REQUIRED_MISSING.getCode(),
+                    "仅支持 n=1 (任务面单图语义)"));
+        }
+        return create("image", apiKey, openAiImagesParams(body), traceId, idempotencyKey)
+                .map(created -> openAiJobCreated(created, "image_generation"));
+    }
+
+    /** OpenAI images 请求体 → 任务面契约 {model, params:{prompt,size,ratio,resolution}}. */
+    private static Map<String, Object> openAiImagesParams(Map<String, Object> body) {
+        Map<String, Object> inner = new LinkedHashMap<>();
+        inner.put("prompt", body == null ? null : body.get("prompt"));
+        if (body != null) {
+            for (String k : List.of("size", "ratio", "resolution")) {
+                if (body.get(k) != null) {
+                    inner.put(k, body.get(k));
+                }
+            }
+        }
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("model", body == null ? null : body.get("model"));
+        params.put("params", inner);
+        return params;
+    }
+
+    /** GET /v1/videos/{task_no} → OpenAI video_generation job 视图. */
+    public Mono<Map<String, Object>> videoJob(String taskNo, String apiKey) {
+        return poll("video", taskNo, apiKey).map(TaskRelayOrchestrator::openAiVideoJobView);
+    }
+
+    /** GET /v1/images/generations/{task_no} → OpenAI image_generation job 视图. */
+    public Mono<Map<String, Object>> imageJob(String taskNo, String apiKey) {
+        return poll("image", taskNo, apiKey).map(TaskRelayOrchestrator::openAiImageJobView);
+    }
+
+    /**
+     * GET /v1/videos/{task_no}/content: SUCCEEDED 时返回首个资源代理 URL (307 重定向目标);
+     * 非 SUCCEEDED → 409; 无资源 → 404.
+     */
+    public Mono<String> videoContentUrl(String taskNo, String apiKey) {
+        return poll("video", taskNo, apiKey)
+                .flatMap(view -> {
+                    if (!"SUCCEEDED".equals(String.valueOf(view.get("status")))) {
+                        return Mono.error(new RelayException(409, ApiCode.STATE_CONFLICT.getCode(),
+                                "任务非 SUCCEEDED: " + view.get("status")));
+                    }
+                    String url = firstResourceUrl(view);
+                    if (url == null) {
+                        return Mono.error(new RelayException(404, ApiCode.NOT_FOUND.getCode(),
+                                "任务无资源"));
+                    }
+                    return Mono.just(url);
+                });
+    }
+
+    /** OpenAI job 创建视图: {id=task_no, object, status=queued, created_at}. */
+    private static Map<String, Object> openAiJobCreated(Map<String, Object> created, String object) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("id", created.get("task_no"));
+        out.put("object", object);
+        out.put("status", "queued");
+        out.put("created_at", java.time.Instant.now().getEpochSecond());
+        return out;
+    }
+
+    /** poll 视图 → OpenAI video_generation job 对象. */
+    private static Map<String, Object> openAiVideoJobView(Map<String, Object> pollView) {
+        Map<String, Object> out = openAiJobBase(pollView, "video_generation");
+        if ("failed".equals(out.get("status"))) {
+            out.put("error", openAiError(pollView));
+        }
+        return out;
+    }
+
+    /** poll 视图 → OpenAI image_generation job 对象 (completed 带 output 数组, 代理 URL). */
+    private static Map<String, Object> openAiImageJobView(Map<String, Object> pollView) {
+        Map<String, Object> out = openAiJobBase(pollView, "image_generation");
+        if ("completed".equals(out.get("status"))) {
+            List<Map<String, Object>> output = new ArrayList<>();
+            if (pollView.get("result") instanceof Map<?, ?> r
+                    && r.get("resources") instanceof List<?> resources) {
+                for (Object url : resources) {
+                    Map<String, Object> imageUrl = new LinkedHashMap<>();
+                    imageUrl.put("url", String.valueOf(url));
+                    Map<String, Object> content = new LinkedHashMap<>();
+                    content.put("type", "output_image");
+                    content.put("image_url", imageUrl);
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("content", List.of(content));
+                    output.add(item);
+                }
+            }
+            out.put("output", output);
+        }
+        if ("failed".equals(out.get("status"))) {
+            out.put("error", openAiError(pollView));
+        }
+        return out;
+    }
+
+    private static Map<String, Object> openAiJobBase(Map<String, Object> pollView, String object) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("id", pollView.get("task_no"));
+        out.put("object", object);
+        out.put("status", openAiJobStatus(String.valueOf(pollView.get("status"))));
+        return out;
+    }
+
+    /** 网关五态 → OpenAI job 状态 (EXPIRED 并入 failed). */
+    private static String openAiJobStatus(String gatewayStatus) {
+        return switch (gatewayStatus) {
+            case "PENDING" -> "queued";
+            case "RUNNING" -> "in_progress";
+            case "SUCCEEDED" -> "completed";
+            default -> "failed";
+        };
+    }
+
+    private static Map<String, Object> openAiError(Map<String, Object> pollView) {
+        Map<String, Object> error = new LinkedHashMap<>();
+        if (pollView.get("error") instanceof Map<?, ?> e) {
+            error.put("code", e.get("code"));
+            error.put("message", e.get("message"));
+        }
+        return error;
+    }
+
+    /** 首个资源代理 URL (content 重定向用). */
+    static String firstResourceUrl(Map<String, Object> pollView) {
+        if (pollView.get("result") instanceof Map<?, ?> r
+                && r.get("resources") instanceof List<?> resources && !resources.isEmpty()) {
+            return String.valueOf(resources.get(0));
+        }
+        return null;
     }
 
     /** 轮询视图: 终态返回存储结果; resources 一律转代理 URL (永不透传上游原文). */

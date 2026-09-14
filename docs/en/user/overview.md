@@ -1,4 +1,4 @@
-# OneToken Product Overview
+# Product Overview
 
 ## What is token-gateway
 

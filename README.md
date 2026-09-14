@@ -98,9 +98,9 @@ bash scripts/smoke.sh                                         # PASS/FAIL 矩阵
 | [docs/用户文档/03_通用约定.md](docs/用户文档/03_通用约定.md) | 认证 / 错误信封与错误码 / 限流 / 幂等 / 超时（**必读**） |
 | [docs/用户文档/04_LLM面接入手册.md](docs/用户文档/04_LLM面接入手册.md) | LLM 面调用方接入（6 端点详解 + SDK 示例 + 验收清单） |
 | [docs/用户文档/05_任务面接入手册.md](docs/用户文档/05_任务面接入手册.md) | 任务面接入（四模态 create/poll/notify/资源代理 + 回调验签） |
-| [docs/用户文档/06_FAQ.md](docs/用户文档/06_FAQ.md) | 常见问题与排障速查 |
-| [docs/用户文档/07_LLM面API契约.yaml](docs/用户文档/07_LLM面API契约.yaml) | LLM 面 OpenAPI 契约（6 端点） |
-| [docs/用户文档/08_任务面API契约.yaml](docs/用户文档/08_任务面API契约.yaml) | 任务面 OpenAPI 契约（M2.5 已落地） |
+| [docs/用户文档/07_FAQ.md](docs/用户文档/07_FAQ.md) | 常见问题与排障速查 |
+| [docs/用户文档/08_LLM面API契约.yaml](docs/用户文档/08_LLM面API契约.yaml) | LLM 面 OpenAPI 契约（6 端点） |
+| [docs/用户文档/09_任务面API契约.yaml](docs/用户文档/09_任务面API契约.yaml) | 任务面 OpenAPI 契约（M2.5 已落地） |
 
 ### 开发文档（网关开发与后端接入方）
 
