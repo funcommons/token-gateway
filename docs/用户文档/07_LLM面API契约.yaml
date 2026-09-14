@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: token-gateway API · LLM 面
+  title: OneToken API · LLM 面
   version: 1.0.0
   description: |
     通用 LLM 推理网关 · LLM 面（对话 / 向量 / 同步生图 / 模型目录）。

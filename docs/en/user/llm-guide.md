@@ -1,4 +1,4 @@
-# token-gateway LLM Face Onboarding Guide
+# OneToken LLM Face Onboarding Guide
 
 | Item | Content |
 |---|---|

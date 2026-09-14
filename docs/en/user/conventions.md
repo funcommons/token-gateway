@@ -1,4 +1,4 @@
-# Conventions
+# OneToken Conventions
 
 **Required reading for all callers**: authentication, response shapes, error codes, rate limiting, idempotency, tracing, timeouts. Identical across the LLM face and the task face.
 

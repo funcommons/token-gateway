@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: token-gateway API · 任务面（M2.5a/c 已落地，Worker 执行 M2.5b 进行中）
+  title: OneToken API · 任务面
   version: 1.0.0
   description: |
     通用模型能力网关 · 任务面（videos / images / audios / tts 异步任务四模态）。

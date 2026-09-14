@@ -1,4 +1,4 @@
-# Quickstart
+# OneToken Quickstart
 
 First call in 5 minutes. Before you start:
 

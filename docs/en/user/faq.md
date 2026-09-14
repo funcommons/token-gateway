@@ -1,4 +1,4 @@
-# FAQ
+# OneToken FAQ
 
 ## Credentials & Authentication
 

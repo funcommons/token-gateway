@@ -1,4 +1,4 @@
-# token-gateway Task Face Onboarding Guide
+# OneToken Task Face Onboarding Guide
 
 > **Status: partially available (2026-09-02).** Implemented gateway-side: four-modality
 > create/poll endpoints, billing saga (full pre-charge / terminal refund), terminal webhook
