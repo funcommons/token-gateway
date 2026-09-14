@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-14
+
 ### 新增
 
 - **OpenAI 协议任务面（issue #19，任务面双协议）**：OpenAI job 形状挂任务引擎，OpenAI SDK 可直接调用；`id` = OneToken 协议 `task_no`，两协议互通
