@@ -94,6 +94,16 @@ class ResourceProxyControllerTest {
         return controller.fetch(TASK_NO, 0, 123L, "sig");
     }
 
+    /** body 拼接保持在响应式链内 (assertNext 内 block() 在 epoll 线程发射时抛 IllegalStateException). */
+    private static Mono<String> joinBody(ResponseEntity<Flux<DataBuffer>> resp) {
+        return DataBufferUtils.join(resp.getBody()).map(db -> {
+            byte[] b = new byte[db.readableByteCount()];
+            db.read(b);
+            DataBufferUtils.release(db);
+            return new String(b);
+        });
+    }
+
     private void mappedTask(String status, Map<String, Object> result, String apiKey) {
         when(mappingStore.get(TASK_NO)).thenReturn(Mono.just("lotask-1"));
         when(metaStore.getMeta(TASK_NO)).thenReturn(Mono.just(meta(apiKey)));
@@ -123,19 +133,11 @@ class ResourceProxyControllerTest {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        StepVerifier.create(fetch())
-                .assertNext(resp -> {
-                    assertThat(resp.getStatusCode().value()).isEqualTo(200);
-                    String body = DataBufferUtils.join(resp.getBody())
-                            .map(db -> {
-                                byte[] b = new byte[db.readableByteCount()];
-                                db.read(b);
-                                DataBufferUtils.release(db);
-                                return new String(b);
-                            })
-                            .block();
-                    assertThat(body).isEqualTo("cached-bytes");
-                })
+        StepVerifier.create(fetch().flatMap(resp -> {
+            assertThat(resp.getStatusCode().value()).isEqualTo(200);
+            return joinBody(resp);
+        }))
+                .assertNext(body -> assertThat(body).isEqualTo("cached-bytes"))
                 .verifyComplete();
         assertThat(upstream.getRequestCount()).isZero();
     }
@@ -179,19 +181,12 @@ class ResourceProxyControllerTest {
         mappedTask("SUCCESS", Map.of("resources", List.of(upstream.url("/file.mp4").toString())),
                 "sk-channel-key");
 
-        StepVerifier.create(fetch())
-                .assertNext(resp -> {
-                    assertThat(resp.getStatusCode().value()).isEqualTo(200);
-                    String body = DataBufferUtils.join(resp.getBody())
-                            .map(db -> {
-                                byte[] b = new byte[db.readableByteCount()];
-                                db.read(b);
-                                DataBufferUtils.release(db);
-                                return new String(b);
-                            })
-                            .block();
-                    assertThat(body).isEqualTo("fresh-upstream-bytes");
-                })
+        // body 断言并入响应式链 (assertNext 内 block() 在 epoll 线程发射时炸 — flaky, 修复于 issue #18 CI)
+        StepVerifier.create(fetch().flatMap(resp -> {
+            assertThat(resp.getStatusCode().value()).isEqualTo(200);
+            return joinBody(resp);
+        }))
+                .assertNext(body -> assertThat(body).isEqualTo("fresh-upstream-bytes"))
                 .verifyComplete();
 
         RecordedRequest req = upstream.takeRequest(3, TimeUnit.SECONDS);
@@ -222,19 +217,16 @@ class ResourceProxyControllerTest {
         String dataUri = "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(png);
         mappedTask("SUCCESS", Map.of("resources", List.of(dataUri), "usage", Map.of()), "sk-x");
 
-        StepVerifier.create(fetch())
-                .assertNext(resp -> {
-                    assertThat(resp.getStatusCode().value()).isEqualTo(200);
-                    String body = DataBufferUtils.join(resp.getBody())
-                            .map(db -> {
-                                byte[] b = new byte[db.readableByteCount()];
-                                db.read(b);
-                                DataBufferUtils.release(db);
-                                return new String(b, java.nio.charset.StandardCharsets.ISO_8859_1);
-                            })
-                            .block();
-                    assertThat(body.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1)).isEqualTo(png);
-                })
+        StepVerifier.create(fetch().flatMap(resp -> {
+            assertThat(resp.getStatusCode().value()).isEqualTo(200);
+            return DataBufferUtils.join(resp.getBody()).map(db -> {
+                byte[] b = new byte[db.readableByteCount()];
+                db.read(b);
+                DataBufferUtils.release(db);
+                return new String(b, java.nio.charset.StandardCharsets.ISO_8859_1);
+            });
+        }))
+                .assertNext(body -> assertThat(body.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1)).isEqualTo(png))
                 .verifyComplete();
         // data URI 无上游调用
         assertThat(upstream.getRequestCount()).isZero();
