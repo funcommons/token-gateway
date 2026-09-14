@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-14
+
 ### 修复
 
 - **OpenAI 协议 tools 跨协议全链路丢失**（issue #18）：OpenAI 调用方带 `tools` 打到 `protocol: anthropic` 渠道时，请求/历史/响应/流式四断点全丢——
