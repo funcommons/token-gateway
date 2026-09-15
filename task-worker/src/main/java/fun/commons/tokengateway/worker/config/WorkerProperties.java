@@ -19,6 +19,12 @@ public class WorkerProperties {
     /** 拉单间隔. */
     private Duration pollInterval = Duration.ofSeconds(5);
 
+    /**
+     * 单 tick 单 taskType 最大认领数 (链式拉取: poll → 派发 → 续拉, 直至空队列/上限/令牌耗尽).
+     * 1 = 旧行为 (每 tick 一单); 队列深时调大可线性抬升单 type 吞吐.
+     */
+    private int pullBatchSize = 4;
+
     /** 上游轮询间隔 (脚本 poll 钩子的循环节拍; 脚本可用 ctx.config 覆盖). */
     private Duration upstreamPollInterval = Duration.ofSeconds(5);
 

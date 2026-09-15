@@ -20,6 +20,7 @@ token-gateway:
 worker:
   # id: wkr-xxx                       # 默认启动生成 wkr-<uuid8>
   poll-interval: 5s                   # 拉单节拍
+  pull-batch-size: 4                  # 单 tick 单 taskType 最大认领数 (链式拉取; 1 = 旧每 tick 一单)
   upstream-poll-interval: 5s          # 脚本 poll 钩子循环节拍
   scripts-dir: ${WORKER_SCRIPTS_DIR:scripts}
   concurrency: 8

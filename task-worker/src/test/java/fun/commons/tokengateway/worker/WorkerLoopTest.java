@@ -10,10 +10,13 @@ import fun.commons.tokengateway.worker.script.ScriptHttpClient;
 import fun.commons.tokengateway.worker.script.ScriptLoader;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -28,6 +31,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -136,5 +141,79 @@ class WorkerLoopTest {
             verify(lotask).result(any(), eq("FAILED"), isNull(),
                     anyString(), anyString());
         }
+    }
+
+    // -------------------------------------------------------- tick 批量拉取
+
+    /** 零 HTTP 三钩子脚本 (同步 SUCCEEDED, tick 批量用例不依赖上游 fixtures). */
+    private static final String TRIVIAL_SCRIPT = """
+            def create(ctx) { [upstreamTaskId: 'up-' + ctx.payload.taskNo] }
+            def poll(ctx) { [state: 'SUCCEEDED'] }
+            def resultMapping(ctx) { [resources: ['mock://' + ctx.payload.taskNo]] }
+            """;
+
+    @TempDir
+    Path tmp;
+
+    /** 真临时脚本目录 + 零 HTTP 脚本 (tick() 起手 reload 重扫磁盘, 反射注入会被清空). */
+    private WorkerLoop loopWithTrivialScript(WorkerProperties props,
+            WorkerLotaskClient lotask) throws Exception {
+        props.setScriptsDir(tmp.toString());
+        props.setUpstreamPollInterval(Duration.ofMillis(10));
+        props.setStatusCheckEvery(100);   // 用例不触发取消检测
+        Path dir = tmp.resolve("batchtest");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("inline-v1.groovy"), TRIVIAL_SCRIPT);
+
+        ScriptLoader loader = new ScriptLoader(props);
+        loader.reload();
+        WorkerLoop loop = new WorkerLoop(lotask, loader, new GroovySandbox(),
+                new ScriptHttpClient(WebClient.builder(), props),
+                new RouteSnapshotCipher(CIPHER_KEY), props);
+        return loop;
+    }
+
+    private static ClaimedTask task(String id, int no) {
+        return new ClaimedTask(id, "batchtest", Map.of("taskNo", no), 1L, 1, 1, null);
+    }
+
+    @Test
+    @DisplayName("tick 批量拉取: 队列 3 单 batch=4 → 单 tick 全派发 (3 拉 + 1 空轮收口)")
+    void tickDrainsQueueInBatch() throws Exception {
+        WorkerProperties props = new WorkerProperties();
+        props.setPullBatchSize(4);
+        WorkerLotaskClient lotask = mock(WorkerLotaskClient.class);
+        when(lotask.progress(any(), anyString(), anyInt())).thenReturn(Mono.empty());
+        when(lotask.result(any(), anyString(), any(), any(), any())).thenReturn(Mono.empty());
+        when(lotask.poll(anyString(), anyString())).thenReturn(
+                Mono.just(task("t-1", 1)), Mono.just(task("t-2", 2)),
+                Mono.just(task("t-3", 3)), Mono.empty());
+        WorkerLoop loop = loopWithTrivialScript(props, lotask);
+
+        loop.tick();
+
+        // 单 tick 拉满队列: 3 单 + 1 空轮 (空轮即收口, 不会第 5 次)
+        verify(lotask, timeout(5000).times(4)).poll(anyString(), anyString());
+        verify(lotask, timeout(10000).times(3)).result(any(), eq("SUCCESS"),
+                any(), isNull(), isNull());
+    }
+
+    @Test
+    @DisplayName("tick 批量上限: batch=2 且队列持续有单 → 单 tick 恰拉 2 次收口")
+    void tickRespectsBatchCap() throws Exception {
+        WorkerProperties props = new WorkerProperties();
+        props.setPullBatchSize(2);
+        WorkerLotaskClient lotask = mock(WorkerLotaskClient.class);
+        when(lotask.progress(any(), anyString(), anyInt())).thenReturn(Mono.empty());
+        when(lotask.result(any(), anyString(), any(), any(), any())).thenReturn(Mono.empty());
+        when(lotask.poll(anyString(), anyString())).thenReturn(
+                Mono.just(task("t-1", 1)), Mono.just(task("t-2", 2)));
+        WorkerLoop loop = loopWithTrivialScript(props, lotask);
+
+        loop.tick();
+
+        verify(lotask, timeout(10000).times(2)).result(any(), eq("SUCCESS"),
+                any(), isNull(), isNull());
+        verify(lotask, timeout(5000).times(2)).poll(anyString(), anyString());
     }
 }

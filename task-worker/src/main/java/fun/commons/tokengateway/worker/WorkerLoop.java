@@ -72,21 +72,33 @@ public class WorkerLoop {
     public void tick() {
         scriptLoader.reload();
         for (String taskType : scriptLoader.taskTypes()) {
-            if (!concurrency.tryAcquire()) {
-                return;
-            }
-            lotaskClient.poll(taskType, workerId)
-                    .subscribe(
-                            task -> Mono.fromRunnable(() -> runTask(task))
-                                    .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
-                                    .subscribe(),
-                            e -> {
-                                concurrency.release();
-                                log.warn("[WorkerLoop] poll 异常: type={}, err={}",
-                                        taskType, e.getMessage());
-                            },
-                            () -> concurrency.release()); // 无任务 → 释放令牌
+            pollBatch(taskType, props.getPullBatchSize());
         }
+    }
+
+    /**
+     * 单 type 链式拉取 (吞吐: 每 tick 认领多单, 而非一单/5s):
+     * poll → 派发 → 续拉, 直至 空队列 / batch 上限 / 并发令牌耗尽.
+     * 令牌随任务移交 runTask (其 finally 释放), 空轮/异常释放并停止本轮续拉.
+     */
+    private void pollBatch(String taskType, int remaining) {
+        if (remaining <= 0 || !concurrency.tryAcquire()) {
+            return;
+        }
+        lotaskClient.poll(taskType, workerId)
+                .subscribe(
+                        task -> {
+                            Mono.fromRunnable(() -> runTask(task))
+                                    .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
+                                    .subscribe();
+                            pollBatch(taskType, remaining - 1);
+                        },
+                        e -> {
+                            concurrency.release();
+                            log.warn("[WorkerLoop] poll 异常: type={}, err={}",
+                                    taskType, e.getMessage());
+                        },
+                        () -> concurrency.release()); // 无任务 → 释放令牌
     }
 
     /** 单任务执行 (虚拟线程; 脚本钩子经 ScriptExecutor 超时收口). */
