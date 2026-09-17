@@ -363,6 +363,49 @@ class TaskRelayOrchestratorTest {
     }
 
     @Test
+    @DisplayName("计费合规修复: OneToken body.params dims 透传 distribute (复合档计价前提)")
+    void createForwardsOneTokenPriceParams() {
+        enqueueHappyControlPlane(backend);
+        when(lotaskClient.submit(anyString(), anyString(), any(), anyString()))
+                .thenReturn(Mono.just("YeirYkxHuQ"));
+        when(mappingStore.put(anyString(), eq("YeirYkxHuQ"), any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(orchestrator.create("image", "sk-caller",
+                        Map.of("model", "runninghub-gptimage2-4k",
+                                "params", Map.of("ratio", "1:1", "resolution", "4k",
+                                        "referenceImageUrls", java.util.List.of("https://r/1.png"))), null))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        // distribute 请求体必须带 params.{ratio,resolution} — 协议面按 4K 档计价的前提
+        try {
+            backend.takeRequest(); // validate
+            okhttp3.mockwebserver.RecordedRequest dist = backend.takeRequest(); // distribute
+            com.alibaba.fastjson2.JSONObject body =
+                    com.alibaba.fastjson2.JSON.parseObject(dist.getBody().readUtf8());
+            com.alibaba.fastjson2.JSONObject params = body.getJSONObject("params");
+            org.assertj.core.api.Assertions.assertThat(params).isNotNull();
+            org.assertj.core.api.Assertions.assertThat(params.getString("resolution")).isEqualTo("4k");
+            org.assertj.core.api.Assertions.assertThat(params.getString("ratio")).isEqualTo("1:1");
+        } catch (InterruptedException e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    @Test
+    @DisplayName("extractPriceParams: params 与顶层同键时顶层覆盖; 无 body 返回空")
+    void extractPriceParamsMergesShapes() {
+        Map<String, Object> out = TaskRelayOrchestrator.extractPriceParams(
+                Map.of("params", Map.of("resolution", "2k", "ratio", "16:9"),
+                        "resolution", "4k"));
+        org.assertj.core.api.Assertions.assertThat(out)
+                .containsEntry("resolution", "4k")     // 顶层 (OpenAI 形状) 优先
+                .containsEntry("ratio", "16:9");       // params (OneToken 形状)
+        org.assertj.core.api.Assertions.assertThat(
+                TaskRelayOrchestrator.extractPriceParams(null)).isEmpty();
+    }
+
+    @Test
     @DisplayName("余额不足 → 402 + 10617, 不产生任务 (lotask submit 不调用)")
     void createInsufficientBalance() {
         backend.enqueue(json("{\"code\":0,\"data\":{\"valid\":true,\"tokenId\":\"t1\","

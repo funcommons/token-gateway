@@ -119,14 +119,7 @@ public class TaskRelayOrchestrator {
      */
     private Mono<DistributeVO> resolveRoute(TokenValidateVO token, String model, String idempotencyKey,
                                             Map<String, Object> body) {
-        Map<String, Object> priceParams = new LinkedHashMap<>();
-        if (body != null) {
-            for (String k : new String[]{"size", "ratio", "resolution"}) {
-                if (body.get(k) != null) {
-                    priceParams.put(k, body.get(k));
-                }
-            }
-        }
+        Map<String, Object> priceParams = extractPriceParams(body);
         if (adapterSelector.routeViaTokenRoute()) {
             return tokenRouteClient.resolve(model, null, 0, 0, null);
         }
@@ -152,6 +145,39 @@ public class TaskRelayOrchestrator {
                     return Mono.just(distResp.getData());
                 });
     }
+
+    /**
+     * 计费维度提取 (复合档 "ratio|resolution|duration" 正确计价的前提):
+     * OpenAI 形状取顶层 size/ratio/resolution; OneToken 形状 (issue #20) dims 在
+     * body.params.{size,ratio,resolution,duration} — 两处合并, 顶层同键覆盖 params。
+     * <p>缺陷修复 (2026-09-17 计费合规): 原先只读顶层, OneToken 请求 dims 全丢 →
+     * 协议面 readModelPriceQuote 静默兜底 1:1|1K 底档, 复合档模型 (IMAGE_BY_SIZE)
+     * 一律按最低档少收 (2K -47% / 4K -87%)。
+     */
+    static Map<String, Object> extractPriceParams(Map<String, Object> body) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (body == null) {
+            return out;
+        }
+        Object params = body.get("params");
+        if (params instanceof Map<?, ?> p) {
+            for (String k : PRICE_DIM_KEYS) {
+                Object v = p.get(k);
+                if (v != null) {
+                    out.put(k, v);
+                }
+            }
+        }
+        for (String k : PRICE_DIM_KEYS) {
+            Object v = body.get(k);
+            if (v != null) {
+                out.put(k, v);
+            }
+        }
+        return out;
+    }
+
+    private static final String[] PRICE_DIM_KEYS = {"size", "ratio", "resolution", "duration"};
 
     private Mono<Map<String, Object>> submitWithSaga(String modality, TokenValidateVO token,
                                                      DistributeVO channel, String model,
