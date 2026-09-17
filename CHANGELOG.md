@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-17
+
+### 新增
+
+- **worker tick 批量拉取**：`pull-batch-size` 链式认领，单 task_type 认领吞吐 0.2→6 单/s
+
+### 修复
+
+- **OneToken 计费维度丢失（P0 系统性少收）**：`TaskRelayOrchestrator.resolveRoute` 原只读 body 顶层 `size/ratio/resolution`，而 OneToken 协议（issue #20）的计费 dims 在 `body.params.*` → 提取为空 → 协议面 `readModelPriceQuote` 静默兜底 `1:1|1K` 底档，复合档（IMAGE_BY_SIZE）模型一律按最低档计价：2K 实扣 8 应 15（-47%）、4K 实扣 8 应 60（**-87%**）。抽 `extractPriceParams` 合并双形状（顶层同键覆盖 params）+ 补 `duration` 键（视频复合档）；实测（runninghub-gptimage2-4k）：修复前 4k/2k 均 8.00，修复后 4k=60.00、2k=15.00。MMagiX2 协议面同步补 dims 全缺 WARN（静默少收可观测）
+- **资源代理 Web 可看性**：代理响应恒 `application/octet-stream` 且 URL 无扩展名，浏览器不内联渲染。三层 Content-Type 解析（回源捕获上游响应头 → 上游 URL 扩展名 → 旧缓存魔数嗅探 PNG/JPEG/GIF/WEBP/MP4/PDF）+ `{index}.ct` sidecar 持久化；路径支持 `/{index}.{ext}` 双形态（剥离后验签，与无后缀 URL 同 sig，向后兼容），新签 URL 按 `usage.outputType` 自动带后缀；`Content-Disposition: inline` + 文件名带扩展名。实测：8.7MB PNG 新旧双形态均 `image/png` 内联，字节与上游一致
+
+### 测试
+
+- 431 → 439（计费透传回归 2 + 资源代理 Web 可看性 4 + worker 批拉相关 2）
+
 ## [0.8.0] - 2026-09-14
 
 ### 新增
