@@ -91,7 +91,7 @@ class ResourceProxyControllerTest {
     }
 
     private Mono<ResponseEntity<Flux<DataBuffer>>> fetch() {
-        return controller.fetch(TASK_NO, 0, 123L, "sig");
+        return controller.fetch(TASK_NO, "0", 123L, "sig");
     }
 
     /** body 拼接保持在响应式链内 (assertNext 内 block() 在 epoll 线程发射时抛 IllegalStateException). */

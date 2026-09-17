@@ -31,6 +31,7 @@ public class ResourceUrlConverter {
         if (!(resources instanceof List<?> list)) {
             return converted;
         }
+        String ext = outputExtensionOf(converted);
         List<String> proxied = new ArrayList<>(list.size());
         for (int i = 0; i < list.size(); i++) {
             String query = resourceSigner.signQuery(taskNo, i);
@@ -40,9 +41,22 @@ public class ResourceUrlConverter {
                 converted.put("resources", List.of());
                 return converted;
             }
-            proxied.add("/v1/resources/" + taskNo + "/" + i + "?" + query);
+            // 后缀仅可读性 (Web 直链语义), 代理侧剥离后验签 — 与无后缀 URL 同 sig 通用
+            proxied.add("/v1/resources/" + taskNo + "/" + i + ext + "?" + query);
         }
         converted.put("resources", proxied);
         return converted;
+    }
+
+    /** 扩展名取 usage.outputType (resultMapping 约定: png/jpg/...), 缺省无后缀 (旧形态不变). */
+    private static String outputExtensionOf(Map<String, Object> result) {
+        Object usage = result.get("usage");
+        if (usage instanceof Map<?, ?> u && u.get("outputType") != null) {
+            String t = String.valueOf(u.get("outputType")).trim().toLowerCase();
+            if (!t.isEmpty() && t.chars().allMatch(Character::isLetterOrDigit) && t.length() <= 5) {
+                return "." + t;
+            }
+        }
+        return "";
     }
 }
