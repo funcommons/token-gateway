@@ -4,6 +4,13 @@
 
 **401 although the credential looks valid?**
 The credential was disabled on the backend side (or the tenant suspended) — disabling takes effect immediately. Check credential status with your platform operator.
+> Since v0.10.0, transient unavailability of the credential-validation service no longer returns 401 but **504 + 10003** (retryable); a persistent 401/10202 genuinely means a credential problem.
+
+**What does 504 / 10003 mean?**
+The credential-validation service was transiently unavailable (infrastructure glitch/timeout) — it does **not** mean your credential is bad. Back off and retry; if it persists, contact the platform to check control-plane availability.
+
+**Can I pass BASE64 reference images to OneToken image generation?**
+The gateway passes `params` through untouched and does not block base64, but the contract does not promise this form — whether it works depends on the target model/worker script; prefer URLs. Hard limits: request body ≤ 16 MB (gateway inbound), task-create payload ≤ 8 MB (gateway→platform outbound; base64 inflates ~33%). Task **results** are unaffected: if the upstream returns an inline `data:...;base64` image, the resource proxy decodes and re-hosts it — callers always receive proxy URLs.
 
 **What if I send both Bearer and x-api-key?**
 Bearer wins. Send only one to avoid troubleshooting ambiguity.

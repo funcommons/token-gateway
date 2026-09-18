@@ -1,11 +1,12 @@
 # OneToken Task Face Onboarding Guide
 
-> **Status: partially available (2026-09-02).** Implemented gateway-side: four-modality
-> create/poll endpoints, billing saga (full pre-charge / terminal refund), terminal webhook
-> receiver with signature verification, notify callbacks, resource proxy, timeout clock and
-> reconciliation fallback (M2.5a/c). **Upstream task execution runs on the self-written Worker
-> (task-worker module landed: sandbox / poll loop / sample script)** — until the first
-> real upstream's Groovy script ships, create is accepted but tasks are not executed. Authentication, cross-cutting specifications
+> **Status: fully available end-to-end (2026-09-18).** Four-modality create/poll, billing saga
+> (full pre-charge / terminal refund), terminal webhook receiver with signature verification,
+> notify callbacks, resource proxy (`.{ext}` dual-form + browser-inline rendering), timeout
+> clock and reconciliation fallback, and the self-written Worker (task-worker module:
+> sandbox / poll loop / batch claiming) have all landed; available models per modality follow
+> the platform's provisioned catalog (`GET /v1/models`). Authentication and cross-cutting
+> specifications
 > (rate limiting / idempotency / trace), and error codes are identical to the LLM face —
 > see [LLM Face Onboarding Guide](./llm-guide.md) §3/§6/§7.
 
@@ -13,7 +14,7 @@
 |---|---|
 | Document | Task Face Onboarding Guide (videos / images / audios / tts — four asynchronous-task modalities) |
 | Companion | LLM face [LLM Face Onboarding Guide](./llm-guide.md); API contract [Task Face API Contract](https://github.com/funcommons/token-gateway/blob/main/docs/用户文档/09_任务面API契约.yaml); design proposal [Design Document](../dev/design.md) §6.4; hosting plan [Task Face lotask4j Hosting](../dev/task-lotask4j-hosting.md) |
-| Version | V1.1 (2026-09-02, M2.5a/c landed; Worker execution M2.5b in progress) |
+| Version | V1.3 (2026-09-18, Worker/batch-pull landed + resource-proxy visibility & base64 semantics + 504/10003 validation semantics) |
 | Implementation source | Task state hosted by the lotask4j platform (zero-modification onboarding, V4+ prerequisite) + self-written Worker with Groovy adaptation |
 
 ---

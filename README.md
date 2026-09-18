@@ -1,6 +1,6 @@
 # token-gateway
 
-> 大模型网关服务（通用模型能力网关 · LLM 同步面 + 任务四模态面（M2.5a/c 已落地，Worker 执行 M2.5b 进行中））
+> 大模型网关服务（通用模型能力网关 · LLM 同步面 + 任务四模态面 + 任务执行 Worker）
 
 [![Java](https://img.shields.io/badge/Java-17-orange.svg)](https://openjdk.java.net/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-green.svg)](https://spring.io/projects/spring-boot)
@@ -22,13 +22,17 @@ token-gateway/
                  # 后端 RPC 客户端 + THMP 契约面 + 配置装配；零 JDBC
   face-llm       # LLM 同步面：6 端点 + RelayOrchestrator 管线 + SSE 透传 + 协议转换；
                  # 无数据库无本地盘，弹性扩缩
-  face-task      # 任务面（M2.5a/c 已落地，Worker 执行 M2.5b 进行中）：任务状态由
-                 # lotask4j 平台托管（无 DB），caller 端点 + 计费 saga + webhook 验签 +
-                 # notify + 资源代理 + 超时钟/对账兜底，仅资源缓存盘
-  task-worker    # 自写任务执行 Worker（M2.5b）：lotask4j worker API 拉单/上报 +
+  face-task      # 任务面：任务状态由 lotask4j 平台托管（无 DB），caller 端点 +
+                 # 计费 saga + webhook 验签 + notify + 资源代理 + 超时钟/对账兜底，
+                 # 仅资源缓存盘
+  task-worker    # 自写任务执行 Worker：lotask4j worker API 拉单/上报 +
                  # Groovy 三钩子沙箱（AST 黑名单 + 出网白名单 + 超时硬上限），
                  # 脚本真源在仓根 scripts/，独立进程独立扩缩
   app            # 装配：token-gateway.face = llm | task | all（同 jar 异配置部署分组）
+  token-gateway-spring-boot-starter
+                 # 嵌入模式：WebFlux 宿主引用即装配网关（JitPack 发布，tag 即版本）
+  demo-control-plane
+                 # 控制层 demo（联调/冒烟用，非生产组件；端口 9400 内存计费账本）
 ```
 
 **face 独立部署**：`token-gateway.face=llm` 只装 LLM 面（无 DB 无盘）；`=task` 只装任务面（挂库挂盘）；`=all` 单组合跑（默认）。由 `FaceLlmAssembly` / `FaceTaskAssembly` + `@ConditionalOnFace` 按 face 条件装配（face 值非法启动 fail-fast）。
@@ -52,8 +56,8 @@ token-gateway/
 前置：后端能力面服务（如 MMagiX 单体）已在 9400 端口启动；Redis 可达（默认 localhost:6379）。
 
 ```bash
-mvn verify                                                    # 431 个单测 + 覆盖率门禁
-java -jar app/target/token-gateway-app-0.8.0.jar              # 监听 9401
+mvn verify                                                    # 446 个单测 + 覆盖率门禁
+java -jar app/target/token-gateway-app-0.10.0.jar             # 监听 9401
 ```
 
 **全链路冒烟**（LLM 面 + 任务面正负路径 + notify + 对账，11 步 28 断言——notify 验签双侧设钥时满配 29，五进程零真实依赖）：
@@ -81,7 +85,7 @@ bash scripts/smoke.sh                                         # PASS/FAIL 矩阵
 <dependency>
     <groupId>com.github.funcommons.token-gateway</groupId>
     <artifactId>token-gateway-spring-boot-starter</artifactId>
-    <version>v0.8.0</version>
+    <version>v0.10.0</version>
 </dependency>
 ```
 
@@ -98,6 +102,7 @@ bash scripts/smoke.sh                                         # PASS/FAIL 矩阵
 | [docs/用户文档/03_通用约定.md](docs/用户文档/03_通用约定.md) | 认证 / 错误信封与错误码 / 限流 / 幂等 / 超时（**必读**） |
 | [docs/用户文档/04_LLM面接入手册.md](docs/用户文档/04_LLM面接入手册.md) | LLM 面调用方接入（6 端点详解 + SDK 示例 + 验收清单） |
 | [docs/用户文档/05_任务面接入手册.md](docs/用户文档/05_任务面接入手册.md) | 任务面接入（四模态 create/poll/notify/资源代理 + 回调验签） |
+| [docs/用户文档/06_OpenAI任务面接入手册.md](docs/用户文档/06_OpenAI任务面接入手册.md) | OpenAI 协议任务面（/v1/videos、异步生图 background） |
 | [docs/用户文档/07_FAQ.md](docs/用户文档/07_FAQ.md) | 常见问题与排障速查 |
 | [docs/用户文档/08_LLM面API契约.yaml](docs/用户文档/08_LLM面API契约.yaml) | LLM 面 OpenAPI 契约（6 端点） |
 | [docs/用户文档/09_任务面API契约.yaml](docs/用户文档/09_任务面API契约.yaml) | 任务面 OpenAPI 契约（M2.5 已落地） |
@@ -112,4 +117,19 @@ bash scripts/smoke.sh                                         # PASS/FAIL 矩阵
 | [docs/开发文档/05_任务面lotask4j托管方案.md](docs/开发文档/05_任务面lotask4j托管方案.md) | 任务面 lotask4j 托管方案（平台中转执行 · Groovy 脚本适配 · 零改造接入清单 R1~R9 对照） |
 | [docs/开发文档/06_任务面face-task开发手册.md](docs/开发文档/06_任务面face-task开发手册.md) | 任务面开发实施手册（组件分解 · lotask4j 对接契约 · 配置模型 · M2.5 任务分解） |
 | [docs/开发文档/07_lotask4j租户开通手册.md](docs/开发文档/07_lotask4j租户开通手册.md) | lotask4j 租户开通与冒烟环境 runbook（建租户 · 凭证注入 · 全链路冒烟） |
+| [docs/开发文档/08_部署运维手册.md](docs/开发文档/08_部署运维手册.md) | 部署运维（三种部署形态 · 配置参考 · 健康检查 · 故障速查） |
 | [docs/开发文档/03_能力面接口契约.yaml](docs/开发文档/03_能力面接口契约.yaml) | 能力面 OpenAPI 契约（后端需实现的端点 + MQ 日志消息） |
+
+历史时点文档（如 v0.1.0 测试报告）见 [docs/archive/](docs/archive/)。
+
+## 贡献
+
+欢迎 issue / PR：流程与规范见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+
+## 安全
+
+发现安全漏洞请勿公开提 issue，按 [SECURITY.md](./SECURITY.md) 的渠道私下报告。
+
+## License
+
+[Apache-2.0](./LICENSE)

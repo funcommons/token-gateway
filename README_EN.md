@@ -1,6 +1,6 @@
 # token-gateway
 
-> Universal Model Capability Gateway — LLM sync face implemented; task face (4 modalities) planned in M2.5.
+> Universal Model Capability Gateway — LLM sync face + task face (4 modalities) + task execution Worker.
 
 [![Java](https://img.shields.io/badge/Java-17-orange.svg)](https://openjdk.java.net/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-green.svg)](https://spring.io/projects/spring-boot)
@@ -17,9 +17,11 @@ Maven multi-module (design doc §9; faces independently deployable):
 - `gateway-spi` — capability-face SPI (M0 frozen): BackendAdapter + Capability + 7 face interfaces + task delegate + contract DTOs + config model + startup capability validation
 - `gateway-core` — shared infrastructure (~70% across faces): envelope + cross-cutting (trace/rate-limit/idempotency/moderation) + backend RPC clients + THMP contract face; zero JDBC
 - `face-llm` — LLM sync face: 6 endpoints + relay pipeline + SSE passthrough + protocol conversion; no DB, no local disk
-- `face-task` — task face (M2.5a/c landed; Worker execution M2.5b in progress): task state hosted by the lotask4j platform (no DB); caller endpoints + billing saga + webhook verification + notify + resource proxy + timeout-clock/reconciliation fallback, only a resource cache disk
-- `task-worker` — self-written task execution Worker (M2.5b): pulls/reports via the lotask4j worker API + Groovy three-hook sandbox (AST blacklist + egress allowlist + hook timeout); script source of truth in repo-root `scripts/`; independent process
+- `face-task` — task face: task state hosted by the lotask4j platform (no DB); caller endpoints + billing saga + webhook verification + notify + resource proxy + timeout-clock/reconciliation fallback, only a resource cache disk
+- `task-worker` — self-written task execution Worker: pulls/reports via the lotask4j worker API + Groovy three-hook sandbox (AST blacklist + egress allowlist + hook timeout); script source of truth in repo-root `scripts/`; independent process
 - `app` — assembly: `token-gateway.face = llm | task | all` (same jar, different config per deployment group)
+- `token-gateway-spring-boot-starter` — embedded mode: reference from a WebFlux host to assemble the gateway (published via JitPack, tag = version)
+- `demo-control-plane` — control-plane demo for integration/smoke (not for production; port 9400, in-memory billing ledger)
 
 **Independent face deployment**: `face=llm` loads only the LLM face (no DB/disk); `face=task` loads only the task face (DB + disk); `face=all` runs both (default). Gated by `FaceLlmAssembly` / `FaceTaskAssembly` + `@ConditionalOnFace` (invalid face value fails fast at startup).
 
@@ -42,8 +44,8 @@ Maven multi-module (design doc §9; faces independently deployable):
 Prerequisites: backend capability services reachable (e.g. MMagiX monolith on :9400); Redis reachable (default localhost:6379).
 
 ```bash
-mvn verify                                                    # 431 tests + coverage gate
-java -jar app/target/token-gateway-app-0.8.0.jar              # listens on :9401
+mvn verify                                                    # 446 tests + coverage gate
+java -jar app/target/token-gateway-app-0.10.0.jar             # listens on :9401
 ```
 
 **Full-chain smoke** (LLM face + task face positive/negative paths + notify + reconciliation, 11 steps / 28 assertions — 29 with notify verify keys configured on both sides, five processes, zero real dependencies):
@@ -71,7 +73,7 @@ Key configuration (`app/src/main/resources/application.yml`): `gateway.backend.u
 <dependency>
     <groupId>com.github.funcommons.token-gateway</groupId>
     <artifactId>token-gateway-spring-boot-starter</artifactId>
-    <version>v0.8.0</version>
+    <version>v0.10.0</version>
 </dependency>
 ```
 
@@ -88,6 +90,7 @@ The host must be on the **WebFlux stack** (the starter stays inactive in MVC hos
 | [Conventions (en)](https://funcommons.github.io/token-gateway/en/user/conventions) · [中文](docs/用户文档/03_通用约定.md) | Auth / error envelope & codes / rate limit / idempotency (**required**) |
 | [LLM Guide (en)](https://funcommons.github.io/token-gateway/en/user/llm-guide) · [中文](docs/用户文档/04_LLM面接入手册.md) | LLM face (6 endpoints + SDK examples + acceptance checklist) |
 | [Task Guide (en)](https://funcommons.github.io/token-gateway/en/user/task-guide) · [中文](docs/用户文档/05_任务面接入手册.md) | Task face (4-modality create/poll/notify/resource proxy + callback verification) |
+| [OpenAI Task Guide (en)](https://funcommons.github.io/token-gateway/en/user/openai-task-guide) · [中文](docs/用户文档/06_OpenAI任务面接入手册.md) | OpenAI-protocol task face (/v1/videos, async image background) |
 | [FAQ (en)](https://funcommons.github.io/token-gateway/en/user/faq) · [中文](docs/用户文档/07_FAQ.md) | Troubleshooting quick reference |
 | [LLM API Contract](docs/用户文档/08_LLM面API契约.yaml) | OpenAPI contract (6 endpoints) |
 | [Task API Contract](docs/用户文档/09_任务面API契约.yaml) | OpenAPI contract (M2.5 landed) |
@@ -103,3 +106,18 @@ The host must be on the **WebFlux stack** (the starter stays inactive in MVC hos
 | [Task Face Development Handbook (en)](https://funcommons.github.io/token-gateway/en/dev/task-face-dev-handbook) · [中文](docs/开发文档/06_任务面face-task开发手册.md) | Component breakdown · lotask4j integration contract · config model · M2.5 task breakdown |
 | [lotask4j Tenant Onboarding (en)](https://funcommons.github.io/token-gateway/en/dev/lotask4j-tenant-onboarding) · [中文](docs/开发文档/07_lotask4j租户开通手册.md) | Tenant provisioning · credential injection · full-chain smoke runbook |
 | [Capability-Face Contract](docs/开发文档/03_能力面接口契约.yaml) | OpenAPI contract for backend endpoints + MQ log messages |
+| [Deployment & Ops (中文)](docs/开发文档/08_部署运维手册.md) | Deployment forms · configuration reference · health checks · troubleshooting |
+
+Historical point-in-time documents (e.g. the v0.1.0 test report) live in [docs/archive/](docs/archive/).
+
+## Contributing
+
+Issues and PRs welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+## Security
+
+Do not open public issues for security vulnerabilities; report privately per [SECURITY.md](./SECURITY.md).
+
+## License
+
+[Apache-2.0](./LICENSE)

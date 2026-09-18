@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 文档
+
+- **文档治理一轮**：README（中英）对齐当前状态（阶段标记、446 测试、v0.10.0 版本引用、模块树补 starter/demo、文档表补 06/部署手册、新增贡献/安全段）；快速开始（中英）修正第三步端点形状（`/v1/videos` OpenAI job 形状误配 OneToken 形状 → 改 `/v1/onetoken/videos`）与 starter 版本引用；任务面手册（中英）状态横幅更新为全链路可用 + 资源代理 `.{ext}`/inline/`base64` 输出语义；FAQ（中英）新增 504/10003 与 base64 参考图条目；v0.1.0 测试报告归档至 `docs/archive/`；新增《部署运维手册》《CONTRIBUTING》《SECURITY》；vitepress 关闭 `ignoreDeadLinks`（构建即死链检查）
+
 ## [0.10.0] - 2026-09-18
 
 ### 修复

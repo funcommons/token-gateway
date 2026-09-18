@@ -62,16 +62,16 @@ print(msg.content[0].text)
 ```bash
 # ① Create (returns task_no synchronously; full pre-charge at creation,
 #    insufficient balance → 10617 and no task is created)
-curl -s http://<gateway-host>:9401/v1/videos \
+curl -s http://<gateway-host>:9401/v1/onetoken/videos \
   -H "Authorization: Bearer <your-credential>" -H "Content-Type: application/json" \
   -H "Idempotency-Key: $(uuidgen)" \
   -d '{"model":"vid-1.5","params":{"duration":5,"resolution":"720p"},
        "notify_url":"https://you/callback"}'
-# → {"task_no":"T20260902...","status":"PENDING","poll_url":"/v1/videos/T20260902..."}
+# → {"task_no":"T20260902...","status":"PENDING","poll_url":"/v1/onetoken/videos/T20260902..."}
 
 # ② Poll (drive every 3–5s; terminal states are idempotent — repeated polling
 #    neither touches upstream nor refunds twice)
-curl -s http://<gateway-host>:9401/v1/videos/T20260902... \
+curl -s http://<gateway-host>:9401/v1/onetoken/videos/T20260902... \
   -H "Authorization: Bearer <your-credential>"
 # → {"task_no":"...","status":"SUCCEEDED","result":{"resources":["<proxy URL>"],"usage":{...}}}
 
@@ -94,7 +94,7 @@ Skip the standalone fat-jar: reference the starter inside your own **WebFlux** a
 <dependency>
     <groupId>com.github.funcommons.token-gateway</groupId>
     <artifactId>token-gateway-spring-boot-starter</artifactId>
-    <version>v0.3.0</version>
+    <version>v0.10.0</version>
 </dependency>
 ```
 
