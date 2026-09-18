@@ -407,8 +407,7 @@ class TaskRelayOrchestratorTest {
 
     @Test
     @DisplayName("余额不足 → 402 + 10617, 不产生任务 (lotask submit 不调用)")
-    void createInsufficientBalance() {
-        backend.enqueue(json("{\"code\":0,\"data\":{\"valid\":true,\"tokenId\":\"t1\","
+    void createInsufficientBalance() {        backend.enqueue(json("{\"code\":0,\"data\":{\"valid\":true,\"tokenId\":\"t1\","
                 + "\"userId\":\"u1\",\"tenantId\":\"tn1\"}}"));
         backend.enqueue(json("{\"code\":0,\"data\":{\"channelId\":\"ch1\",\"baseUrl\":\"https://up\","
                 + "\"apiKey\":\"sk-upstream\",\"ownerType\":\"PLATFORM\"}}"));

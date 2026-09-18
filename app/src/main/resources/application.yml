@@ -56,6 +56,8 @@ token-gateway:
       # (WebhookVerifier.activeSecrets 主/备依次), 存量载荷全部过期后删除备钥
       tenant-secret-previous: ${LOTASK_TENANT_SECRET_PREVIOUS:}
       webhook-callback-url: ${LOTASK_WEBHOOK_CALLBACK_URL:}
+      # submit 出站载荷上限 (base64 参考图等大载荷; 超限 413/10100 拒绝, 不发平台)
+      max-submit-size: ${TGW_LOTASK_MAX_SUBMIT_SIZE:64MB}
     snapshot-cipher-key: ${TGW_SNAPSHOT_CIPHER_KEY:}
     resource-sign-key: ${TGW_RESOURCE_SIGN_KEY:}
     # lotask submit 的 task_type 粒度: modality(默认, 零感知) | model (remote Worker 按
@@ -76,8 +78,10 @@ token-gateway:
           max-active: 32
           max-idle: 16
           min-idle: 4
+  # 入站请求体上限 (base64 参考图等大载荷; 出站 submit 上限另配
+  # token-gateway.task.lotask.max-submit-size)
   codec:
-    max-in-memory-size: 16MB
+    max-in-memory-size: ${GATEWAY_MAX_BODY_SIZE:128MB}
 
 # 主应用 RPC 目标 (兼容窗口: token-gateway.* 七面未配置 url 的面回退到此; 全部迁移后删除)
 gateway:

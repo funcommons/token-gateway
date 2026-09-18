@@ -90,6 +90,12 @@ public class LotaskTaskClient {
             body.put("callbackUrl", callbackUrl);
         }
         byte[] raw = JSON.toJSONBytes(body);
+        long maxSubmitBytes = org.springframework.util.unit.DataSize.parse(cfg().getMaxSubmitSize()).toBytes();
+        if (raw.length > maxSubmitBytes) {
+            // 出站载荷硬上限 (base64 参考图等大载荷): 序列化后实测字节校验, 超限不发平台
+            return Mono.error(new RelayException(413, ApiCode.PARAM_ERROR.getCode(),
+                    "任务创建载荷超限: " + raw.length + "B, 上限 " + maxSubmitBytes + "B"));
+        }
         return withKickRetry(Mono.defer(() -> authSigner.authorize(webClientBuilder.build().post()
                         .uri(cfg().getUrl() + SUBMIT_PATH)
                         .contentType(MediaType.APPLICATION_JSON)))

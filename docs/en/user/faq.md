@@ -10,7 +10,10 @@ The credential was disabled on the backend side (or the tenant suspended) — di
 The credential-validation service was transiently unavailable (infrastructure glitch/timeout) — it does **not** mean your credential is bad. Back off and retry; if it persists, contact the platform to check control-plane availability.
 
 **Can I pass BASE64 reference images to OneToken image generation?**
-The gateway passes `params` through untouched and does not block base64, but the contract does not promise this form — whether it works depends on the target model/worker script; prefer URLs. Hard limits: request body ≤ 16 MB (gateway inbound), task-create payload ≤ 8 MB (gateway→platform outbound; base64 inflates ~33%). Task **results** are unaffected: if the upstream returns an inline `data:...;base64` image, the resource proxy decodes and re-hosts it — callers always receive proxy URLs.
+Yes — `params` is passed through untouched (base64 data URLs included); whether it works depends on the target model/worker script, so prefer URLs. Hard limits (both configurable):
+- Request body ≤ **128 MB** by default (gateway inbound; tune via `GATEWAY_MAX_BODY_SIZE`);
+- Task-create payload (submit outbound) ≤ **64 MB** by default (`token-gateway.task.lotask.max-submit-size` / env `TGW_LOTASK_MAX_SUBMIT_SIZE`; exceeded → 413/10100).
+Task **results** are unaffected: if the upstream returns an inline `data:...;base64` image, the resource proxy decodes and re-hosts it — callers always receive proxy URLs.
 
 **What if I send both Bearer and x-api-key?**
 Bearer wins. Send only one to avoid troubleshooting ambiguity.

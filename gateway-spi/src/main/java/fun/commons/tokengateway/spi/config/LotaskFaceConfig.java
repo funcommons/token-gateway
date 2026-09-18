@@ -48,4 +48,11 @@ public class LotaskFaceConfig {
 
     /** 读超时 (submit/get/cancel 统一预算). */
     private Duration readTimeout = Duration.ofSeconds(5);
+
+    /**
+     * submit 请求体上限, DataSize 形态字符串如 "64MB"/"512KB" (spi 模块零 spring 依赖,
+     * 由 face-task 侧 DataSize.parse 解析). base64 参考图等大载荷出站口径,
+     * 超限 413/10100 拒绝不发平台; 入站上限另见 server.codec.max-in-memory-size (默认 128MB).
+     */
+    private String maxSubmitSize = "64MB";
 }

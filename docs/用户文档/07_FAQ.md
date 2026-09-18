@@ -10,7 +10,10 @@
 凭证校验服务瞬时不可用（基础设施抖动/超时），**不代表凭证有问题**。退避重试即可；持续出现联系平台查控制层可用性。
 
 **OneToken 生图能传 BASE64 参考图吗？**
-网关对 `params` 全量透传、不拦 base64，但契约未承诺该形态——能否生效取决于目标模型/Worker 脚本，建议优先用 URL。硬限制：请求体 ≤ 16MB（网关入站）、任务创建载荷 ≤ 8MB（网关→平台出站，base64 约膨胀 33%）。任务**结果**侧无此顾虑：上游若以内联 `data:image/...;base64` 回图，网关资源代理自动解码并转成代理 URL，调用方拿到的仍是代理地址。
+支持 `params` 全量透传（含 base64 data URL），能否生效取决于目标模型/Worker 脚本，建议优先用 URL。硬限制（均可配置）：
+- 请求体默认 ≤ **128MB**（网关入站，`GATEWAY_MAX_BODY_SIZE` 可调）；
+- 任务创建载荷（submit 出站）默认 ≤ **64MB**（`token-gateway.task.lotask.max-submit-size` / env `TGW_LOTASK_MAX_SUBMIT_SIZE` 可调，超限 413/10100 拒绝）。
+任务**结果**侧无此顾虑：上游若以内联 `data:image/...;base64` 回图，网关资源代理自动解码并转成代理 URL，调用方拿到的仍是代理地址。
 
 **Bearer 和 x-api-key 都传了会怎样？**
 Bearer 优先。建议只传一种，避免排障歧义。

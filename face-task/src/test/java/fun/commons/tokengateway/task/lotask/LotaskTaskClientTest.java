@@ -26,12 +26,13 @@ class LotaskTaskClientTest {
 
     private MockWebServer lotask;
     private LotaskTaskClient client;
+    private TokenGatewayProperties props;
 
     @BeforeEach
     void setUp() throws Exception {
         lotask = new MockWebServer();
         lotask.start();
-        TokenGatewayProperties props = new TokenGatewayProperties();
+        props = new TokenGatewayProperties();
         props.getTask().getLotask().setUrl(lotask.url("/").toString().replaceAll("/$", ""));
         props.getTask().getLotask().setAuth(AuthType.JWT);
         props.getTask().getLotask().setJwtSecret("test-jwt-secret");
@@ -43,6 +44,20 @@ class LotaskTaskClientTest {
     @AfterEach
     void tearDown() throws Exception {
         lotask.shutdown();
+    }
+
+    @Test
+    @DisplayName("submit 载荷超上限 → 413 + 10100, 不发请求 (max-submit-size 可配)")
+    void submitPayloadOverLimit413() {
+        props.getTask().getLotask().setMaxSubmitSize("1KB");
+
+        StepVerifier.create(client.submit("video", "T20260901abcdef",
+                        Map.of("blob", "x".repeat(64 * 1024)), null))
+                .expectErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 413
+                        && re.getCode() == ApiCode.PARAM_ERROR.getCode())
+                .verify();
+        assertThat(lotask.getRequestCount()).isZero();
     }
 
     @Test
