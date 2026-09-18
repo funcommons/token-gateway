@@ -50,6 +50,12 @@ public class TaskRelayOrchestrator {
     private static final char[] TASK_NO_ALPHABET =
             "0123456789abcdefghijklmnopqrstuvwxyz".toCharArray();
 
+    /**
+     * bootstrap 侧模型不存在业务码 (MMagiX ErrorCode.MODEL_NOT_FOUND, 2xxxx 段).
+     * P1-5: distribute 对未知模型回此码, 与 10400 同属确定性"资源不存在"语义, 一并转 404.
+     */
+    private static final int BOOTSTRAP_MODEL_NOT_FOUND = 20103;
+
     private final HttpTokenApi tokenApi;
     private final HttpChannelApi channelApi;
     private final fun.commons.tokengateway.rpc.AdapterSelector adapterSelector;
@@ -113,7 +119,7 @@ public class TaskRelayOrchestrator {
     }
 
     /**
-     * 控制层 route resolve: 模型不同价不同, 先定价再预扣; 10400 语义透传 (同 LLM 面).
+     * 控制层 route resolve: 模型不同价不同, 先定价再预扣; 10400/20103 语义透传 (同 LLM 面).
      * <p>G5: adapter=tokengo|openapi 时走 token-route resolve (data_json 契约字段映射),
      * 路由快照随 submit 载荷下发 Worker 的链路不变.
      */
@@ -135,7 +141,8 @@ public class TaskRelayOrchestrator {
                     if (distResp == null || !distResp.isSuccess() || distResp.getData() == null) {
                         String reason = distResp == null ? "no response"
                                 : (distResp.getMessage() == null ? "unknown" : distResp.getMessage());
-                        if (distResp != null && distResp.getCode() == ApiCode.NOT_FOUND.getCode()) {
+                        if (distResp != null && (distResp.getCode() == ApiCode.NOT_FOUND.getCode()
+                                || distResp.getCode() == BOOTSTRAP_MODEL_NOT_FOUND)) {
                             return Mono.error(new RelayException(404, ApiCode.NOT_FOUND.getCode(),
                                     "模型不存在或无可用渠道: " + reason));
                         }

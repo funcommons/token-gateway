@@ -423,6 +423,23 @@ class TaskRelayOrchestratorTest {
     }
 
     @Test
+    @DisplayName("未知模型 (bootstrap 20103 MODEL_NOT_FOUND) → 404 + 10400, 不产生任务 (P1-5)")
+    void createUnknownModelBootstrap20103() {
+        backend.enqueue(json("{\"code\":0,\"data\":{\"valid\":true,\"tokenId\":\"t1\","
+                + "\"userId\":\"u1\",\"tenantId\":\"tn1\"}}"));
+        backend.enqueue(json("{\"code\":20103,\"message\":\"模型不存在或已下线: no-such-model-regression\","
+                + "\"data\":null}"));
+
+        StepVerifier.create(orchestrator.create("image", "sk-caller",
+                        Map.of("model", "no-such-model-regression"), null))
+                .expectErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 404
+                        && re.getCode() == ApiCode.NOT_FOUND.getCode())
+                .verify();
+        verify(lotaskClient, never()).submit(anyString(), anyString(), any(), anyString());
+    }
+
+    @Test
     @DisplayName("submit 失败 → 全额退款 (refund RPC 发出) + 502 + 10004")
     void createSubmitFailRefunds() {
         enqueueHappyControlPlane(backend);

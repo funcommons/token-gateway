@@ -51,6 +51,12 @@ import java.util.UUID;
 @RequiredArgsConstructor(onConstructor_ = @Autowired)
 public class RelayOrchestrator {
 
+    /**
+     * bootstrap 侧模型不存在业务码 (MMagiX ErrorCode.MODEL_NOT_FOUND, 2xxxx 段).
+     * P1-5: distribute 对未知模型回此码, 与 10400 同属确定性"资源不存在"语义, 一并转 404.
+     */
+    private static final int BOOTSTRAP_MODEL_NOT_FOUND = 20103;
+
     private final HttpTokenApi tokenApi;
     private final HttpChannelApi channelApi;
     private final HttpBillingApi billingApi;
@@ -161,10 +167,12 @@ public class RelayOrchestrator {
                     if (distResp == null || !distResp.isSuccess() || distResp.getData() == null) {
                         String reason = distResp == null ? "no response"
                                 : (distResp.getMessage() == null ? "unknown" : distResp.getMessage());
-                        // 后端业务码 10400 (模型不存在/无可用渠道) 语义透传: HTTP 404 + 信封 10400;
+                        // 后端业务码 10400 / 20103 (模型不存在: bootstrap WorkDistributeService 抛
+                        // ErrorCode.MODEL_NOT_FOUND, P1-5) 语义透传: HTTP 404 + 信封 10400;
                         // 其余失败 (RPC 降级/未知) 按上游故障 502 + 10004
-                        if (distResp != null && distResp.getCode()
-                                == fun.commons.tokengateway.framework.ApiCode.NOT_FOUND.getCode()) {
+                        if (distResp != null && (distResp.getCode()
+                                == fun.commons.tokengateway.framework.ApiCode.NOT_FOUND.getCode()
+                                || distResp.getCode() == BOOTSTRAP_MODEL_NOT_FOUND)) {
                             return Mono.error(new RelayException(404,
                                     fun.commons.tokengateway.framework.ApiCode.NOT_FOUND.getCode(),
                                     "模型不存在或无可用渠道: " + reason));

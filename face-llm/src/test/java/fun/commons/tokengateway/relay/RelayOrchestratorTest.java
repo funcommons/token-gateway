@@ -121,6 +121,23 @@ class RelayOrchestratorTest {
     }
 
     @Test
+    @DisplayName("channel distribute 业务码 20103 (bootstrap MODEL_NOT_FOUND) → 404 + 信封 10400 (P1-5)")
+    void distributeModelNotFound20103() {
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"valid\":true,\"tokenId\":\"1\",\"userId\":\"2\",\"tenantId\":\"3\"}}"));
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":20103,\"message\":\"模型不存在或已下线: no-such-model\"}"));
+
+        StepVerifier.create(orchestrator.prepare("sk", "no-such-model", 0, 0, null, null))
+                .verifyErrorMatches(e -> e instanceof RelayException
+                        && ((RelayException) e).getHttpStatus() == 404
+                        && ((RelayException) e).getCode() == 10400
+                        && e.getMessage().contains("no-such-model"));
+    }
+
+    @Test
     @DisplayName("PASS 回显 sanitizedContent → moderationSanitized=null, body 不被改写")
     void passThroughDoesNotMask() {
         backend.enqueue(new MockResponse()
