@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-18
+
 ### 新增
 
 - **OneToken BASE64 大载荷入站口径 128MB（可配置）**：入站请求体 `spring.codec.max-in-memory-size` 默认 16MB→**128MB**（env `GATEWAY_MAX_BODY_SIZE`）；submit 出站载荷保持无网关侧上限（随入站请求体边界）。FAQ/部署手册同步
