@@ -6,7 +6,7 @@
 
 ### 新增
 
-- **OneToken BASE64 载荷口径（入站 128MB / 出站 64MB，均可配置）**：入站请求体 `spring.codec.max-in-memory-size` 默认 16MB→**128MB**（env `GATEWAY_MAX_BODY_SIZE`）；submit 出站载荷此前无上限（手工序列化直发），新增 `token-gateway.task.lotask.max-submit-size`（默认 **64MB**，env `TGW_LOTASK_MAX_SUBMIT_SIZE`）——序列化后实测字节校验，超限 413/10100 拒绝、不发平台、走退款。FAQ/部署手册同步
+- **OneToken BASE64 大载荷入站口径 128MB（可配置）**：入站请求体 `spring.codec.max-in-memory-size` 默认 16MB→**128MB**（env `GATEWAY_MAX_BODY_SIZE`）；submit 出站载荷保持无网关侧上限（随入站请求体边界）。FAQ/部署手册同步
 
 ### 文档
 
