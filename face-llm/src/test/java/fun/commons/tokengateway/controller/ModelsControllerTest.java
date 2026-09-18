@@ -120,6 +120,16 @@ class ModelsControllerTest {
     }
 
     @Test
+    @DisplayName("token 校验 RPC 失败 → 504 + 10003 (issue #22: 区别于 key 真失效 401)")
+    void tokenRpcFailure() {
+        backend.enqueue(new MockResponse().setResponseCode(500));
+        StepVerifier.create((Mono<?>) controller.listModels("Bearer sk", null, null))
+                .verifyErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 504
+                        && re.getCode() == 10003);
+    }
+
+    @Test
     @DisplayName("chat-model RPC 失败 → 空列表兜底, 不报错")
     void chatModelRpcFailureEmptyList() {
         mockTokenOk();

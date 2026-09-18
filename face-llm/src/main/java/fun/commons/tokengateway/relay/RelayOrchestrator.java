@@ -98,7 +98,7 @@ public class RelayOrchestrator {
      * <p>失败场景 (任一) 直接抛 RelayException:
      * <ul>
      *   <li>apiKey 缺失 → 401</li>
-     *   <li>token RPC 失败 / token 无效 → 401</li>
+     *   <li>token 校验 RPC 失败/超时 → 504 (可重试基础设施错误, issue #22) / token 无效 → 401</li>
      *   <li>channel RPC 失败 / 渠道为空 → 502</li>
      *   <li>moderation BLOCK → 400</li>
      *   <li>preConsume 失败 → 502; 信封 10617 (余额不足) → 402 + 10617</li>
@@ -115,8 +115,12 @@ public class RelayOrchestrator {
         return tokenApi.validate(TokenValidateRequest.builder()
                         .apiKey(apiKey).model(model).build())
                 .flatMap(tokenResp -> {
-                    if (tokenResp == null || !tokenResp.isSuccess() || tokenResp.getData() == null
-                            || !tokenResp.getData().isValid()) {
+                    if (tokenResp == null || !tokenResp.isSuccess()) {
+                        // token 校验 RPC 失败/超时 (fail 包络 10003) → 504 可重试基础设施错误,
+                        // 区别于 key 真失效的 401 (issue #22)
+                        return Mono.error(new RelayException(504, "token 校验服务不可用, 请重试"));
+                    }
+                    if (tokenResp.getData() == null || !tokenResp.getData().isValid()) {
                         return Mono.error(new RelayException(401, "invalid token"));
                     }
                     TokenValidateVO token = tokenResp.getData();

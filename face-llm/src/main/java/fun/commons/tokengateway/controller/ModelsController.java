@@ -52,8 +52,12 @@ public class ModelsController {
         }
         return tokenApi.validate(TokenValidateRequest.builder().apiKey(apiKey).model(null).build())
                 .flatMap(tokenResp -> {
-                    if (tokenResp == null || !tokenResp.isSuccess() || tokenResp.getData() == null
-                            || !tokenResp.getData().isValid()) {
+                    if (tokenResp == null || !tokenResp.isSuccess()) {
+                        // token 校验 RPC 失败/超时 (fail 包络 10003) → 504 可重试基础设施错误,
+                        // 区别于 key 真失效的 401 (issue #22)
+                        return Mono.error(new RelayException(504, "token 校验服务不可用, 请重试"));
+                    }
+                    if (tokenResp.getData() == null || !tokenResp.getData().isValid()) {
                         return Mono.error(new RelayException(401, "invalid token"));
                     }
                     boolean isAnthropic = (anthropicVersion != null && !anthropicVersion.isBlank())

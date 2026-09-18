@@ -467,6 +467,44 @@ class TaskRelayOrchestratorTest {
     }
 
     @Test
+    @DisplayName("issue #22: token 校验 RPC 失败 → 504 + 10003 (可重试基础设施错误), 不产生任务")
+    void createTokenRpcFailure504() {
+        backend.enqueue(new MockResponse().setResponseCode(500)); // token-validate 5xx → fail 包络
+
+        StepVerifier.create(orchestrator.create("image", "sk-caller", Map.of("model", "sd-xl"), null))
+                .expectErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 504
+                        && re.getCode() == ApiCode.SERVICE_TIMEOUT.getCode())
+                .verify();
+        verify(lotaskClient, never()).submit(anyString(), anyString(), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("issue #22: token 真无效 → 维持 401 + 10202")
+    void createInvalidToken401() {
+        backend.enqueue(json("{\"code\":0,\"data\":{\"valid\":false}}"));
+
+        StepVerifier.create(orchestrator.create("image", "sk-bad", Map.of("model", "sd-xl"), null))
+                .expectErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 401
+                        && re.getCode() == ApiCode.TOKEN_INVALID.getCode())
+                .verify();
+    }
+
+    @Test
+    @DisplayName("issue #22: poll 时 token 校验 RPC 失败 → 504 + 10003 (不触映射查询)")
+    void pollTokenRpcFailure504() {
+        backend.enqueue(new MockResponse().setResponseCode(500));
+
+        StepVerifier.create(orchestrator.poll("video", "T-x", "sk-caller"))
+                .expectErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 504
+                        && re.getCode() == ApiCode.SERVICE_TIMEOUT.getCode())
+                .verify();
+        verify(mappingStore, never()).get(anyString());
+    }
+
+    @Test
     @DisplayName("poll: 映射缺失 → 404 + 10400")
     void pollMappingMissing() {
         backend.enqueue(json("{\"code\":0,\"data\":{\"valid\":true}}"));

@@ -104,6 +104,17 @@ class RelayOrchestratorTest {
     }
 
     @Test
+    @DisplayName("token 校验 RPC 失败 → 504 + 10003 (issue #22: 区别于 token 无效 401)")
+    void tokenRpcFailure() {
+        backend.enqueue(new MockResponse().setResponseCode(500));
+
+        StepVerifier.create(orchestrator.prepare("sk-test", "gpt-4o", 0, 0, null, null))
+                .verifyErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 504
+                        && re.getCode() == 10003);
+    }
+
+    @Test
     @DisplayName("channel distribute 业务码 10400 → 404 + 信封 10400 (模型不存在/无可用渠道)")
     void distributeFailed() {
         backend.enqueue(new MockResponse()

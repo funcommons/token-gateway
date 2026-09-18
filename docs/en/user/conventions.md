@@ -10,6 +10,7 @@
 | API-Key header | `x-api-key: <credential>` | Anthropic ecosystem default; Bearer wins if both are sent |
 
 - Credential validation is the first pipeline step; failure returns **10202 invalid token / 10200 unauthenticated** (HTTP 401 + error envelope).
+- If the credential-validation service itself is transiently unavailable (infrastructure glitch/timeout), the gateway returns **10003** (HTTP 504) — a retryable error that does **not** mean your credential is bad; back off and retry, don't treat it as an auth failure.
 - Which backend validates your credential is decided by model routing — **switching backends never changes how you call**.
 - Credentials never appear in gateway logs or error messages.
 
@@ -42,7 +43,7 @@ Error envelope (6 fields):
 | code | HTTP | Meaning | Caller action |
 |---|---|---|---|
 | 10001 | 500 | System busy | Retry with backoff |
-| 10003 | 504 | Service call timeout | Retry with backoff; check max_tokens for long texts |
+| 10003 | 504 | Service call timeout / credential-validation service temporarily unavailable | Retry with backoff; check max_tokens for long texts |
 | 10004 | 502 | Third-party failure (all upstreams failed / task platform unreachable) | Retry with backoff; contact the platform if persistent |
 | 10100~10106 | 400 | Parameter error/missing/format/range/JSON; 10106 also for content-safety rejection; resource-proxy signature expiry/tampering returns 10100 | Fix the request, do not retry |
 | 10200 | 401 | Unauthenticated / token expired | Use a valid credential |
