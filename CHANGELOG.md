@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-18
+
+### 修复
+
+- **token 校验 RPC 失败与 key 真失效语义分离（issue #22）**：`HttpTokenApi.validate` 的 RPC 失败 fail 包络（10003）此前被 4 处判定点（TaskRelayOrchestrator submit/poll、RelayOrchestrator prepare、ModelsController /v1/models）与「key 真无效」混在一个 `||` 里，一律映射 401/10202 invalid token —— 主应用瞬时抖动即误导接入方按 key 失效排障（融光 ai-fusion-video 实踩：轮询 401 判死任务，实际 worker 已 SUCCESS，成功回调成孤儿）。拆两段式判定：RPC 失败/超时 → **504 + 10003**（可重试基础设施错误）；key 真失效 → 维持 **401 + 10202**。《通用约定》（中英）错误码表同步，测试 +5
+- **OneToken 未知模型 20103 → HTTP 404**：bootstrap `WorkDistributeService` 抛 `MODEL_NOT_FOUND(20103)` 时网关此前仅把 10400 映射 404，其余落 502+10004 —— 接入方把确定性客户端错误当可重试上游故障。`TaskRelayOrchestrator.resolveRoute` 与 `RelayOrchestrator.obtainRoute` 判定扩展 10400‖20103，信封归一 10400，bootstrap 原始 message 保留 reason
+
+### 测试
+
+- 439 → 446（未知模型双编排器回归 + token 校验语义分离 5 例：RPC 失败 504 / key 失效 401 双分支，任务面覆盖 submit/poll）
+
 ## [0.9.0] - 2026-09-17
 
 ### 新增
