@@ -34,7 +34,7 @@
 | 1 | `/v1/onetoken/videos` · `/v1/onetoken/images` · `/v1/onetoken/audios` · `/v1/onetoken/tts` | POST | Create a task (isomorphic across the four modalities) |
 | 2 | `/v1/onetoken/videos/{task_no}` (isomorphic across the four modalities) | GET | Poll task status |
 | 3 | `/v1/onetoken/images/sync` | POST | Synchronous image generation wrapper (OpenAI shape; create + poll-to-terminal internally) |
-| 4 | `/v1/resources/{task_no}/{index}?exp=&sig=` | GET | Resource proxy (no credential required; sig is the capability credential) |
+| 4 | `/v1/resources/{task_no}/{index}?exp=&sig=` (or `/{index}.{ext}` dual form) | GET | Resource proxy (no credential required; sig is the capability credential; auto Content-Type for browser-inline rendering) |
 
 > Note: task-face endpoints live under `/v1/onetoken/*` since v0.8.0 (issue #20, decoupled from OpenAI official endpoints); `/v1/onetoken/images` (async task), `/v1/onetoken/images/sync` (sync wrapper) and the LLM face's `/v1/images/generations` (sync pass-through) are three different endpoints — do not confuse them.
 
@@ -65,6 +65,9 @@ curl -s http://localhost:9401/v1/onetoken/videos \
 # ② Poll (driven by the caller every 3–5s; terminal states are idempotent — repeated polling neither touches upstream nor triggers duplicate refunds)
 curl -s http://localhost:9401/v1/onetoken/videos/T20260831... -H "Authorization: Bearer <credential>"
 # → {"status":"SUCCEEDED","result":{"resources":["<proxy URL>"],"usage":{...}}}
+#    A 504+10003 on create/poll = credential-validation service transiently unavailable
+#    (retryable infrastructure error) — back off and retry; don't kill the task as a bad
+#    key (only 401+10202 means that).
 
 # ③ Resource fetch (result.resources contains gateway proxy URLs carrying a 24h-valid exp+sig; browsers/download clients can fetch directly without credentials)
 curl -sL "<proxy URL>" -o out.mp4

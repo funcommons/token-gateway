@@ -77,6 +77,7 @@ On verification failure return HTTP 401 + envelope (code=10300); the gateway tre
 - In: `{credential}` (the caller's raw credential, forwarded verbatim by the gateway).
 - Out: `data: {tenant_id, user_id, active, masked_credential}`.
 - Invalid/expired → envelope 10202/10200 (**not 5xx**).
+- Validation endpoint itself unreachable/timing out → the gateway answers the caller **504 + 10003** (retryable infrastructure error; since v0.10.0, semantically separated from credential failure per issue #22).
 - High-frequency hot face: local cache recommended (60s TTL) + instant disable support (trade-off between receiving disable notifications and a short TTL).
 
 ### 4.2 route — `POST /gw/v1/route/resolve`

@@ -107,6 +107,7 @@ The host must be on the **WebFlux stack** (the starter stays inactive in MVC hos
 | [lotask4j Tenant Onboarding (en)](https://funcommons.github.io/token-gateway/en/dev/lotask4j-tenant-onboarding) · [中文](docs/开发文档/07_lotask4j租户开通手册.md) | Tenant provisioning · credential injection · full-chain smoke runbook |
 | [Capability-Face Contract](docs/开发文档/03_能力面接口契约.yaml) | OpenAPI contract for backend endpoints + MQ log messages |
 | [Deployment & Ops (中文)](docs/开发文档/08_部署运维手册.md) | Deployment forms · configuration reference · health checks · troubleshooting |
+| [Docs Site Scheme (中文)](docs/开发文档/09_在线文档方案.md) | Reusable one-file scheme for GitHub open-source online docs |
 
 Historical point-in-time documents (e.g. the v0.1.0 test report) live in [docs/archive/](docs/archive/).
 

@@ -118,6 +118,7 @@ bash scripts/smoke.sh                                         # PASS/FAIL 矩阵
 | [docs/开发文档/06_任务面face-task开发手册.md](docs/开发文档/06_任务面face-task开发手册.md) | 任务面开发实施手册（组件分解 · lotask4j 对接契约 · 配置模型 · M2.5 任务分解） |
 | [docs/开发文档/07_lotask4j租户开通手册.md](docs/开发文档/07_lotask4j租户开通手册.md) | lotask4j 租户开通与冒烟环境 runbook（建租户 · 凭证注入 · 全链路冒烟） |
 | [docs/开发文档/08_部署运维手册.md](docs/开发文档/08_部署运维手册.md) | 部署运维（三种部署形态 · 配置参考 · 健康检查 · 故障速查） |
+| [docs/开发文档/09_在线文档方案.md](docs/开发文档/09_在线文档方案.md) | GitHub 开源项目在线文档方案（可复用，精简版） |
 | [docs/开发文档/03_能力面接口契约.yaml](docs/开发文档/03_能力面接口契约.yaml) | 能力面 OpenAPI 契约（后端需实现的端点 + MQ 日志消息） |
 
 历史时点文档（如 v0.1.0 测试报告）见 [docs/archive/](docs/archive/)。

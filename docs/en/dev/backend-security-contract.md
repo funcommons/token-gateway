@@ -124,6 +124,7 @@ stringToSign = HTTP_METHOD + "\n" + PATH + "\n" + TIMESTAMP + "\n" + NONCE + "\n
 |---|---|---|
 | Backend rejects the gateway's credential | HTTP 401 + envelope `code=10300` | **Configuration error** — ops alert; no retry; not blamed on the caller |
 | Gateway rejects the caller's credential | HTTP 401 + envelope `10200/10202` | Normal business flow, passed through to the caller |
+| Validation service itself unreachable/timing out (RPC failure) | HTTP 504 + envelope `10003` | Gateway surfaces a retryable infrastructure error to the caller, semantically separated from credential failure (v0.10.0, issue #22); retry/alert on the control plane |
 | Signature clock-window overflow / nonce replay | HTTP 401 + envelope `code=10300` | Configuration-error alert (suspected replay → security audit) |
 
 ## 8. Audit and Compliance
