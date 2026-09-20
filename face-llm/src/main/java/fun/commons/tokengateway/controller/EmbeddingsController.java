@@ -1,6 +1,7 @@
 package fun.commons.tokengateway.controller;
 
 import fun.commons.tokengateway.contract.DistributeVO;
+import fun.commons.tokengateway.config.UpstreamPassthroughProperties;
 import fun.commons.tokengateway.relay.AccessLogReporter;
 import fun.commons.tokengateway.relay.RelayOrchestrator;
 import fun.commons.tokengateway.relay.TokenUsage;
@@ -8,6 +9,7 @@ import fun.commons.tokengateway.relay.TokenUsageExtractor;
 import fun.commons.tokengateway.util.ClientIpResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -43,6 +45,8 @@ public class EmbeddingsController {
     private final WebClient.Builder webClientBuilder;
     /** 客户端 IP 解析 (issue #27): token-validate clientIp 填充, 信任代理策略可配. */
     private final ClientIpResolver clientIpResolver;
+    /** 上游头透传白名单 (issue #32): 默认空 = 不透传任何头. */
+    private final UpstreamPassthroughProperties upstreamPassthroughProps;
 
     @PostMapping(value = "/v1/embeddings")
     public Mono<ResponseEntity<Object>> embeddings(
@@ -52,21 +56,22 @@ public class EmbeddingsController {
             ServerWebExchange exchange
     ) {
         String clientIp = clientIpResolver.resolve(exchange);
+        HttpHeaders clientHeaders = exchange.getRequest().getHeaders();
         return Mono.deferContextual(cv -> doEmbeddings(authorization, xApiKey, body,
                 cv.getOrDefault(fun.commons.tokengateway.trace.TraceWebFilter.CONTEXT_KEY,
-                        (String) null), clientIp));
+                        (String) null), clientIp, clientHeaders));
     }
 
     private Mono<ResponseEntity<Object>> doEmbeddings(
             String authorization, String xApiKey, Map<String, Object> body, String traceId,
-            String clientIp) {
+            String clientIp, HttpHeaders clientHeaders) {
         String apiKey = extractApiKey(authorization, xApiKey);
         String model = resolveModel(body);
         int estPromptTokens = estimateInputTokens(body);
         long startNs = System.nanoTime();
         return orchestrator.prepare(apiKey, model, estPromptTokens, EST_COMPLETION_TOKENS, null,
                 traceId, clientIp)
-                .flatMap(prepared -> invokeUpstream(prepared.channel(), body)
+                .flatMap(prepared -> invokeUpstream(prepared.channel(), body, clientHeaders)
                         .doOnNext(resp -> {
                             TokenUsage u = TokenUsageExtractor.fromOpenAi(resp);
                             int latency = elapsedMs(startNs);
@@ -96,12 +101,16 @@ public class EmbeddingsController {
     }
 
     @SuppressWarnings("unchecked")
-    private Mono<Map<String, Object>> invokeUpstream(DistributeVO channel, Map<String, Object> body) {
+    private Mono<Map<String, Object>> invokeUpstream(DistributeVO channel, Map<String, Object> body,
+                                                     HttpHeaders clientHeaders) {
         String url = channel.getBaseUrl().replaceAll("/+$", "") + UPSTREAM_ENDPOINT;
-        return webClientBuilder.build().post()
+        WebClient.RequestBodySpec spec = webClientBuilder.build().post()
                 .uri(url)
                 .header("Authorization", "Bearer " + channel.getApiKey())
-                .header("Accept", MediaType.APPLICATION_JSON_VALUE)
+                .header("Accept", MediaType.APPLICATION_JSON_VALUE);
+        // 上游头透传白名单 (issue #32): 协议头先设, 命中白名单的客户端头追加
+        upstreamPassthroughProps.applyTo(spec, clientHeaders);
+        return spec
                 .bodyValue(body)
                 .retrieve()
                 .bodyToMono((Class<Map<String, Object>>) (Class<?>) Map.class)

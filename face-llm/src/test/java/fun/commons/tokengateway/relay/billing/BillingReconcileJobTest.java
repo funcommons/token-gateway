@@ -251,4 +251,40 @@ class BillingReconcileJobTest {
         assertThatCode(() -> job.reconcile()).doesNotThrowAnyException();
         verify(pendingStore, never()).remove(any());
     }
+
+    @Test
+    @DisplayName("issue #31 面归属: 配了 task.billing.path-prefix, 重放 settle 仍走通用前缀 (不串 task 面)")
+    void replayStaysOnGenericPrefixWhenTaskPrefixConfigured() throws Exception {
+        MockWebServer genericBackend = new MockWebServer();
+        genericBackend.start();
+        try {
+            var legacy = new GatewayProperties();
+            legacy.setUrl(genericBackend.url("/").toString().replaceAll("/$", ""));
+            var spi = new TokenGatewayProperties();
+            spi.getTask().getBilling().setPathPrefix("/v1/internal/billing/task");
+            var genericApi = new HttpBillingApi(WebClient.builder(),
+                    new CapabilityEndpoints(spi, legacy), new RpcInternalAuth(legacy));
+            var isolatedStore = mock(BillingPendingStore.class);
+            when(isolatedStore.remove(any())).thenReturn(Mono.just(1L));
+            BillingPendingRecord record = BillingPendingRecord.forSettle(
+                    "pc-31", "req-31", null, 10, 2, 0, 0, null, null, 100, null);
+            when(isolatedStore.duePending(anyInt())).thenReturn(Flux.just(entry(record)));
+            var isolatedJob = new BillingReconcileJob(isolatedStore, genericApi,
+                    new BillingReconcileProperties());
+
+            genericBackend.enqueue(new MockResponse()
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("{\"code\":0,\"data\":{\"creditConsumed\":0.5}}"));
+
+            isolatedJob.reconcile();
+
+            verify(isolatedStore, timeout(2000)).remove(any());
+            RecordedRequest request = genericBackend.takeRequest(2, TimeUnit.SECONDS);
+            assertThat(request).isNotNull();
+            // task 前缀已配, 重放仍必须走通用前缀 (LLM 面契约不串 task 面)
+            assertThat(request.getPath()).isEqualTo("/api/v1/internal/billing/settle");
+        } finally {
+            genericBackend.shutdown();
+        }
+    }
 }

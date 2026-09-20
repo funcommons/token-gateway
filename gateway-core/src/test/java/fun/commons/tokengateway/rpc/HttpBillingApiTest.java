@@ -156,4 +156,66 @@ class HttpBillingApiTest {
                 })
                 .verifyComplete();
     }
+
+    @Test
+    @DisplayName("issue #31: 任务族三端点走 task.billing.path-prefix 寻址")
+    void taskFamilyHitsTaskPrefix() throws Exception {
+        var spi = new TokenGatewayProperties();
+        spi.getTask().getBilling().setPathPrefix("/v1/internal/billing/task");
+        var legacy = new GatewayProperties();
+        legacy.setUrl(backend.url("/").toString().replaceAll("/$", ""));
+        legacy.setTimeout(Duration.ofSeconds(2));
+        api = new HttpBillingApi(WebClient.builder(),
+                new CapabilityEndpoints(spi, legacy), new RpcInternalAuth(legacy));
+
+        backend.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"preConsumeId\":\"pc-t\",\"success\":true}}"));
+        backend.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":null}"));
+        backend.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":null}"));
+
+        StepVerifier.create(api.preConsumeTask(PreConsumeRequest.builder().userId("u1").amount(7).build()))
+                .assertNext(resp -> assertThat(resp.isSuccess()).isTrue()).verifyComplete();
+        StepVerifier.create(api.settleTask(SettleRequest.builder().preConsumeId("pc-t").build()))
+                .expectNextCount(1).verifyComplete();
+        StepVerifier.create(api.refundTask(RefundRequest.builder().preConsumeId("pc-t").build()))
+                .expectNextCount(1).verifyComplete();
+
+        assertThat(backend.takeRequest().getPath()).isEqualTo("/v1/internal/billing/task/pre-consume");
+        assertThat(backend.takeRequest().getPath()).isEqualTo("/v1/internal/billing/task/settle");
+        assertThat(backend.takeRequest().getPath()).isEqualTo("/v1/internal/billing/task/refund");
+    }
+
+    @Test
+    @DisplayName("issue #31 面归属互斥: 配了 task 前缀, 通用族 settle 仍走通用前缀 (不串 task 面)")
+    void genericFamilyUnaffectedByTaskPrefix() throws Exception {
+        var spi = new TokenGatewayProperties();
+        spi.getTask().getBilling().setPathPrefix("/v1/internal/billing/task");
+        var legacy = new GatewayProperties();
+        legacy.setUrl(backend.url("/").toString().replaceAll("/$", ""));
+        legacy.setTimeout(Duration.ofSeconds(2));
+        api = new HttpBillingApi(WebClient.builder(),
+                new CapabilityEndpoints(spi, legacy), new RpcInternalAuth(legacy));
+
+        backend.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"creditConsumed\":0.5}}"));
+
+        StepVerifier.create(api.settle(SettleRequest.builder().preConsumeId("pc-1").build()))
+                .assertNext(resp -> assertThat(resp.isSuccess()).isTrue()).verifyComplete();
+
+        assertThat(backend.takeRequest().getPath()).isEqualTo("/api/v1/internal/billing/settle");
+    }
+
+    @Test
+    @DisplayName("issue #31 回归红线: task.billing 未配, 任务族路径 == 现全局前缀 (存量行为不变)")
+    void taskFamilyFallsBackToGlobalPrefixWhenUnconfigured() throws Exception {
+        backend.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":null}"));
+
+        StepVerifier.create(api.refundTask(RefundRequest.builder().preConsumeId("pc-1").build()))
+                .assertNext(resp -> assertThat(resp.isSuccess()).isTrue()).verifyComplete();
+
+        assertThat(backend.takeRequest().getPath()).isEqualTo("/api/v1/internal/billing/refund");
+    }
 }

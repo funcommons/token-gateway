@@ -3,11 +3,13 @@ package fun.commons.tokengateway.controller;
 import fun.commons.tokengateway.exception.RelayException;
 
 import fun.commons.tokengateway.contract.DistributeVO;
+import fun.commons.tokengateway.config.UpstreamPassthroughProperties;
 import fun.commons.tokengateway.format.FormatConverter;
 import fun.commons.tokengateway.relay.RelayOrchestrator;
 import fun.commons.tokengateway.util.ClientIpResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -38,6 +40,8 @@ public class CountTokensController {
     private final WebClient.Builder webClientBuilder;
     /** 客户端 IP 解析 (issue #27): token-validate clientIp 填充, 信任代理策略可配. */
     private final ClientIpResolver clientIpResolver;
+    /** 上游头透传白名单 (issue #32): 默认空 = 不透传任何头. */
+    private final UpstreamPassthroughProperties upstreamPassthroughProps;
 
     @PostMapping("/v1/messages/count_tokens")
     public Mono<Map<String, Object>> countTokens(
@@ -46,6 +50,7 @@ public class CountTokensController {
             @RequestBody Map<String, Object> body,
             ServerWebExchange exchange
     ) {
+        HttpHeaders clientHeaders = exchange.getRequest().getHeaders();
         if (body == null || body.isEmpty()) {
             return Mono.error(new RelayException(400,
                     fun.commons.tokengateway.framework.ApiCode.REQUIRED_MISSING.getCode(), "请求体为空"));
@@ -68,11 +73,14 @@ public class CountTokensController {
                                 "count_tokens 仅在 anthropic 协议上游支持, 当前上游: " + channel.getProtocol()));
                     }
                     String url = channel.getBaseUrl().replaceAll("/+$", "") + COUNT_TOKENS_ENDPOINT;
-                    return webClientBuilder.build().post()
+                    WebClient.RequestBodySpec spec = webClientBuilder.build().post()
                             .uri(url)
                             .header("x-api-key", channel.getApiKey())
                             .header("anthropic-version", "2023-06-01")
-                            .header("Accept", MediaType.APPLICATION_JSON_VALUE)
+                            .header("Accept", MediaType.APPLICATION_JSON_VALUE);
+                    // 上游头透传白名单 (issue #32): 协议头先设, 命中白名单的客户端头追加
+                    upstreamPassthroughProps.applyTo(spec, clientHeaders);
+                    return spec
                             .bodyValue(body)
                             .retrieve()
                             .bodyToMono(Map.class)

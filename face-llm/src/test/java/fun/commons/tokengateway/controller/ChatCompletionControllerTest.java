@@ -87,7 +87,8 @@ class ChatCompletionControllerTest {
                 moderationApi,
                 builder,
                 failoverProps,
-                new ClientIpResolver(new ClientIpProperties()));
+                new ClientIpResolver(new ClientIpProperties()),
+                new fun.commons.tokengateway.config.UpstreamPassthroughProperties());
     }
 
     @AfterEach
@@ -448,6 +449,195 @@ class ChatCompletionControllerTest {
         assertThat(settleBody).contains("\"cacheReadTokens\":4");
         assertThat(settleBody).contains("\"reasoningTokens\":3");
         assertThat(settleBody).contains("\"audioTokens\":8");
+    }
+
+    @Test
+    @DisplayName("流式无 usage 正常完成: completion 按已吐内容 chars/4 估算, 不再固定 256 (issue #33)")
+    void streamNoUsageSettlesByEmittedChars() throws Exception {
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"valid\":true,\"tokenId\":\"1\","
+                        + "\"userId\":\"2\",\"tenantId\":\"3\"}}"));
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"channelId\":\"c1\","
+                        + "\"baseUrl\":\"" + upstreamServer.url("/").toString().replaceAll("/$", "") + "\","
+                        + "\"apiKey\":\"sk-up\",\"protocol\":\"openai\",\"billingMode\":\"PLATFORM\"}}"));
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"success\":true,\"preConsumeId\":\"pc-1\"}}"));
+        // "Hello," (6) + " world!" (7) = 13 chars → completion = 13/4 = 3 (旧逻辑固定 256)
+        upstreamServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_END)
+                .setBody("data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}\n\n"
+                        + "data: {\"choices\":[{\"delta\":{\"content\":\"Hello,\"}}]}\n\n"
+                        + "data: {\"choices\":[{\"delta\":{\"content\":\" world!\"}}]}\n\n"
+                        + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+                        + "data: [DONE]\n\n"));
+        backendServer.enqueue(jsonOk());                            // settle (fire-and-forget)
+        backendServer.enqueue(jsonOk());                            // access-log (fire-and-forget)
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", "gpt-4o");
+        body.put("stream", true);
+        body.put("messages", List.of(Map.of("role", "user", "content", "hi")));
+
+        java.util.concurrent.atomic.AtomicReference<
+                org.springframework.http.ResponseEntity<Object>> entityRef = new java.util.concurrent.atomic.AtomicReference<>();
+        StepVerifier.create(controller.complete("Bearer sk-test", null, body, exchange()))
+                .assertNext(entity -> {
+                    assertThat(entity.getStatusCode().value()).isEqualTo(200);
+                    entityRef.set(entity);
+                })
+                .verifyComplete();
+
+        @SuppressWarnings("unchecked")
+        Flux<org.springframework.http.codec.ServerSentEvent<String>> flux =
+                (Flux<org.springframework.http.codec.ServerSentEvent<String>>) entityRef.get().getBody();
+        var events = flux.filter(e -> e.data() != null && !e.data().isBlank())
+                .collectList()
+                .block(java.time.Duration.ofSeconds(10));
+        assertThat(events).isNotNull();
+
+        String settleBody = null;
+        for (int i = 0; i < 6 && settleBody == null; i++) {
+            var recorded = backendServer.takeRequest(3, java.util.concurrent.TimeUnit.SECONDS);
+            if (recorded == null) {
+                break;
+            }
+            if (recorded.getPath().contains("/billing/settle")) {
+                settleBody = recorded.getBody().readUtf8();
+            }
+        }
+        assertThat(settleBody).isNotNull();
+        // prompt: 用户内容 "hi" len/4=0 → max(1,0)=1; completion: 13 chars/4 = 3
+        assertThat(settleBody).contains("\"actualPromptTokens\":1");
+        assertThat(settleBody).contains("\"actualCompletionTokens\":3");
+        assertThat(settleBody).doesNotContain("\"actualCompletionTokens\":256");
+    }
+
+    @Test
+    @DisplayName("流式空载荷 (纯 [DONE]): completion 兜底收 1 防零额, prompt 仍 len/4 (issue #33)")
+    void streamEmptyDoneOnlySettlesCompletionOne() throws Exception {
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"valid\":true,\"tokenId\":\"1\","
+                        + "\"userId\":\"2\",\"tenantId\":\"3\"}}"));
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"channelId\":\"c1\","
+                        + "\"baseUrl\":\"" + upstreamServer.url("/").toString().replaceAll("/$", "") + "\","
+                        + "\"apiKey\":\"sk-up\",\"protocol\":\"openai\",\"billingMode\":\"PLATFORM\"}}"));
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"success\":true,\"preConsumeId\":\"pc-1\"}}"));
+        upstreamServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_END)
+                .setBody("data: [DONE]\n\n"));
+        backendServer.enqueue(jsonOk());                            // settle (fire-and-forget)
+        backendServer.enqueue(jsonOk());                            // access-log (fire-and-forget)
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", "gpt-4o");
+        body.put("stream", true);
+        body.put("messages", List.of(Map.of("role", "user", "content", "hi")));
+
+        java.util.concurrent.atomic.AtomicReference<
+                org.springframework.http.ResponseEntity<Object>> entityRef = new java.util.concurrent.atomic.AtomicReference<>();
+        StepVerifier.create(controller.complete("Bearer sk-test", null, body, exchange()))
+                .assertNext(entity -> {
+                    assertThat(entity.getStatusCode().value()).isEqualTo(200);
+                    entityRef.set(entity);
+                })
+                .verifyComplete();
+
+        @SuppressWarnings("unchecked")
+        Flux<org.springframework.http.codec.ServerSentEvent<String>> flux =
+                (Flux<org.springframework.http.codec.ServerSentEvent<String>>) entityRef.get().getBody();
+        flux.collectList().block(java.time.Duration.ofSeconds(10));
+
+        String settleBody = null;
+        for (int i = 0; i < 6 && settleBody == null; i++) {
+            var recorded = backendServer.takeRequest(3, java.util.concurrent.TimeUnit.SECONDS);
+            if (recorded == null) {
+                break;
+            }
+            if (recorded.getPath().contains("/billing/settle")) {
+                settleBody = recorded.getBody().readUtf8();
+            }
+        }
+        assertThat(settleBody).isNotNull();
+        assertThat(settleBody).contains("\"actualPromptTokens\":1");
+        assertThat(settleBody).contains("\"actualCompletionTokens\":1");
+    }
+
+    @Test
+    @DisplayName("流式 anthropic 上游 (OpenAI→Anthropic 转换): text/thinking delta 均 chars 估算 (issue #33)")
+    void streamAnthropicUpstreamNoUsageConvertedSettlesByEmittedChars() throws Exception {
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"valid\":true,\"tokenId\":\"1\","
+                        + "\"userId\":\"2\",\"tenantId\":\"3\"}}"));
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"channelId\":\"c1\","
+                        + "\"baseUrl\":\"" + upstreamServer.url("/").toString().replaceAll("/$", "") + "\","
+                        + "\"apiKey\":\"sk-up\",\"protocol\":\"anthropic\",\"billingMode\":\"PLATFORM\"}}"));
+        backendServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"success\":true,\"preConsumeId\":\"pc-1\"}}"));
+        // 喂给累加器的是上游原始 Anthropic 形状: thinking (3) + text (8) = 11 chars → 11/4 = 2
+        upstreamServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_END)
+                .setBody("event: message_start\ndata: {\"type\":\"message_start\","
+                        + "\"message\":{\"id\":\"m1\",\"role\":\"assistant\",\"content\":[]}}\n\n"
+                        + "event: content_block_delta\ndata: {\"type\":\"content_block_delta\","
+                        + "\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"ijk\"}}\n\n"
+                        + "event: content_block_delta\ndata: {\"type\":\"content_block_delta\","
+                        + "\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"abcdefgh\"}}\n\n"
+                        + "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"));
+        backendServer.enqueue(jsonOk());                            // settle (fire-and-forget)
+        backendServer.enqueue(jsonOk());                            // access-log (fire-and-forget)
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", "gpt-4o");
+        body.put("stream", true);
+        body.put("messages", List.of(Map.of("role", "user", "content", "hi")));
+
+        java.util.concurrent.atomic.AtomicReference<
+                org.springframework.http.ResponseEntity<Object>> entityRef = new java.util.concurrent.atomic.AtomicReference<>();
+        StepVerifier.create(controller.complete("Bearer sk-test", null, body, exchange()))
+                .assertNext(entity -> {
+                    assertThat(entity.getStatusCode().value()).isEqualTo(200);
+                    entityRef.set(entity);
+                })
+                .verifyComplete();
+
+        @SuppressWarnings("unchecked")
+        Flux<org.springframework.http.codec.ServerSentEvent<String>> flux =
+                (Flux<org.springframework.http.codec.ServerSentEvent<String>>) entityRef.get().getBody();
+        var events = flux.filter(e -> e.data() != null && !e.data().isBlank())
+                .collectList()
+                .block(java.time.Duration.ofSeconds(10));
+        assertThat(events).isNotEmpty();
+
+        String settleBody = null;
+        for (int i = 0; i < 6 && settleBody == null; i++) {
+            var recorded = backendServer.takeRequest(3, java.util.concurrent.TimeUnit.SECONDS);
+            if (recorded == null) {
+                break;
+            }
+            if (recorded.getPath().contains("/billing/settle")) {
+                settleBody = recorded.getBody().readUtf8();
+            }
+        }
+        assertThat(settleBody).isNotNull();
+        assertThat(settleBody).contains("\"actualPromptTokens\":1");
+        assertThat(settleBody).contains("\"actualCompletionTokens\":2");
+        assertThat(settleBody).doesNotContain("\"actualCompletionTokens\":256");
     }
 
     private MockResponse jsonOk() {

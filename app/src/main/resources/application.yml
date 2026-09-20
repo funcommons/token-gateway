@@ -61,6 +61,16 @@ token-gateway:
     # lotask submit 的 task_type 粒度: modality(默认, 零感知) | model (remote Worker 按
     # modelCode 拉单时配 model, issue #13; 切换后 timeouts 键须同步按模型编码建)
     # submit-task-type: modality
+    # 任务计费面 (issue #31): 任务三端点独立寻址, 与 LLM 面计费契约互斥
+    # (任务=全额 amount 直传+settle 确认制; LLM=token 估价+settle 四维重算退差)。
+    # 逐字段缺省回退 token-gateway.billing.* 对应值 —— 不配即行为与现状一致。
+    # (注意: 键必须随值一起注释 —— 空节点 billing: 会被 binder 当空字符串标量绑定失败)
+    # billing:
+    #   url: http://localhost:9400            # 缺省回退 billing.url
+    #   path-prefix: /v1/internal/billing/task # 任务三端点前缀; 缺省回退 billing.path-prefix (通用 /api/v1/internal/billing)
+    #   auth: jwt                              # jwt | key | none; 缺省回退 billing.auth
+    #   jwt-secret: ${TG_TASK_BILLING_JWT}     # 或 internal-token: 平移态形态; 缺省回退 billing 凭证
+    #   timeout: 5s                            # 缺省回退 billing.timeout
     timeouts:
       video: 2h
       image: 30m
@@ -132,6 +142,17 @@ gateway:
   # error-passthrough-codes:
   #   4090: 403
   #   10601: 402
+
+  # 上游请求头透传白名单 (issue #32): 默认空 = 不透传任何头 (fail-closed, 出站请求与历史版本
+  # 逐字节一致)。开启后对流式/非流式、OpenAI/Anthropic 全部 LLM 上游调用点生效, 用途如
+  # mock 上游 chaos 故障注入 (X-Mock-Fault: stream-cut-after=2):
+  # upstream:
+  #   passthrough-headers:
+  #     - X-Mock-Fault     # 精确名
+  #     - X-Mock-*         # 前缀通配 (以 * 结尾)
+  # 黑名单硬编码、优先于白名单: Authorization / Cookie / Set-Cookie / Host / Content-Length /
+  # X-API-Key / X-Internal-* (内部签名族) / Accept / anthropic-version 配置了也不透传;
+  # 多值头只取第一个值 (防走私), 头名匹配大小写不敏感。
 
   # THMP 契约面影子双跑 (22 号 S2-W1): enabled=true 后旧 distribute 与中台 resolve 并行比对,
   # 结果只埋点不执行; secret 环境变量注入 (thmp_tenants 契约租户, 禁入仓).

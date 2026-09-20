@@ -275,4 +275,82 @@ class StreamUsageAccumulatorTest {
         assertThat(acc.result().cachedTokens()).isZero();
         assertThat(acc.result().cacheCreationTokens()).isNull();
     }
+
+    // ---- issue #33: 已吐内容 chars 统计 (内容估算法兜底) ----
+
+    @Test
+    @DisplayName("issue #33 OpenAI delta.content: 多帧 chars 累计, hasUsage 仍 false")
+    void openaiDeltaCharsAccumulated() {
+        StreamUsageAccumulator acc = new StreamUsageAccumulator();
+        acc.accept("data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}\n\n");
+        acc.accept("data: {\"choices\":[{\"delta\":{\"content\":\"Hello,\"}}]}\n\n");
+        acc.accept("data: {\"choices\":[{\"delta\":{\"content\":\" world!\"}}]}\n\n");
+        acc.accept("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n");
+        acc.accept("data: [DONE]\n\n");
+
+        assertThat(acc.hasUsage()).isFalse();
+        // 6 + 7 = 13; 空串与无 content 帧计 0
+        assertThat(acc.emittedChars()).isEqualTo(13);
+        assertThat(acc.result().promptTokens()).isZero();
+        assertThat(acc.result().completionTokens()).isZero();
+    }
+
+    @Test
+    @DisplayName("issue #33 Anthropic text_delta: chars 累计 (event: 行与空帧跳过)")
+    void anthropicTextDeltaCharsAccumulated() {
+        StreamUsageAccumulator acc = new StreamUsageAccumulator();
+        acc.accept("event: message_start\ndata: {\"type\":\"message_start\","
+                + "\"message\":{\"id\":\"m1\",\"role\":\"assistant\",\"content\":[]}}\n\n");
+        acc.accept("event: content_block_delta\ndata: {\"type\":\"content_block_delta\","
+                + "\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"你\"}}\n\n");
+        acc.accept("event: content_block_delta\ndata: {\"type\":\"content_block_delta\","
+                + "\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"好\"}}\n\n");
+        acc.accept("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n");
+
+        assertThat(acc.hasUsage()).isFalse();
+        // message_start/message_stop 无内容标记零解析; text_delta 1+1=2
+        assertThat(acc.emittedChars()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("issue #33 thinking_delta 与 input_json_delta 也计入 (都是上游真实 token)")
+    void thinkingAndInputJsonDeltaCharsCounted() {
+        StreamUsageAccumulator acc = new StreamUsageAccumulator();
+        acc.accept("event: content_block_delta\ndata: {\"type\":\"content_block_delta\","
+                + "\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"abc\"}}\n\n");
+        acc.accept("event: content_block_delta\ndata: {\"type\":\"content_block_delta\","
+                + "\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"a\\\":1}\"}}\n\n");
+
+        assertThat(acc.hasUsage()).isFalse();
+        // thinking 3 + partial_json 7
+        assertThat(acc.emittedChars()).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("issue #33 回归红线: 有真实 usage 帧, result() 仍为真实值 (emittedChars 不参与)")
+    void usageFrameWinsOverEmittedChars() {
+        StreamUsageAccumulator acc = new StreamUsageAccumulator();
+        acc.accept("data: {\"choices\":[{\"delta\":{\"content\":\"hello world\"}}]}\n\n");
+        acc.accept("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":7}}\n\n");
+        acc.accept("data: [DONE]\n\n");
+
+        assertThat(acc.hasUsage()).isTrue();
+        assertThat(acc.emittedChars()).isEqualTo(11);
+        // 红线: 计费取真实 usage, 不受已吐 chars 影响
+        assertThat(acc.result().promptTokens()).isEqualTo(12);
+        assertThat(acc.result().completionTokens()).isEqualTo(7);
+    }
+
+    @Test
+    @DisplayName("issue #33 垃圾帧/纯 event 行/纯 [DONE]: 零计数不抛")
+    void garbageFramesZeroCount() {
+        StreamUsageAccumulator acc = new StreamUsageAccumulator();
+        acc.accept("event: ping\n\n");
+        acc.accept("data: [DONE]\n\n");
+        acc.accept("garbage-not-json");
+        acc.accept(": heartbeat comment\n\n");
+
+        assertThat(acc.hasUsage()).isFalse();
+        assertThat(acc.emittedChars()).isZero();
+    }
 }

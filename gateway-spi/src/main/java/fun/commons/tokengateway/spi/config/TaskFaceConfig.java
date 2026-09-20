@@ -31,6 +31,12 @@ public class TaskFaceConfig {
     /** lotask4j 平台对接 (任务状态托管方, 零改造接入). */
     private LotaskFaceConfig lotask = new LotaskFaceConfig();
 
+    /**
+     * 任务计费面 (issue #31): 任务三端点独立寻址, 与 LLM 面计费契约互斥
+     * (全额 amount 直传 vs token 估价重算). 逐字段缺省回退 {@code token-gateway.billing.*}.
+     */
+    private TaskBillingFaceConfig billing = new TaskBillingFaceConfig();
+
     /** 路由快照 AES-GCM 加密密钥 (环境变量注入; 仅网关与自写 Worker 持有, 平台只见密文). */
     private String snapshotCipherKey;
 

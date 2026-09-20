@@ -22,6 +22,19 @@ import java.util.function.Consumer;
  *       不再合并进 cachedTokens</li>
  * </ul>
  * <p>线程模型: 帧按 Reactor 串行推送, 字段用普通字段即可 (细分维用 Long 以区分 "无源" 与 0).
+ *
+ * <p>issue #33 内容估算法: 正常完成但末帧无 usage 的流, completion 按「已吐内容 chars/4」
+ * 兜底 (与 prompt len/4 同口径). accept() 重塑为两级门控:
+ * <ul>
+ *   <li>帧含 {@code "usage"} → 既有真实 usage 解析, 行为与改造前逐字节一致;</li>
+ *   <li>帧含内容 delta 标记 → 累加 {@link #emittedChars()} (content 与 thinking/reasoning/
+ *       tool JSON 增量都算, 均为上游真实产生的 token). 喂入帧恒为上游原始形状
+ *       (SsePassthroughInvoker 在协议转换前消费), 故标记按双协议形状识别:
+ *       OpenAI {@code choices[].delta.content}, Anthropic {@code text_delta /
+ *       thinking_delta / input_json_delta};</li>
+ *   <li>其余帧零解析直接返回 (热点路径不回退); 解析失败静默跳过不计数不打 WARN (每帧都打会刷屏).</li>
+ * </ul>
+ * 有真实 usage 时 emittedChars 不参与任何计算 (hasUsage 路径回归红线).
  */
 @Slf4j
 public class StreamUsageAccumulator implements Consumer<String> {
@@ -34,28 +47,43 @@ public class StreamUsageAccumulator implements Consumer<String> {
     private Long audioTokens;
     private Long cacheCreationTokens;
     private boolean hasUsage;
+    /** issue #33: 已吐内容字符累计 (usage 兜底估算用, chars/4 与 prompt 同口径). */
+    private int emittedChars;
 
     @Override
     public void accept(String frame) {
-        if (frame == null || !frame.contains("\"usage\"") && !frame.contains("\"usage\":")) {
+        if (frame == null) {
+            return;
+        }
+        // 两级门控: 只做 contains 短路, 不含任何标记的帧零解析直接返回
+        boolean usageFrame = frame.contains("\"usage\"");
+        boolean deltaFrame = !usageFrame && isContentDeltaFrame(frame);
+        if (!usageFrame && !deltaFrame) {
             return;
         }
         String data = extractDataPayload(frame);
         if (data == null || data.isBlank() || "[DONE]".equals(data.trim())) {
             return;
         }
-        log.debug("[StreamUsage] frame data (first 200 chars)={}", data.length() > 200 ? data.substring(0, 200) : data);
         Map<String, Object> chunk;
         try {
             chunk = com.alibaba.fastjson2.JSON.parseObject(data, Map.class);
         } catch (Exception e) {
+            // 解析失败静默跳过 (不计数不打 WARN, 每帧都打会刷屏)
             log.debug("[StreamUsage] JSON parse failed: {}", e.getMessage());
             return;
         }
-        parseOpenAiUsage(chunk);
-        parseAnthropicUsage(chunk);
-        log.debug("[StreamUsage] post-parse hasUsage={}, prompt={}, completion={}, cached={}, reasoning={}, audio={}, cacheCreation={}",
-                hasUsage, promptTokens, completionTokens, cachedTokens, reasoningTokens, audioTokens, cacheCreationTokens);
+        if (usageFrame) {
+            // 真实 usage 解析: 与 #33 改造前逐字节一致
+            log.debug("[StreamUsage] frame data (first 200 chars)={}", data.length() > 200 ? data.substring(0, 200) : data);
+            parseOpenAiUsage(chunk);
+            parseAnthropicUsage(chunk);
+            log.debug("[StreamUsage] post-parse hasUsage={}, prompt={}, completion={}, cached={}, reasoning={}, audio={}, cacheCreation={}",
+                    hasUsage, promptTokens, completionTokens, cachedTokens, reasoningTokens, audioTokens, cacheCreationTokens);
+        }
+        if (deltaFrame) {
+            accumulateEmittedChars(chunk);
+        }
     }
 
     /**
@@ -63,6 +91,13 @@ public class StreamUsageAccumulator implements Consumer<String> {
      */
     public boolean hasUsage() {
         return hasUsage;
+    }
+
+    /**
+     * issue #33: 已吐内容字符累计 (hasUsage=true 时不参与任何计算).
+     */
+    public int emittedChars() {
+        return emittedChars;
     }
 
     public TokenUsage result() {
@@ -155,6 +190,52 @@ public class StreamUsageAccumulator implements Consumer<String> {
                 hasUsage = true;
             }
         }
+    }
+
+    /**
+     * issue #33: 内容 delta 帧识别 (仅 contains 短路, 双协议形状 — 喂入帧为上游原始形状,
+     * 协议转换发生在帧消费之后, 见 SsePassthroughInvoker#transformFrames).
+     */
+    private static boolean isContentDeltaFrame(String frame) {
+        // OpenAI: choices[].delta.content;
+        // Anthropic: content_block_delta.delta.{text_delta, thinking_delta, input_json_delta}
+        return (frame.contains("\"delta\"") && frame.contains("\"content\""))
+                || frame.contains("\"text_delta\"")
+                || frame.contains("\"thinking_delta\"")
+                || frame.contains("\"input_json_delta\"");
+    }
+
+    /**
+     * issue #33: 累加已吐内容 chars — content 与 thinking/reasoning 文本都算 (均为上游
+     * 真实产生的 token), tool 调用的 partial_json 增量同理; 空串/null 计 0, 异常静默跳过.
+     */
+    private void accumulateEmittedChars(Map<String, Object> chunk) {
+        try {
+            int n = 0;
+            // OpenAI shape: choices[].delta.{content, reasoning_content, reasoning}
+            if (chunk.get("choices") instanceof java.util.List<?> choices) {
+                for (Object c : choices) {
+                    if (c instanceof Map<?, ?> choice && choice.get("delta") instanceof Map<?, ?> delta) {
+                        n += stringLen(delta.get("content"));
+                        n += stringLen(delta.get("reasoning_content"));
+                        n += stringLen(delta.get("reasoning"));
+                    }
+                }
+            }
+            // Anthropic shape: content_block_delta.delta.{text, thinking, partial_json}
+            if (chunk.get("delta") instanceof Map<?, ?> delta) {
+                n += stringLen(delta.get("text"));
+                n += stringLen(delta.get("thinking"));
+                n += stringLen(delta.get("partial_json"));
+            }
+            emittedChars += n;
+        } catch (Exception e) {
+            log.debug("[StreamUsage] emitted chars accumulate skipped: {}", e.getMessage());
+        }
+    }
+
+    private static int stringLen(Object v) {
+        return v instanceof String s ? s.length() : 0;
     }
 
     /** creation 跨帧累加 (保留既有 += 语义, 含 message_start 首帧自 0 起累). */

@@ -3,6 +3,7 @@ package fun.commons.tokengateway.controller;
 import fun.commons.tokengateway.exception.RelayException;
 
 import fun.commons.tokengateway.contract.DistributeVO;
+import fun.commons.tokengateway.config.UpstreamPassthroughProperties;
 import fun.commons.tokengateway.contract.ModerationAuditRequest;
 import fun.commons.tokengateway.format.FormatConverter;
 import fun.commons.tokengateway.format.OpenAiSseConverter;
@@ -18,6 +19,7 @@ import fun.commons.tokengateway.util.ChatTokenEstimator;
 import fun.commons.tokengateway.util.ClientIpResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -61,6 +63,8 @@ public class ChatCompletionController {
     private final FailoverProperties failoverProps;
     /** 客户端 IP 解析 (issue #27): token-validate clientIp 填充, 信任代理策略可配. */
     private final ClientIpResolver clientIpResolver;
+    /** 上游头透传白名单 (issue #32): 默认空 = 不透传任何头. */
+    private final UpstreamPassthroughProperties upstreamPassthroughProps;
 
     @PostMapping(value = "/v1/chat/completions")
     public Mono<org.springframework.http.ResponseEntity<Object>> complete(
@@ -70,14 +74,15 @@ public class ChatCompletionController {
             ServerWebExchange exchange
     ) {
         String clientIp = clientIpResolver.resolve(exchange);
+        HttpHeaders clientHeaders = exchange.getRequest().getHeaders();
         return Mono.deferContextual(cv -> doComplete(authorization, xApiKey, body,
                 cv.getOrDefault(fun.commons.tokengateway.trace.TraceWebFilter.CONTEXT_KEY,
-                        (String) null), clientIp));
+                        (String) null), clientIp, clientHeaders));
     }
 
     private Mono<org.springframework.http.ResponseEntity<Object>> doComplete(
             String authorization, String xApiKey, Map<String, Object> body, String traceId,
-            String clientIp) {
+            String clientIp, HttpHeaders clientHeaders) {
         String apiKey = extractApiKey(authorization, xApiKey);
         String model = resolveModel(body);
         String userContent = RelayOrchestrator.extractUserContent(body);
@@ -90,7 +95,7 @@ public class ChatCompletionController {
                     .map(prepared -> org.springframework.http.ResponseEntity.ok()
                             .contentType(MediaType.TEXT_EVENT_STREAM)
                             .body((Object) invokeUpstreamStream(prepared, RelayOrchestrator.applyMask(body, prepared.moderationSanitized()),
-                                    traceId, estPrompt, estCompletion)));
+                                    traceId, estPrompt, estCompletion, clientHeaders)));
         }
         long startNs = System.nanoTime();
         return orchestrator.prepare(apiKey, model, estPrompt, estCompletion, userContent, traceId,
@@ -103,7 +108,8 @@ public class ChatCompletionController {
                     List<String> failedChannels = new ArrayList<>();
                     List<SettleRequest.AttemptDetail> lossAttempts = new ArrayList<>();
                     return invokeNonStreamWithFailover(prepared, model, effectiveBody,
-                            estPrompt, estCompletion, failedChannels, 1, active, lossAttempts)
+                            estPrompt, estCompletion, failedChannels, 1, active, lossAttempts,
+                            clientHeaders)
                             .flatMap(resp -> {
                                 // 修复 P0: 轮换后须结算 active (新预扣); 旧 prepared 已被
                                 // failover 内 refund 退款, 用它会漏结算新预扣 (PENDING 挂账 + 用户白嫖)
@@ -206,7 +212,8 @@ public class ChatCompletionController {
     }
 
     @SuppressWarnings("unchecked")
-    private Mono<Map<String, Object>> invokeUpstreamNonStream(DistributeVO channel, Map<String, Object> body) {
+    private Mono<Map<String, Object>> invokeUpstreamNonStream(DistributeVO channel, Map<String, Object> body,
+                                                              HttpHeaders clientHeaders) {
         boolean isAnthropic = channel.getProtocol() != null
                 && "anthropic".equalsIgnoreCase(channel.getProtocol());
         String endpoint = isAnthropic ? "/v1/messages" : "/v1/chat/completions";
@@ -215,11 +222,15 @@ public class ChatCompletionController {
         Map<String, Object> upstreamBody = UpstreamModelMapper.applyModelMapping(channel,
                 isAnthropic ? formatConverter.openaiToAnthropic(body) : body);
 
-        return webClientBuilder.build().post()
+        WebClient.RequestBodySpec spec = webClientBuilder.build().post()
                 .uri(url)
                 .header(isAnthropic ? "x-api-key" : "Authorization",
                         isAnthropic ? channel.getApiKey() : "Bearer " + channel.getApiKey())
-                .header("Accept", MediaType.APPLICATION_JSON_VALUE)
+                .header("Accept", MediaType.APPLICATION_JSON_VALUE);
+        // 上游头透传白名单 (issue #32): 协议头先设, 命中白名单的客户端头追加
+        upstreamPassthroughProps.applyTo(spec, clientHeaders);
+
+        return spec
                 .bodyValue(upstreamBody)
                 .retrieve()
                 .bodyToMono((Class<Map<String, Object>>) (Class<?>) Map.class)
@@ -237,7 +248,8 @@ public class ChatCompletionController {
 
     private Flux<ServerSentEvent<String>> invokeUpstreamStream(
             RelayOrchestrator.PreparedRequest prepared,
-            Map<String, Object> body, String traceId, int estPrompt, int estCompletion) {
+            Map<String, Object> body, String traceId, int estPrompt, int estCompletion,
+            HttpHeaders clientHeaders) {
         long startNs = System.nanoTime();
         String model = String.valueOf(body.getOrDefault("model", ""));
         List<String> failedChannels = new ArrayList<>();
@@ -248,16 +260,17 @@ public class ChatCompletionController {
                 new AtomicReference<>(prepared);
         AtomicReference<fun.commons.tokengateway.relay.StreamUsageAccumulator> activeAcc =
                 new AtomicReference<>(new fun.commons.tokengateway.relay.StreamUsageAccumulator());
-        return streamAttempt(prepared, body, failedChannels, 1, estPrompt, estCompletion, active, activeAcc, lossAttempts)
+        return streamAttempt(prepared, body, failedChannels, 1, estPrompt, estCompletion, active, activeAcc, lossAttempts, clientHeaders)
                 .doOnComplete(() -> {
                     int latency = elapsedMs(startNs);
                     RelayOrchestrator.PreparedRequest current = active.get();
                     fun.commons.tokengateway.relay.StreamUsageAccumulator usageAcc = activeAcc.get();
                     fun.commons.tokengateway.relay.TokenUsage u = usageAcc.hasUsage()
-                            ? usageAcc.result() : estimateFallback(body);
-                    log.info("[ChatCompletion/stream] traceId={}, model={}, hasUsage={}, prompt={}, completion={}, cached={}",
+                            ? usageAcc.result()
+                            : estimateFallback(body, usageAcc.emittedChars());
+                    log.info("[ChatCompletion/stream] traceId={}, model={}, hasUsage={}, prompt={}, completion={}, cached={}, emittedChars={}",
                             traceId, model, usageAcc.hasUsage(),
-                            u.promptTokens(), u.completionTokens(), u.cachedTokens());
+                            u.promptTokens(), u.completionTokens(), u.cachedTokens(), usageAcc.emittedChars());
                     // issue #26: settle/access-log 携带 reasoning/audio/cacheCreation 细分留痕
                     orchestrator.settle(current, u, latency, lossAttempts)
                             .flatMap(credit -> accessLogReporter.reportSuccess(current, model, REQUEST_PATH,
@@ -303,7 +316,8 @@ public class ChatCompletionController {
             int estPrompt, int estCompletion,
             AtomicReference<RelayOrchestrator.PreparedRequest> active,
             AtomicReference<fun.commons.tokengateway.relay.StreamUsageAccumulator> activeAcc,
-            List<SettleRequest.AttemptDetail> lossAttempts) {
+            List<SettleRequest.AttemptDetail> lossAttempts,
+            HttpHeaders clientHeaders) {
         String model = String.valueOf(body.getOrDefault("model", ""));
         fun.commons.tokengateway.relay.StreamUsageAccumulator usageAcc =
                 new fun.commons.tokengateway.relay.StreamUsageAccumulator();
@@ -314,8 +328,8 @@ public class ChatCompletionController {
         // 发上游用渠道重映射后的 upstream_code, 客户端 model 仅用于路由/计费
         Map<String, Object> upstreamBody = UpstreamModelMapper.applyModelMapping(channel, withIncludeUsage(body));
         Flux<ServerSentEvent<String>> upstream = isAnthropicChannel(channel)
-                ? invokeAnthropicUpstream(channel, upstreamBody, usageAcc)
-                : sseInvoker.invokeStream(channel, upstreamBody, usageAcc);
+                ? invokeAnthropicUpstream(channel, upstreamBody, usageAcc, clientHeaders)
+                : sseInvoker.invokeStream(channel, upstreamBody, usageAcc, clientHeaders);
         return upstream
                 .doOnNext(e -> emitted.set(true))
                 .onErrorResume(err -> {
@@ -352,7 +366,7 @@ public class ChatCompletionController {
                                             failoverProps.withJitter(failoverProps.backoffMs(attempt)))))
                                     .thenMany(streamAttempt(next, body, failedChannels,
                                             attempt + 1, estPrompt, estCompletion, active, activeAcc,
-                                            lossAttempts)));
+                                            lossAttempts, clientHeaders)));
                 });
     }
 
@@ -365,9 +379,10 @@ public class ChatCompletionController {
             String model, Map<String, Object> body,
             int estPrompt, int estCompletion, List<String> failedChannels, int attempt,
             AtomicReference<RelayOrchestrator.PreparedRequest> active,
-            List<SettleRequest.AttemptDetail> lossAttempts) {
+            List<SettleRequest.AttemptDetail> lossAttempts,
+            HttpHeaders clientHeaders) {
         active.set(prepared);
-        return invokeUpstreamNonStream(prepared.channel(), body)
+        return invokeUpstreamNonStream(prepared.channel(), body, clientHeaders)
                 .onErrorResume(err -> {
                     if (!UpstreamErrorPolicy.isRetryable(err) || !failoverProps.shouldRetry(attempt)) {
                         // 终态失败: 健康计数由 AccessLogReporter.reportError 统一上报, 此处不重复
@@ -397,7 +412,7 @@ public class ChatCompletionController {
                                             failoverProps.withJitter(failoverProps.backoffMs(attempt)))))
                                     .then(invokeNonStreamWithFailover(next, model, body,
                                             estPrompt, estCompletion, failedChannels, attempt + 1, active,
-                                            lossAttempts)));
+                                            lossAttempts, clientHeaders)));
                 });
     }
 
@@ -416,22 +431,26 @@ public class ChatCompletionController {
     }
 
     /**
-     * 上游未吐 usage 帧的估算兜底: prompt 按消息文本 len/4, completion 固定 256 (对齐单体).
+     * 上游未吐 usage 帧的估算兜底 (issue #33 内容估算法): prompt 按用户内容 len/4,
+     * completion 按已吐内容 chars/4 (同口径; 0 字符也收 1 防零额漏洞), 其余维度 0.
+     * 仍 SUCCESS settle, 不退款.
      */
-    private static fun.commons.tokengateway.relay.TokenUsage estimateFallback(Map<String, Object> body) {
+    private static fun.commons.tokengateway.relay.TokenUsage estimateFallback(Map<String, Object> body, int emittedChars) {
         String content = RelayOrchestrator.extractUserContent(body);
         int prompt = content == null ? 0 : Math.max(1, content.length() / 4);
-        return new fun.commons.tokengateway.relay.TokenUsage(prompt, 256, 0);
+        return new fun.commons.tokengateway.relay.TokenUsage(prompt, Math.max(1, emittedChars / 4), 0);
     }
 
     private Flux<ServerSentEvent<String>> invokeAnthropicUpstream(
             DistributeVO channel, Map<String, Object> openaiBody,
-            fun.commons.tokengateway.relay.StreamUsageAccumulator usageAcc) {
+            fun.commons.tokengateway.relay.StreamUsageAccumulator usageAcc,
+            HttpHeaders clientHeaders) {
         Map<String, Object> anthropicBody = formatConverter.openaiToAnthropic(openaiBody);
         anthropicBody.put("stream", true);
         log.info("[Relay/Stream] OpenAI→Anthropic: channelId={}, model={}",
                 channel.getChannelId(), anthropicBody.get("model"));
-        return sseInvoker.invokeStreamAnthropic(channel, anthropicBody, new OpenAiSseConverter(), usageAcc);
+        return sseInvoker.invokeStreamAnthropic(channel, anthropicBody, new OpenAiSseConverter(), usageAcc,
+                clientHeaders);
     }
 
     private static boolean isAnthropicChannel(DistributeVO channel) {

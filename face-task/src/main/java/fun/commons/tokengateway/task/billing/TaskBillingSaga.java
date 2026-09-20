@@ -24,6 +24,10 @@ import java.time.Duration;
  * 无 token 估算 — estimatedPromptTokens/estimatedCompletionTokens 传 0,
  * 金额由 billing 面按 model 定价表裁决 (控制层决议 2026-09-01).
  *
+ * <p>面归属 (issue #31): 走 HttpBillingApi 任务族 (preConsumeTask/settleTask/refundTask),
+ * 寻址 {@code token-gateway.task.billing.*} (逐字段缺省回退通用 billing 前缀) ——
+ * 与 LLM 面计费契约互斥 (全额直传 vs token 估价重算), 不得混用通用族.
+ *
  * <p>退款幂等: pre_consume_id 为幂等键 (billing 面自身幂等), 网关侧再以
  * IdempotencyStore 去重防并发重复退款 (webhook 重投/对账补偿/超时钟三源触发).
  */
@@ -55,7 +59,7 @@ public class TaskBillingSaga {
      */
     public Mono<String> preConsumeFull(TokenValidateVO token, String channelId, String ownerType,
                                        String model, String requestId, Integer amount) {
-        return billingApi.preConsume(PreConsumeRequest.builder()
+        return billingApi.preConsumeTask(PreConsumeRequest.builder()
                         .tenantId(token.getTenantId())
                         .userId(token.getUserId())
                         .tokenId(token.getTokenId())
@@ -96,7 +100,7 @@ public class TaskBillingSaga {
                         log.info("[TaskBilling] 退款已执行过, 幂等跳过: preConsumeId={}", preConsumeId);
                         return Mono.empty();
                     }
-                    return billingApi.refund(RefundRequest.builder()
+                    return billingApi.refundTask(RefundRequest.builder()
                                     .preConsumeId(preConsumeId)
                                     .reason(reason)
                                     .requestId(requestId)
@@ -116,7 +120,7 @@ public class TaskBillingSaga {
         if (preConsumeId == null) {
             return Mono.empty();
         }
-        return billingApi.settle(SettleRequest.builder()
+        return billingApi.settleTask(SettleRequest.builder()
                         .preConsumeId(preConsumeId)
                         .success(true)
                         .requestId(requestId)

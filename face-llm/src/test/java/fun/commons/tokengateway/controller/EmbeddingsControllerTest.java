@@ -66,7 +66,8 @@ class EmbeddingsControllerTest {
                         new fun.commons.tokengateway.rpc.HttpAccessLogApi(builder, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props)),
                         fun.commons.tokengateway.relay.TestChannelHealthReporters.disabled()),
                 builder,
-                new ClientIpResolver(new ClientIpProperties()));
+                new ClientIpResolver(new ClientIpProperties()),
+                new fun.commons.tokengateway.config.UpstreamPassthroughProperties());
     }
 
     @AfterEach

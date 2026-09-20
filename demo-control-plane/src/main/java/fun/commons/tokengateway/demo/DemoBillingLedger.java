@@ -126,6 +126,10 @@ public class DemoBillingLedger {
     }
 
     private static BigDecimal estimate(PreConsumeRequest req) {
+        // 任务面金额直传 (issue #12/#31): amount 非空 = 接入方定价全额积分, 优先于 token 估算
+        if (req.getAmount() != null) {
+            return BigDecimal.valueOf(req.getAmount());
+        }
         if (req.getEstimatedPromptTokens() == 0 && req.getEstimatedCompletionTokens() == 0) {
             return TASK_FLAT_PRICE;
         }

@@ -79,7 +79,8 @@ class MessagesControllerTest {
                 new fun.commons.tokengateway.rpc.HttpModerationApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props), new fun.commons.tokengateway.spi.config.TokenGatewayProperties()),
                 b,
                 failoverProps,
-                new ClientIpResolver(clientIpProps));
+                new ClientIpResolver(clientIpProps),
+                new fun.commons.tokengateway.config.UpstreamPassthroughProperties());
     }
 
     @AfterEach
@@ -460,6 +461,165 @@ class MessagesControllerTest {
         assertThat(events).anyMatch(e -> e.data().contains("hello"));
         assertThat(upstream.getRequestCount()).isEqualTo(2);
         assertThat(backendPaths()).anyMatch(p -> p != null && p.contains("record-failure"));
+    }
+
+    @Test
+    @DisplayName("流式 anthropic 上游无 usage: completion 按已吐 text_delta chars/4 估算, 不再固定 256 (issue #33)")
+    void streamAnthropicNativeNoUsageSettlesByEmittedChars() throws Exception {
+        mockTokenOk();
+        mockDistribute("anthropic");
+        mockScanPass();
+        // "abcd" (4) + "efgh" (4) = 8 chars → completion = 8/4 = 2 (旧逻辑固定 256)
+        upstream.enqueue(new MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_END)
+                .setBody("event: message_start\ndata: {\"type\":\"message_start\","
+                        + "\"message\":{\"id\":\"m1\",\"role\":\"assistant\",\"content\":[]}}\n\n"
+                        + "event: content_block_delta\ndata: {\"type\":\"content_block_delta\","
+                        + "\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"abcd\"}}\n\n"
+                        + "event: content_block_delta\ndata: {\"type\":\"content_block_delta\","
+                        + "\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"efgh\"}}\n\n"
+                        + "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"));
+        backend.enqueue(jsonOk());                                  // settle (fire-and-forget)
+        backend.enqueue(jsonOk());                                  // access-log (fire-and-forget)
+
+        Map<String, Object> body = anthropicBody();
+        body.put("stream", true);
+
+        java.util.concurrent.atomic.AtomicReference<
+                org.springframework.http.ResponseEntity<Object>> entityRef =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        StepVerifier.create(controller.messages(null, "sk-ant-x", body, exchange()))
+                .assertNext(entity -> {
+                    assertThat(entity.getStatusCode().value()).isEqualTo(200);
+                    entityRef.set(entity);
+                })
+                .verifyComplete();
+
+        @SuppressWarnings("unchecked")
+        Flux<ServerSentEvent<String>> flux =
+                (Flux<ServerSentEvent<String>>) entityRef.get().getBody();
+        var events = flux.filter(e -> e.data() != null && !e.data().isBlank())
+                .collectList()
+                .block(java.time.Duration.ofSeconds(10));
+        assertThat(events).isNotEmpty();
+
+        String settleBody = settleBodyAfterDrain();
+        assertThat(settleBody).isNotNull();
+        // prompt: "你好" len/4=0 → max(1,0)=1; completion: 8 chars/4 = 2
+        assertThat(settleBody).contains("\"actualPromptTokens\":1");
+        assertThat(settleBody).contains("\"actualCompletionTokens\":2");
+        assertThat(settleBody).doesNotContain("\"actualCompletionTokens\":256");
+    }
+
+    @Test
+    @DisplayName("流式 openai 上游 (Anthropic→OpenAI 转换) 无 usage: completion 按 delta.content chars/4 估算 (issue #33)")
+    void streamOpenaiUpstreamNoUsageSettlesByEmittedChars() throws Exception {
+        mockTokenOk();
+        mockDistribute("openai");
+        mockScanPass();
+        // 喂给累加器的是上游原始 OpenAI 形状: "Hello," (6) + " world!" (7) = 13 chars → 13/4 = 3
+        upstream.enqueue(new MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_END)
+                .setBody("data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}\n\n"
+                        + "data: {\"choices\":[{\"delta\":{\"content\":\"Hello,\"}}]}\n\n"
+                        + "data: {\"choices\":[{\"delta\":{\"content\":\" world!\"}}]}\n\n"
+                        + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+                        + "data: [DONE]\n\n"));
+        backend.enqueue(jsonOk());                                  // settle (fire-and-forget)
+        backend.enqueue(jsonOk());                                  // access-log (fire-and-forget)
+
+        Map<String, Object> body = anthropicBody();
+        body.put("stream", true);
+
+        java.util.concurrent.atomic.AtomicReference<
+                org.springframework.http.ResponseEntity<Object>> entityRef =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        StepVerifier.create(controller.messages(null, "sk-ant-x", body, exchange()))
+                .assertNext(entity -> {
+                    assertThat(entity.getStatusCode().value()).isEqualTo(200);
+                    entityRef.set(entity);
+                })
+                .verifyComplete();
+
+        @SuppressWarnings("unchecked")
+        Flux<ServerSentEvent<String>> flux =
+                (Flux<ServerSentEvent<String>>) entityRef.get().getBody();
+        var events = flux.filter(e -> e.data() != null && !e.data().isBlank())
+                .collectList()
+                .block(java.time.Duration.ofSeconds(10));
+        assertThat(events).isNotEmpty();
+
+        String settleBody = settleBodyAfterDrain();
+        assertThat(settleBody).isNotNull();
+        assertThat(settleBody).contains("\"actualPromptTokens\":1");
+        assertThat(settleBody).contains("\"actualCompletionTokens\":3");
+        assertThat(settleBody).doesNotContain("\"actualCompletionTokens\":256");
+    }
+
+    @Test
+    @DisplayName("流式 anthropic 上游有 usage: 真实 output_tokens 计费, 已吐 chars 不参与 (issue #33 回归红线)")
+    void streamAnthropicNativeWithUsageRegression() throws Exception {
+        mockTokenOk();
+        mockDistribute("anthropic");
+        mockScanPass();
+        upstream.enqueue(new MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_END)
+                .setBody("event: message_start\ndata: {\"type\":\"message_start\","
+                        + "\"message\":{\"usage\":{\"input_tokens\":25,\"cache_read_input_tokens\":3}}}\n\n"
+                        + "event: content_block_delta\ndata: {\"type\":\"content_block_delta\","
+                        + "\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello world\"}}\n\n"
+                        + "event: message_delta\ndata: {\"type\":\"message_delta\","
+                        + "\"usage\":{\"output_tokens\":9}}\n\n"
+                        + "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"));
+        backend.enqueue(jsonOk());                                  // settle (fire-and-forget)
+        backend.enqueue(jsonOk());                                  // access-log (fire-and-forget)
+
+        Map<String, Object> body = anthropicBody();
+        body.put("stream", true);
+
+        java.util.concurrent.atomic.AtomicReference<
+                org.springframework.http.ResponseEntity<Object>> entityRef =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        StepVerifier.create(controller.messages(null, "sk-ant-x", body, exchange()))
+                .assertNext(entity -> {
+                    assertThat(entity.getStatusCode().value()).isEqualTo(200);
+                    entityRef.set(entity);
+                })
+                .verifyComplete();
+
+        // 订阅并排空响应体 Flux —— 不订阅则上游永不触发、settle 永不落 (与兄弟用例同款)
+        @SuppressWarnings("unchecked")
+        Flux<ServerSentEvent<String>> flux =
+                (Flux<ServerSentEvent<String>>) entityRef.get().getBody();
+        flux.filter(e -> e.data() != null && !e.data().isBlank())
+                .collectList()
+                .block(java.time.Duration.ofSeconds(10));
+
+        String settleBody = settleBodyAfterDrain();
+        assertThat(settleBody).isNotNull();
+        // 红线: 有真实 usage 时按真实值结算 (已吐 11 chars 不参与任何计算)
+        assertThat(settleBody).contains("\"actualPromptTokens\":25");
+        assertThat(settleBody).contains("\"actualCompletionTokens\":9");
+        assertThat(settleBody).contains("\"cacheReadTokens\":3");
+    }
+
+    /**
+     * 轮询后端请求取 settle 请求体 (跳过 validate/scan/preConsume 等, 上限 ~18s).
+     */
+    private String settleBodyAfterDrain() throws InterruptedException {
+        for (int i = 0; i < 6; i++) {
+            RecordedRequest recorded = backend.takeRequest(3, java.util.concurrent.TimeUnit.SECONDS);
+            if (recorded == null) {
+                break;
+            }
+            if (recorded.getPath().contains("/billing/settle")) {
+                return recorded.getBody().readUtf8();
+            }
+        }
+        return null;
     }
 
     /** fire-and-forget 健康上报异步完成, 轮询等待 (上限 5s). */

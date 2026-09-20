@@ -36,9 +36,12 @@ class CountTokensControllerTest {
     private MockWebServer backend;
     private MockWebServer upstream;
     private CountTokensController controller;
+    /** 上游头透传白名单 (issue #32): 个别用例按需开启. */
+    private fun.commons.tokengateway.config.UpstreamPassthroughProperties upstreamProps;
 
     @BeforeEach
     void setUp() throws Exception {
+        upstreamProps = new fun.commons.tokengateway.config.UpstreamPassthroughProperties();
         backend = new MockWebServer();
         backend.start();
         upstream = new MockWebServer();
@@ -54,7 +57,8 @@ class CountTokensControllerTest {
                 new fun.commons.tokengateway.thmp.ThmpShadow.Noop(),
                 new fun.commons.tokengateway.thmp.ThmpCutover.Noop()),
                 new FormatConverter(), b,
-                new ClientIpResolver(new ClientIpProperties()));
+                new ClientIpResolver(new ClientIpProperties()),
+                upstreamProps);
     }
 
     @AfterEach
@@ -130,6 +134,28 @@ class CountTokensControllerTest {
         StepVerifier.create(controller.countTokens(null, null, body(), exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 401);
+    }
+
+    @Test
+    @DisplayName("上游头透传白名单 (issue #32): 配置 X-Mock-* 后非流式上游收到注入头")
+    void passthroughHeaderReachesUpstreamNonStream() throws Exception {
+        upstreamProps.getPassthroughHeaders().add("X-Mock-*");
+        mockTokenOk();
+        mockDistribute("anthropic");
+        upstream.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"input_tokens\":7}"));
+
+        ServerWebExchange exchangeWithFault = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/v1/messages/count_tokens")
+                        .header("X-Mock-Fault", "stream-cut-after=2"));
+
+        StepVerifier.create(controller.countTokens(null, "sk-ant-x", body(), exchangeWithFault))
+                .assertNext(r -> assertThat(r.get("input_tokens")).isEqualTo(7))
+                .verifyComplete();
+
+        assertThat(upstream.takeRequest().getHeader("X-Mock-Fault"))
+                .isEqualTo("stream-cut-after=2");
     }
 
     /** 直调注入 exchange (clientIp 解析入口; 缺省无 XFF → 取 mock 对端地址). */

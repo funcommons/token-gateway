@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **billing 双 face 拆分（issue #31，P0）**：第 8 面 `token-gateway.task.billing.{url,path-prefix,auth,jwt-secret,internal-token,timeout}`——**逐字段**缺省回退 `token-gateway.billing.*`。任务三端点（全额 amount 直传 + settle 确认制）与 LLM 面三端点（token 估价 + settle 四维重算退差）在 face=all 单体内不再互斥：`TaskBillingSaga` 走 task 面（新增任务族方法），`RelayOrchestrator`/`BillingReconcileJob`（#23 重放）恒通用面（隔离测试实证不串）。存量 #12 全局前缀指 task 路径 → 行为不变零迁移。demo-control-plane 计费桩补 `/v1/internal/billing/task/*` 双前缀 + 账本 amount 直传修正（此前被忽略一律 flat price）
+- **上游头透传白名单（issue #32，方案 A）**：`gateway.upstream.passthrough-headers`（默认空=**fail-closed**）支持精确名与 `X-Mock-*` 前缀通配，从客户端请求头透传至上游——流式 SSE + 非流式全部上游构造点一次做齐；硬编码黑名单压过白名单（Authorization/Cookie/X-Internal-*/内部签名头/协议头，防凭证泄漏与顶掉协议头），解锁流式断连 chaos 故障注入
+- **流式无 usage 内容估算法（issue #33）**：拍板「内容估算法」——无 usage 正常完成流 completion 由固定 256 改为 `max(1, 已吐内容 chars/4)`（content/thinking/tool `partial_json` 都计入；透传与 OpenAI↔Anthropic 双向转换四组合覆盖），吐 2 帧收 2 帧、吐 8K 收 8K 双向公平；仍 SUCCESS settle 不退款（无薅羊毛向量），有 usage 路径逐字节不变
+
+### 修复
+
+- **限流 429 绕过 error-shape（issue #34）**：`RateLimitWebFilter` 在 WebFilter 层直写响应、不进 #24 渲染链——429 拒绝分支接入 error-shape 分流（openai + /v1/chat|/v1/messages 前缀 → `{"error":{type:rate_limit_error,...}}` + 顶层 trace_id，param 显式 null 与 Jackson 出口对齐），`Retry-After`/`X-RateLimit-*` 头原样保留；任务面恒信封，默认 envelope 行为不变
+
 ## [0.12.0] - 2026-09-20
 
 ### 新增

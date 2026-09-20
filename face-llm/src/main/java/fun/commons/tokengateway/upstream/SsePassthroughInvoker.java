@@ -1,9 +1,11 @@
 package fun.commons.tokengateway.upstream;
 
 import fun.commons.tokengateway.contract.DistributeVO;
+import fun.commons.tokengateway.config.UpstreamPassthroughProperties;
 import fun.commons.tokengateway.format.SseTransformer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.http.HttpHeaders;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
@@ -33,15 +35,28 @@ public class SsePassthroughInvoker {
 
     private final WebClient.Builder webClientBuilder;
     private final Duration heartbeatInterval;
+    /** 上游头透传白名单 (issue #32): 默认空 = 不透传任何头, 出站请求逐字节不变. */
+    private final UpstreamPassthroughProperties passthroughProps;
 
     @org.springframework.beans.factory.annotation.Autowired
+    public SsePassthroughInvoker(WebClient.Builder webClientBuilder,
+                                 UpstreamPassthroughProperties passthroughProps) {
+        this(webClientBuilder, HEARTBEAT_INTERVAL, passthroughProps);
+    }
+
     public SsePassthroughInvoker(WebClient.Builder webClientBuilder) {
-        this(webClientBuilder, HEARTBEAT_INTERVAL);
+        this(webClientBuilder, HEARTBEAT_INTERVAL, new UpstreamPassthroughProperties());
     }
 
     SsePassthroughInvoker(WebClient.Builder webClientBuilder, Duration heartbeatInterval) {
+        this(webClientBuilder, heartbeatInterval, new UpstreamPassthroughProperties());
+    }
+
+    SsePassthroughInvoker(WebClient.Builder webClientBuilder, Duration heartbeatInterval,
+                          UpstreamPassthroughProperties passthroughProps) {
         this.webClientBuilder = webClientBuilder;
         this.heartbeatInterval = heartbeatInterval;
+        this.passthroughProps = passthroughProps;
     }
 
     public Flux<ServerSentEvent<String>> invokeStream(DistributeVO channel, Map<String, Object> body) {
@@ -53,16 +68,29 @@ public class SsePassthroughInvoker {
      */
     public Flux<ServerSentEvent<String>> invokeStream(DistributeVO channel, Map<String, Object> body,
                                                       java.util.function.Consumer<String> frameConsumer) {
+        return invokeStream(channel, body, frameConsumer, null);
+    }
+
+    /**
+     * @param frameConsumer 原始帧消费者 (usage 提取等), 可为 null
+     * @param clientHeaders 客户端请求头 —— 透传白名单取值来源 (issue #32), null = 不透传
+     */
+    public Flux<ServerSentEvent<String>> invokeStream(DistributeVO channel, Map<String, Object> body,
+                                                      java.util.function.Consumer<String> frameConsumer,
+                                                      HttpHeaders clientHeaders) {
         if (channel == null || channel.getBaseUrl() == null) {
             return Flux.error(new IllegalArgumentException("missing channel/baseUrl"));
         }
         String url = channel.getBaseUrl().replaceAll("/+$", "") + "/v1/chat/completions";
         log.info("[SsePassthrough] 启动: url={}, model={}", url, body.get("model"));
 
-        Flux<String> raw = webClientBuilder.build().post()
+        WebClient.RequestBodySpec spec = webClientBuilder.build().post()
                 .uri(url)
                 .header("Authorization", "Bearer " + channel.getApiKey())
-                .header("Accept", MediaType.TEXT_EVENT_STREAM_VALUE)
+                .header("Accept", MediaType.TEXT_EVENT_STREAM_VALUE);
+        passthroughProps.applyTo(spec, clientHeaders);
+
+        Flux<String> raw = spec
                 .bodyValue(body)
                 .retrieve()
                 .bodyToFlux(DataBuffer.class)
@@ -88,16 +116,30 @@ public class SsePassthroughInvoker {
                                                       Map<String, Object> body,
                                                       SseTransformer transformer,
                                                       java.util.function.Consumer<String> frameConsumer) {
+        return invokeStream(channel, body, transformer, frameConsumer, null);
+    }
+
+    /**
+     * @param clientHeaders 客户端请求头 —— 透传白名单取值来源 (issue #32), null = 不透传
+     */
+    public Flux<ServerSentEvent<String>> invokeStream(DistributeVO channel,
+                                                      Map<String, Object> body,
+                                                      SseTransformer transformer,
+                                                      java.util.function.Consumer<String> frameConsumer,
+                                                      HttpHeaders clientHeaders) {
         if (channel == null || channel.getBaseUrl() == null) {
             return Flux.error(new IllegalArgumentException("missing channel/baseUrl"));
         }
         String url = channel.getBaseUrl().replaceAll("/+$", "") + "/v1/chat/completions";
         log.info("[SsePassthrough] 启动(transformed): url={}, model={}", url, body.get("model"));
 
-        Flux<String> raw = webClientBuilder.build().post()
+        WebClient.RequestBodySpec spec = webClientBuilder.build().post()
                 .uri(url)
                 .header("Authorization", "Bearer " + channel.getApiKey())
-                .header("Accept", MediaType.TEXT_EVENT_STREAM_VALUE)
+                .header("Accept", MediaType.TEXT_EVENT_STREAM_VALUE);
+        passthroughProps.applyTo(spec, clientHeaders);
+
+        Flux<String> raw = spec
                 .bodyValue(body)
                 .retrieve()
                 .bodyToFlux(DataBuffer.class)
@@ -118,17 +160,31 @@ public class SsePassthroughInvoker {
                                                                Map<String, Object> anthropicBody,
                                                                SseTransformer transformer,
                                                                java.util.function.Consumer<String> frameConsumer) {
+        return invokeStreamAnthropic(channel, anthropicBody, transformer, frameConsumer, null);
+    }
+
+    /**
+     * @param clientHeaders 客户端请求头 —— 透传白名单取值来源 (issue #32), null = 不透传
+     */
+    public Flux<ServerSentEvent<String>> invokeStreamAnthropic(DistributeVO channel,
+                                                               Map<String, Object> anthropicBody,
+                                                               SseTransformer transformer,
+                                                               java.util.function.Consumer<String> frameConsumer,
+                                                               HttpHeaders clientHeaders) {
         if (channel == null || channel.getBaseUrl() == null) {
             return Flux.error(new IllegalArgumentException("missing channel/baseUrl"));
         }
         String url = channel.getBaseUrl().replaceAll("/+$", "") + "/v1/messages";
         log.info("[SsePassthrough] 启动(anthropic): url={}, model={}", url, anthropicBody.get("model"));
 
-        Flux<String> raw = webClientBuilder.build().post()
+        WebClient.RequestBodySpec spec = webClientBuilder.build().post()
                 .uri(url)
                 .header("x-api-key", channel.getApiKey())
                 .header("anthropic-version", "2023-06-01")
-                .header("Accept", MediaType.TEXT_EVENT_STREAM_VALUE)
+                .header("Accept", MediaType.TEXT_EVENT_STREAM_VALUE);
+        passthroughProps.applyTo(spec, clientHeaders);
+
+        Flux<String> raw = spec
                 .bodyValue(anthropicBody)
                 .retrieve()
                 .bodyToFlux(DataBuffer.class)
@@ -147,6 +203,16 @@ public class SsePassthroughInvoker {
     public Flux<ServerSentEvent<String>> invokeStreamAnthropicNative(DistributeVO channel,
                                                                      Map<String, Object> anthropicBody,
                                                                      java.util.function.Consumer<String> frameConsumer) {
+        return invokeStreamAnthropicNative(channel, anthropicBody, frameConsumer, null);
+    }
+
+    /**
+     * @param clientHeaders 客户端请求头 —— 透传白名单取值来源 (issue #32), null = 不透传
+     */
+    public Flux<ServerSentEvent<String>> invokeStreamAnthropicNative(DistributeVO channel,
+                                                                     Map<String, Object> anthropicBody,
+                                                                     java.util.function.Consumer<String> frameConsumer,
+                                                                     HttpHeaders clientHeaders) {
         if (channel == null || channel.getBaseUrl() == null) {
             return Flux.error(new IllegalArgumentException("missing channel/baseUrl"));
         }
@@ -154,11 +220,14 @@ public class SsePassthroughInvoker {
         log.info("[SsePassthrough] 启动(anthropic-native): url={}, model={}",
                 url, anthropicBody.get("model"));
 
-        Flux<String> raw = webClientBuilder.build().post()
+        WebClient.RequestBodySpec spec = webClientBuilder.build().post()
                 .uri(url)
                 .header("x-api-key", channel.getApiKey())
                 .header("anthropic-version", "2023-06-01")
-                .header("Accept", MediaType.TEXT_EVENT_STREAM_VALUE)
+                .header("Accept", MediaType.TEXT_EVENT_STREAM_VALUE);
+        passthroughProps.applyTo(spec, clientHeaders);
+
+        Flux<String> raw = spec
                 .bodyValue(anthropicBody)
                 .retrieve()
                 .bodyToFlux(DataBuffer.class)

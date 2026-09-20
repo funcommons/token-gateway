@@ -107,8 +107,11 @@ public class ControlPlaneDemoController {
     }
 
     // ---------- 计费 saga ----------
+    // 双前缀 (issue #31): 通用 chat 契约 /api/v1/internal/billing/* + 任务面变体
+    // /v1/internal/billing/task/* (网关 token-gateway.task.billing.path-prefix 指此;
+    // 同一内存账本, 任务三端点金额直传语义 = preConsume.amount 全额 hold, 本就支持).
 
-    @PostMapping("/api/v1/internal/billing/pre-consume")
+    @PostMapping({"/api/v1/internal/billing/pre-consume", "/v1/internal/billing/task/pre-consume"})
     public ApiResponse<PreConsumeVO> preConsume(@RequestBody PreConsumeRequest req) {
         PreConsumeVO vo = ledger.preConsume(req);
         if (!vo.isSuccess()) {
@@ -117,12 +120,12 @@ public class ControlPlaneDemoController {
         return ApiResponse.success(vo);
     }
 
-    @PostMapping("/api/v1/internal/billing/settle")
+    @PostMapping({"/api/v1/internal/billing/settle", "/v1/internal/billing/task/settle"})
     public ApiResponse<SettleVO> settle(@RequestBody SettleRequest req) {
         return ApiResponse.success(ledger.settle(req));
     }
 
-    @PostMapping("/api/v1/internal/billing/refund")
+    @PostMapping({"/api/v1/internal/billing/refund", "/v1/internal/billing/task/refund"})
     public ApiResponse<Void> refund(@RequestBody RefundRequest req) {
         ledger.refund(req);
         return ApiResponse.success();
