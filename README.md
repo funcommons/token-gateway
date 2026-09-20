@@ -57,7 +57,7 @@ token-gateway/
 
 ```bash
 mvn verify                                                    # 446 个单测 + 覆盖率门禁
-java -jar app/target/token-gateway-app-0.11.0.jar             # 监听 9401
+java -jar app/target/token-gateway-app-0.12.0.jar             # 监听 9401
 ```
 
 **全链路冒烟**（LLM 面 + 任务面正负路径 + notify + 对账，11 步 28 断言——notify 验签双侧设钥时满配 29，五进程零真实依赖）：
@@ -85,7 +85,7 @@ bash scripts/smoke.sh                                         # PASS/FAIL 矩阵
 <dependency>
     <groupId>com.github.funcommons.token-gateway</groupId>
     <artifactId>token-gateway-spring-boot-starter</artifactId>
-    <version>v0.11.0</version>
+    <version>v0.12.0</version>
 </dependency>
 ```
 

@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-20
+
 ### 新增
 
 - **LLM 面 settle/refund 失败重放兜底（issue #23，P0）**：新增 `BillingPendingStore`（Redis ZSET `tgw:billing:pending`，score=下次重试时刻）+ `BillingReconcileJob`（`gateway.billing-reconcile.*` 默认 true/30s/5 次/30s 指数退避）——settle/refund **基础设施失败**（10003 折叠码）按原参重放（preConsumeId 幂等锚），重放成功/退避重排/耗尽死信三态日志（`[Billing-Reconcile]`/`[Billing-DeadLetter]` 单行 JSON 快照含全部结算参数）；业务拒绝不重试直接死信；入队失败兜底死信
