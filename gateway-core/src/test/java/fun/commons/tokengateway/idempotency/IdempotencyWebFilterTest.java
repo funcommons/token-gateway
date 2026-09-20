@@ -49,8 +49,8 @@ class IdempotencyWebFilterTest {
         store = mock(IdempotencyStore.class);
         // 回放语义 (issue #28): 默认桩全 store 交互, 用例内按需覆盖
         lenient().when(store.release(anyString())).thenReturn(Mono.empty());
-        lenient().when(store.findResponse(anyString())).thenReturn(Mono.empty());
-        lenient().when(store.saveResponse(anyString(), anyInt(), any(), any()))
+        lenient().when(store.findResponse(anyString(), any())).thenReturn(Mono.empty());
+        lenient().when(store.saveResponse(anyString(), anyInt(), any(), any(), any()))
                 .thenReturn(Mono.empty());
         props = new IdempotencyProperties();
         props.setEnabled(true);
@@ -123,20 +123,20 @@ class IdempotencyWebFilterTest {
     @Test
     @DisplayName("首次请求: 占位成功 → 放行")
     void firstRequestPasses() {
-        when(store.tryAcquire(anyString(), any(Duration.class))).thenReturn(Mono.just(true));
+        when(store.tryAcquire(anyString(), any(Duration.class), any())).thenReturn(Mono.just(true));
 
         StepVerifier.create(filter.filter(exchangeFor("/v1/chat/completions", "k-1"), chain))
                 .verifyComplete();
 
         assertThat(chainCalled).isTrue();
-        verify(store).tryAcquire("idem:Bearer sk-x:k-1", Duration.ofHours(48));
+        verify(store).tryAcquire(eq("idem:Bearer sk-x:k-1"), eq(Duration.ofHours(48)), any());
     }
 
     @Test
     @DisplayName("重复请求 (占位在途): findResponse 空 + 再占位失败 → 409 + 10501 处理中, 不进 chain")
     void duplicateRejected() {
-        when(store.tryAcquire(anyString(), any(Duration.class))).thenReturn(Mono.just(false));
-        when(store.findResponse(anyString())).thenReturn(Mono.empty());
+        when(store.tryAcquire(anyString(), any(Duration.class), any())).thenReturn(Mono.just(false));
+        when(store.findResponse(anyString(), any())).thenReturn(Mono.empty());
 
         MockServerWebExchange exchange = exchangeFor("/v1/chat/completions", "k-1");
         StepVerifier.create(filter.filter(exchange, chain))
@@ -146,15 +146,15 @@ class IdempotencyWebFilterTest {
         assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(exchange.getResponse().getBodyAsString().block())
                 .contains("10501").contains("处理中");
-        verify(store, times(2)).tryAcquire(anyString(), any(Duration.class));
+        verify(store, times(2)).tryAcquire(anyString(), any(Duration.class), any());
     }
 
     @Test
     @DisplayName("无键竞态 (已释放/过期): findResponse 空 + 再占位成功 → 放行按新请求")
     void releasedKeyRacesIntoNewRequest() {
-        when(store.tryAcquire("idem:Bearer sk-x:k-1", Duration.ofHours(48)))
+        when(store.tryAcquire(eq("idem:Bearer sk-x:k-1"), eq(Duration.ofHours(48)), any()))
                 .thenReturn(Mono.just(false), Mono.just(true));
-        when(store.findResponse("idem:Bearer sk-x:k-1")).thenReturn(Mono.empty());
+        when(store.findResponse(eq("idem:Bearer sk-x:k-1"), any())).thenReturn(Mono.empty());
 
         StepVerifier.create(filter.filter(exchangeFor("/v1/chat/completions", "k-1"), chain))
                 .verifyComplete();
@@ -165,7 +165,7 @@ class IdempotencyWebFilterTest {
     @Test
     @DisplayName("5xx 失败: 释放占位允许重试")
     void serverErrorReleasesKey() {
-        when(store.tryAcquire(anyString(), any(Duration.class))).thenReturn(Mono.just(true));
+        when(store.tryAcquire(anyString(), any(Duration.class), any())).thenReturn(Mono.just(true));
         when(store.release(anyString())).thenReturn(Mono.empty());
         WebFilterChain failChain = exchange -> {
             exchange.getResponse().setStatusCode(HttpStatus.BAD_GATEWAY);
@@ -181,20 +181,20 @@ class IdempotencyWebFilterTest {
     @Test
     @DisplayName("成功请求: 缓存首响, 不释放占位")
     void successKeepsKey() {
-        when(store.tryAcquire(anyString(), any(Duration.class))).thenReturn(Mono.just(true));
+        when(store.tryAcquire(anyString(), any(Duration.class), any())).thenReturn(Mono.just(true));
 
         StepVerifier.create(filter.filter(exchangeFor("/v1/chat/completions", "k-3"),
                         jsonChain("{\"ok\":true}")))
                 .verifyComplete();
 
         verify(store, never()).release(anyString());
-        verify(store).saveResponse(eq("idem:Bearer sk-x:k-3"), eq(200), any(), any());
+        verify(store).saveResponse(eq("idem:Bearer sk-x:k-3"), eq(200), any(), any(), any());
     }
 
     @Test
     @DisplayName("chain 异常: 释放占位并继续抛出")
     void chainErrorReleasesAndRethrows() {
-        when(store.tryAcquire(anyString(), any(Duration.class))).thenReturn(Mono.just(true));
+        when(store.tryAcquire(anyString(), any(Duration.class), any())).thenReturn(Mono.just(true));
         when(store.release(anyString())).thenReturn(Mono.empty());
         WebFilterChain boomChain = exchange -> Mono.error(new RuntimeException("boom"));
 
@@ -202,6 +202,28 @@ class IdempotencyWebFilterTest {
                 .verifyErrorMatches(e -> "boom".equals(e.getMessage()));
 
         verify(store).release("idem:Bearer sk-x:k-4");
+    }
+
+    @Test
+    @DisplayName("body 冲突 (hash 规约): 同 key 异 body → 422, 不回放不进 chain")
+    void bodyMismatchRejected422() {
+        when(store.tryAcquire(anyString(), any(Duration.class), any())).thenReturn(Mono.just(false));
+        when(store.findResponse(anyString(), any()))
+                .thenReturn(Mono.error(new IdempotencyStore.BodyMismatchException("idem:Bearer sk-x:k-m")));
+
+        MockServerWebExchange mismatchExchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/v1/chat/completions")
+                        .header("Authorization", "Bearer sk-x")
+                        .header(IdempotencyWebFilter.IDEMPOTENCY_KEY_HEADER, "k-m")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"model\":\"different\"}"));
+
+        StepVerifier.create(filter.filter(mismatchExchange, chain))
+                .verifyComplete();
+
+        assertThat(chainCalled).isFalse();
+        assertThat(mismatchExchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(mismatchExchange.getResponse().getHeaders().getFirst("Content-Type")).isNotNull();
     }
 
     @Test

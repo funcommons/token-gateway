@@ -76,28 +76,61 @@ public class IdempotencyWebFilter implements WebFilter {
         }
         String redisKey = props.getKeyPrefix() + resolveApiKey(exchange) + ":" + idemKey.trim();
         Duration ttl = Duration.ofHours(props.getTtlHours());
-        return store.tryAcquire(redisKey, ttl)
-                .flatMap(acquired -> acquired
-                        ? firstRequest(exchange, chain, redisKey)
-                        : duplicateRequest(exchange, chain, redisKey, ttl));
+        // body hash 规约 (回归 2026-09-21-01 BL11 P2): 读请求体算 MD5 → 装饰重放给下游 →
+        // 占位/回放/缓存全链携带 hash, 同 key 异 body 422 拒绝 (不再回放错误首响)
+        return DataBufferUtils.join(exchange.getRequest().getBody())
+                .map(buffer -> {
+                    byte[] bytes = new byte[buffer.readableByteCount()];
+                    buffer.read(bytes);
+                    DataBufferUtils.release(buffer);
+                    return bytes;
+                })
+                .defaultIfEmpty(new byte[0])
+                .flatMap(bodyBytes -> {
+                    String bodyHash = md5Hex(bodyBytes);
+                    ServerWebExchange replayableExchange = withReplayableBody(exchange, bodyBytes);
+                    return store.tryAcquire(redisKey, ttl, bodyHash)
+                            .flatMap(acquired -> acquired
+                                    ? firstRequest(replayableExchange, chain, redisKey, bodyHash)
+                                    : duplicateRequest(replayableExchange, chain, redisKey, ttl, bodyHash));
+                });
+    }
+
+    /**
+     * 请求体重放装饰 (hash 计算消费了原始 body, 须以缓存字节重建供下游读取).
+     */
+    private ServerWebExchange withReplayableBody(ServerWebExchange exchange, byte[] bodyBytes) {
+        var mutatedRequest = new org.springframework.http.server.reactive.ServerHttpRequestDecorator(
+                exchange.getRequest()) {
+            @Override
+            public reactor.core.publisher.Flux<DataBuffer> getBody() {
+                if (bodyBytes.length == 0) {
+                    return reactor.core.publisher.Flux.empty();
+                }
+                return reactor.core.publisher.Flux.defer(() ->
+                        reactor.core.publisher.Flux.just(exchange.getResponse().bufferFactory().wrap(bodyBytes)));
+            }
+        };
+        return exchange.mutate().request(mutatedRequest).build();
     }
 
     /**
      * 首次请求: 放行 (响应经捕获装饰器), 完成后按缓存资格处置.
      * 链路异常 → 释放占位并继续抛出 (失败不占键).
      */
-    private Mono<Void> firstRequest(ServerWebExchange exchange, WebFilterChain chain, String redisKey) {
+    private Mono<Void> firstRequest(ServerWebExchange exchange, WebFilterChain chain,
+                                    String redisKey, String bodyHash) {
         CapturingServerHttpResponse decorated = new CapturingServerHttpResponse(exchange.getResponse());
         ServerWebExchange mutated = exchange.mutate().response(decorated).build();
         return chain.filter(mutated)
-                .then(Mono.defer(() -> afterResponse(decorated, redisKey)))
+                .then(Mono.defer(() -> afterResponse(decorated, redisKey, bodyHash)))
                 .onErrorResume(err -> store.release(redisKey).then(Mono.error(err)));
     }
 
     /**
-     * 响应完成处置: 非 2xx → 释放; 2xx 可缓存 → 保存首响; 流式/超限/无 body → 占位保留.
+     * 响应完成处置: 非 2xx → 释放; 2xx 可缓存 → 保存首响 (附 body hash); 流式/超限/无 body → 占位保留.
      */
-    private Mono<Void> afterResponse(CapturingServerHttpResponse decorated, String redisKey) {
+    private Mono<Void> afterResponse(CapturingServerHttpResponse decorated, String redisKey, String bodyHash) {
         HttpStatusCode status = decorated.getStatusCode();
         if (status == null || !status.is2xxSuccessful()) {
             return store.release(redisKey);
@@ -106,7 +139,7 @@ public class IdempotencyWebFilter implements WebFilter {
             MediaType contentType = safeContentType(decorated);
             return store.saveResponse(redisKey, status.value(),
                     contentType == null ? null : contentType.toString(),
-                    decorated.getCapturedBody());
+                    decorated.getCapturedBody(), bodyHash);
         }
         return Mono.empty();
     }
@@ -121,16 +154,18 @@ public class IdempotencyWebFilter implements WebFilter {
     }
 
     /**
-     * 重复请求: 命中首响 → 回放; 无响应 → 再占位 (无键竞态则按新请求) 或 409 处理中.
+     * 重复请求: body 一致命中首响 → 回放; hash 冲突 → 422; 无响应 → 再占位或 409 处理中.
      * 注意 replay 返回 Mono&lt;Void&gt; (完成即空信号), 故以 thenReturn 物化命中标志.
      */
     private Mono<Void> duplicateRequest(ServerWebExchange exchange, WebFilterChain chain,
-                                        String redisKey, Duration ttl) {
-        return store.findResponse(redisKey)
+                                        String redisKey, Duration ttl, String bodyHash) {
+        return store.findResponse(redisKey, bodyHash)
                 .flatMap(cached -> replay(exchange, cached).thenReturn(true))
                 .defaultIfEmpty(false)
                 .flatMap(replayed -> replayed ? Mono.<Void>empty()
-                        : Mono.defer(() -> reacquireOrReject(exchange, chain, redisKey, ttl)));
+                        : Mono.defer(() -> reacquireOrReject(exchange, chain, redisKey, ttl, bodyHash)))
+                .onErrorResume(IdempotencyStore.BodyMismatchException.class,
+                        mismatch -> rejectBodyMismatch(exchange, mismatch));
     }
 
     /**
@@ -138,11 +173,13 @@ public class IdempotencyWebFilter implements WebFilter {
      * 失败则确为在途 (或首响不可缓存) → 409 + 10501.
      */
     private Mono<Void> reacquireOrReject(ServerWebExchange exchange, WebFilterChain chain,
-                                         String redisKey, Duration ttl) {
-        return store.tryAcquire(redisKey, ttl)
+                                         String redisKey, Duration ttl, String bodyHash) {
+        return store.tryAcquire(redisKey, ttl, bodyHash)
                 .flatMap(acquired -> acquired
-                        ? firstRequest(exchange, chain, redisKey)
-                        : rejectInProgress(exchange));
+                        ? firstRequest(exchange, chain, redisKey, bodyHash)
+                        : rejectInProgress(exchange))
+                .onErrorResume(IdempotencyStore.BodyMismatchException.class,
+                        mismatch -> rejectBodyMismatch(exchange, mismatch));
     }
 
     /** 回放首响: 同 status/contentType/body + Idempotency-Replayed: true. */
@@ -174,6 +211,40 @@ public class IdempotencyWebFilter implements WebFilter {
                 .getBytes(StandardCharsets.UTF_8);
         DataBuffer buffer = response.bufferFactory().wrap(bytes);
         return response.writeWith(Mono.just(buffer));
+    }
+
+    /**
+     * 422 body 冲突 (body hash 规约): 同 Idempotency-Key 携带不同请求体 —
+     * 语义错误 (客户端 bug 或攻击), 不回放不重试.
+     */
+    private Mono<Void> rejectBodyMismatch(ServerWebExchange exchange,
+                                          IdempotencyStore.BodyMismatchException mismatch) {
+        var response = exchange.getResponse();
+        response.setStatusCode(HttpStatus.UNPROCESSABLE_ENTITY);
+        response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
+        log.warn("[Idempotency] body 冲突拒绝: path={}, detail={}",
+                exchange.getRequest().getPath().value(), mismatch.getMessage());
+        byte[] bytes = JSON.toJSONString(ApiResponse.fail(ApiCode.PARAM_ERROR,
+                        "Idempotency-Key 已被不同请求体使用, 请更换 key 或保持请求体一致"))
+                .getBytes(StandardCharsets.UTF_8);
+        DataBuffer buffer = response.bufferFactory().wrap(bytes);
+        return response.writeWith(Mono.just(buffer));
+    }
+
+    /** 请求体 MD5 摘要 (hex). */
+    private static String md5Hex(byte[] bytes) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(bytes);
+            StringBuilder sb = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                sb.append(Character.forDigit((b >> 4) & 0xF, 16))
+                        .append(Character.forDigit(b & 0xF, 16));
+            }
+            return sb.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("MD5 不可用", e);
+        }
     }
 
     private static String resolveApiKey(ServerWebExchange exchange) {

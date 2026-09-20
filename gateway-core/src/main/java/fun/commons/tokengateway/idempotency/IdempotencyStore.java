@@ -39,11 +39,48 @@ public interface IdempotencyStore {
     }
 
     /**
+     * 带 body hash 的首响保存 (hash 规约): 默认丢弃 hash 委托四参版 (旧实现兼容).
+     */
+    default Mono<Void> saveResponse(String key, int status, String contentType, String body,
+                                    String bodyHash) {
+        return saveResponse(key, status, contentType, body);
+    }
+
+    /**
      * 查询首响.
      *
      * @return 命中回放缓存条目; 空 = 无缓存响应 (无键或占位尚未产出/不可缓存)
      */
     default Mono<IdempotentResponse> findResponse(String key) {
         return Mono.empty();
+    }
+
+    /**
+     * 带 body hash 的占位 (fwk4j-idempotency 规约对齐, 回归 2026-09-21-01 BL11 P2):
+     * 占位值携带请求体摘要, 供同 key 异 body 冲突检测.
+     *
+     * @return true=占位成功, false=key 已存在 (含「同 key 异 body」— 见 {@link #findResponse(String, String)})
+     */
+    default Mono<Boolean> tryAcquire(String key, Duration ttl, String bodyHash) {
+        return tryAcquire(key, ttl);
+    }
+
+    /**
+     * 带 body hash 的首响查询: 缓存条目 (或占位) 携带的 hash 与本次请求不一致时
+     * 以 {@link BodyMismatchException} 失败 (过滤器转 422, 同 key 异 body 不得回放).
+     *
+     * @return 命中且 body 一致 → 回放缓存条目; 空 = 无缓存; {@link BodyMismatchException} = 冲突
+     */
+    default Mono<IdempotentResponse> findResponse(String key, String bodyHash) {
+        return findResponse(key);
+    }
+
+    /**
+     * 同 key 异 body 冲突 (占位或首响的 hash 与本次请求不符).
+     */
+    class BodyMismatchException extends RuntimeException {
+        public BodyMismatchException(String key) {
+            super("Idempotency-Key 已被不同请求体使用: " + key);
+        }
     }
 }
