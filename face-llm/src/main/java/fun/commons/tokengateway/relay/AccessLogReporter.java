@@ -42,7 +42,24 @@ public class AccessLogReporter {
                                     java.math.BigDecimal creditConsumed,
                                     int latencyMs, String traceId) {
         return report(prepared, model, requestPath, 200,
-                promptTokens, completionTokens, cachedTokens, creditConsumed, latencyMs, traceId, true);
+                promptTokens, completionTokens, cachedTokens,
+                null, null, null, creditConsumed, latencyMs, traceId, true);
+    }
+
+    /**
+     * fire-and-forget 上报访问日志 (上游成功路径, issue #26 细分重载):
+     * 携带 TokenUsage, 留痕 reasoning / audio / cacheCreation 细分维
+     * (null 透传 = 无源数据, 不造数).
+     */
+    public Mono<Void> reportSuccess(RelayOrchestrator.PreparedRequest prepared,
+                                    String model, String requestPath,
+                                    TokenUsage usage,
+                                    java.math.BigDecimal creditConsumed,
+                                    int latencyMs, String traceId) {
+        return report(prepared, model, requestPath, 200,
+                usage.promptTokens(), usage.completionTokens(), usage.cachedTokens(),
+                usage.reasoningTokens(), usage.audioTokens(), usage.cacheCreationTokens(),
+                creditConsumed, latencyMs, traceId, true);
     }
 
     /**
@@ -53,7 +70,8 @@ public class AccessLogReporter {
     public Mono<Void> reportError(RelayOrchestrator.PreparedRequest prepared,
                                   String model, String requestPath,
                                   int httpStatus, int latencyMs, String traceId) {
-        return report(prepared, model, requestPath, httpStatus, 0, 0, 0, null, latencyMs, traceId, true);
+        return report(prepared, model, requestPath, httpStatus, 0, 0, 0,
+                null, null, null, null, latencyMs, traceId, true);
     }
 
     /**
@@ -63,12 +81,14 @@ public class AccessLogReporter {
     public Mono<Void> reportErrorWithoutHealth(RelayOrchestrator.PreparedRequest prepared,
                                                String model, String requestPath,
                                                int httpStatus, int latencyMs, String traceId) {
-        return report(prepared, model, requestPath, httpStatus, 0, 0, 0, null, latencyMs, traceId, false);
+        return report(prepared, model, requestPath, httpStatus, 0, 0, 0,
+                null, null, null, null, latencyMs, traceId, false);
     }
 
     private Mono<Void> report(RelayOrchestrator.PreparedRequest prepared,
                               String model, String requestPath, int statusCode,
                               int promptTokens, int completionTokens, int cachedTokens,
+                              Long reasoningTokens, Long audioTokens, Long cacheCreationTokens,
                               java.math.BigDecimal creditConsumed,
                               int latencyMs,
                               String traceId,
@@ -91,6 +111,9 @@ public class AccessLogReporter {
                 .promptTokens(promptTokens)
                 .completionTokens(completionTokens)
                 .cachedTokens(cachedTokens)
+                .reasoningTokens(reasoningTokens == null ? null : reasoningTokens.intValue())
+                .audioTokens(audioTokens == null ? null : audioTokens.intValue())
+                .cacheCreationTokens(cacheCreationTokens == null ? null : cacheCreationTokens.intValue())
                 .billingMode(channel != null && channel.getOwnerType() != null
                         ? (channel.getOwnerType() == OwnerType.PLATFORM
                                 ? "PLATFORM_DUAL" : "TENANT_SOLO")

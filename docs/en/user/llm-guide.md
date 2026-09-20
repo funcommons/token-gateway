@@ -146,6 +146,7 @@ Notes:
 - Request: `model` (required; the gateway falls back to the default model when omitted) + `messages` (required) + standard OpenAI optional parameters (`max_tokens` / `temperature` / `tools` / `stream`, etc.).
 - The `tools` call chain passes through an Anthropic tool-chain sanitizer (cross-protocol tool-calling compatibility).
 - Success response = **upstream payload passed through as-is (after protocol normalization), no envelope**; `prompt_tokens / completion_tokens / cached_tokens` inside `usage` are the basis for billing settlement.
+- Breakdown retention (issue #26): `usage.completion_tokens_details.reasoning_tokens` (reasoning) and `prompt/completion_tokens_details.audio_tokens` (audio) are retention-only dimensions — **not priced** — used for call-log observability; on the Anthropic protocol, cache-write tokens (`cache_creation_input_tokens`) are reported separately from cache-read (`cache_read_input_tokens` → `cached_tokens`).
 - Upstreams that lack `usage`: settled by estimated tokens (the estimate is slightly higher than actual, and the error direction costs the caller nothing).
 - Billing saga: pre-charge before forwarding (insufficient balance → 10617, HTTP 402 semantic envelope) → forward → settle by actual usage; automatic full refund on total failure.
 

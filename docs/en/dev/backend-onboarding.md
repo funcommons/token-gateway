@@ -108,6 +108,7 @@ Saga guarantee: for each trace, exactly pre-charge − refund = actual consumpti
 - **rpc**: `POST /gw/v1/access-log/record`; the gateway pushes asynchronously in batches (does not block the main path; failures are quiet + alerted).
 - **mq**: see §5; you act as the consumer.
 - Core fields of a log entry: `trace_id, tenant_id, user_id, model, path, prompt_tokens, completion_tokens, cached_tokens, credit, latency_ms, status, ts`.
+- Breakdown retention dimensions (issue #26, optional additions; not priced; `null` = no source data; legacy consumers can simply ignore unknown fields): `reasoning_tokens` (OpenAI reasoning subset), `audio_tokens` (sum of prompt/completion-side audio), `cache_creation_tokens` (Anthropic cache-write, separated from `cached_tokens`; column addition tracked via issue #26 handoff).
 
 ### 4.6 audit — `POST /gw/v1/audit/record`
 

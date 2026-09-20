@@ -299,6 +299,28 @@ public class RelayOrchestrator {
     public Mono<java.math.BigDecimal> settle(PreparedRequest prepared, int actualPromptTokens,
                              int actualCompletionTokens, int cachedTokens, int responseTimeMs,
                              java.util.List<SettleRequest.AttemptDetail> attempts) {
+        return settleFull(prepared, actualPromptTokens, actualCompletionTokens, cachedTokens,
+                null, null, null, responseTimeMs, attempts);
+    }
+
+    /**
+     * 结算 (issue #26 细分重载): 直接携带 TokenUsage, 填充细分留痕维
+     * reasoningTokens / audioTokens (null 透传) 与 cacheCreationTokens (null→0,
+     * 沿用既有 int 字段缺省语义); prompt/completion/cached 总量语义不变.
+     */
+    public Mono<java.math.BigDecimal> settle(PreparedRequest prepared, TokenUsage usage,
+                             int responseTimeMs,
+                             java.util.List<SettleRequest.AttemptDetail> attempts) {
+        return settleFull(prepared, usage.promptTokens(), usage.completionTokens(),
+                usage.cachedTokens(), usage.reasoningTokens(), usage.audioTokens(),
+                usage.cacheCreationTokens(), responseTimeMs, attempts);
+    }
+
+    private Mono<java.math.BigDecimal> settleFull(PreparedRequest prepared,
+                             int actualPromptTokens, int actualCompletionTokens, int cachedTokens,
+                             Long reasoningTokens, Long audioTokens, Long cacheCreationTokens,
+                             int responseTimeMs,
+                             java.util.List<SettleRequest.AttemptDetail> attempts) {
         if (prepared.preConsumeId() == null) {
             return Mono.just(java.math.BigDecimal.ZERO);
         }
@@ -307,6 +329,10 @@ public class RelayOrchestrator {
                         .actualPromptTokens(actualPromptTokens)
                         .actualCompletionTokens(actualCompletionTokens)
                         .cacheReadTokens(cachedTokens)
+                        .cacheCreationTokens(cacheCreationTokens == null
+                                ? 0 : cacheCreationTokens.intValue())
+                        .reasoningTokens(reasoningTokens)
+                        .audioTokens(audioTokens)
                         .success(true)
                         .requestId(prepared.requestId())
                         .ownerPartyId(ownerPartyIdOf(prepared.token()))

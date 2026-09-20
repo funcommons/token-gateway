@@ -140,6 +140,34 @@ class FormatConverterTest {
         org.assertj.core.api.Assertions.assertThat(usage.containsKey("prompt_tokens_details")).isFalse();
     }
 
+    @Test
+    void anthropicToOpenAIResponse_cacheCreationNotLost_issue26() {
+        // issue #26 口径定版: cache_creation_input_tokens 不再并入 cached,
+        // 转换为 prompt_tokens_details.cache_creation_tokens (网关扩展键) 供 fromOpenAi 回收
+        Map<String, Object> out = converter.anthropicToOpenAIResponse(Map.of(
+                "usage", Map.of("input_tokens", 36, "output_tokens", 16,
+                        "cache_read_input_tokens", 128, "cache_creation_input_tokens", 64)));
+        Map<?, ?> usage = (Map<?, ?>) out.get("usage");
+        Map<?, ?> details = (Map<?, ?>) usage.get("prompt_tokens_details");
+        assertThat(details.get("cached_tokens")).isEqualTo(128);
+        assertThat(details.get("cache_creation_tokens")).isEqualTo(64);
+        // 回收链路: fromOpenAi 能读回 cacheCreation 细分
+        var u = fun.commons.tokengateway.relay.TokenUsageExtractor.fromOpenAi(out);
+        org.assertj.core.api.Assertions.assertThat(u.cachedTokens()).isEqualTo(128L);
+        org.assertj.core.api.Assertions.assertThat(u.cacheCreationTokens()).isEqualTo(64L);
+    }
+
+    @Test
+    void anthropicToOpenAIResponse_onlyCacheCreationStillEmitsDetails_issue26() {
+        // 只带 creation 不带 read → details 仍输出 (含扩展键, 不含 cached_tokens)
+        Map<?, ?> usage = (Map<?, ?>) converter.anthropicToOpenAIResponse(Map.of(
+                "usage", Map.of("input_tokens", 10, "output_tokens", 5,
+                        "cache_creation_input_tokens", 64))).get("usage");
+        Map<?, ?> details = (Map<?, ?>) usage.get("prompt_tokens_details");
+        assertThat(details.get("cache_creation_tokens")).isEqualTo(64);
+        org.assertj.core.api.Assertions.assertThat(details.containsKey("cached_tokens")).isFalse();
+    }
+
     // ---------- issue #18: OpenAI → Anthropic tools 链路 ----------
 
     @Test
@@ -462,6 +490,40 @@ class FormatConverterTest {
         Map<?, ?> usage2 = (Map<?, ?>) out.get("usage");
         assertThat(usage2.get("input_tokens")).isEqualTo(3);
         assertThat(usage2.get("output_tokens")).isEqualTo(4);
+    }
+
+    @Test
+    void openAiToAnthropicResponse_breakdownCarried_issue26() {
+        // issue #26 计费口径修复: cached_tokens → cache_read_input_tokens (Anthropic 标准键),
+        // reasoning/audio → 网关扩展键 (仅在有值时注入); fromAnthropic 能读回全部细分
+        Map<String, Object> out = converter.openAiToAnthropicResponse(Map.of(
+                "choices", List.of(Map.of(
+                        "message", Map.of("content", "hi"), "finish_reason", "stop")),
+                "usage", Map.of("prompt_tokens", 36, "completion_tokens", 16,
+                        "prompt_tokens_details", Map.of("cached_tokens", 128, "audio_tokens", 6),
+                        "completion_tokens_details", Map.of("reasoning_tokens", 9, "audio_tokens", 2))));
+        Map<?, ?> usage = (Map<?, ?>) out.get("usage");
+        assertThat(usage.get("input_tokens")).isEqualTo(36);
+        assertThat(usage.get("output_tokens")).isEqualTo(16);
+        assertThat(usage.get("cache_read_input_tokens")).isEqualTo(128);
+        assertThat(usage.get("reasoning_tokens")).isEqualTo(9L);
+        assertThat(usage.get("audio_tokens")).isEqualTo(8L);   // 两侧 audio 求和
+        // 回收链路: Messages 非流式链 (OpenAI 上游) fromAnthropic 不再丢细分
+        var u = fun.commons.tokengateway.relay.TokenUsageExtractor.fromAnthropic(out);
+        org.assertj.core.api.Assertions.assertThat(u.cachedTokens()).isEqualTo(128L);
+        org.assertj.core.api.Assertions.assertThat(u.reasoningTokens()).isEqualTo(9L);
+        org.assertj.core.api.Assertions.assertThat(u.audioTokens()).isEqualTo(8L);
+    }
+
+    @Test
+    void openAiToAnthropicResponse_noBreakdownNoExtensionKeys_issue26() {
+        // 上游无细分 → 扩展键不注入 (决议约束: null 不加键)
+        Map<?, ?> usage = (Map<?, ?>) converter.openAiToAnthropicResponse(Map.of(
+                "choices", List.of(Map.of("message", Map.of("content", "hi"), "finish_reason", "stop")),
+                "usage", Map.of("prompt_tokens", 3, "completion_tokens", 4))).get("usage");
+        org.assertj.core.api.Assertions.assertThat(usage.containsKey("cache_read_input_tokens")).isFalse();
+        org.assertj.core.api.Assertions.assertThat(usage.containsKey("reasoning_tokens")).isFalse();
+        org.assertj.core.api.Assertions.assertThat(usage.containsKey("audio_tokens")).isFalse();
     }
 
     @Test

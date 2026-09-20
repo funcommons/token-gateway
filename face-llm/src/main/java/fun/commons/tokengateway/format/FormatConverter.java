@@ -395,9 +395,20 @@ public class FormatConverter {
             mapped.put("completion_tokens", outVal);
             mapped.put("total_tokens", inVal + outVal);
             Object cached = u.get("cache_read_input_tokens");
-            if (cached instanceof Number && ((Number) cached).intValue() > 0) {
+            Object cacheCreation = u.get("cache_creation_input_tokens");
+            boolean hasCached = cached instanceof Number && ((Number) cached).intValue() > 0;
+            boolean hasCreation = cacheCreation instanceof Number && ((Number) cacheCreation).intValue() > 0;
+            if (hasCached || hasCreation) {
                 Map<String, Object> details = new LinkedHashMap<>();
-                details.put("cached_tokens", ((Number) cached).intValue());
+                if (hasCached) {
+                    details.put("cached_tokens", ((Number) cached).intValue());
+                }
+                if (hasCreation) {
+                    // 网关扩展键 (OpenAI 官方无此键, SDK 忽略未知字段): issue #26 口径定版,
+                    // Anthropic cache_creation_input_tokens 不再并入 cached, Chat 非流式
+                    // 转换链经 TokenUsageExtractor.fromOpenAi 回收 cacheCreation 细分
+                    details.put("cache_creation_tokens", ((Number) cacheCreation).intValue());
+                }
                 mapped.put("prompt_tokens_details", details);
             }
             result.put("usage", mapped);
@@ -778,7 +789,10 @@ public class FormatConverter {
      *   <li>顶层 id/object → Anthropic message id + type:"message"</li>
      *   <li>choices[0].message.content → content 数组 (单 text block)</li>
      *   <li>choices[0].finish_reason → stop_reason 映射</li>
-     *   <li>usage.prompt_tokens → input_tokens, completion_tokens → output_tokens</li>
+     *   <li>usage.prompt_tokens → input_tokens, completion_tokens → output_tokens;
+     *       细分对齐 (issue #26): cached_tokens → cache_read_input_tokens (Anthropic 标准键),
+     *       reasoning/audio → 网关扩展键 reasoning_tokens / audio_tokens
+     *       (官方无此字段, SDK 忽略未知键, 仅在有值时注入)</li>
      * </ul>
      * <p>tool_calls → tool_use 块转换已落地 (Task #179).
      */
@@ -868,9 +882,51 @@ public class FormatConverter {
             Map<String, Object> mapped = new LinkedHashMap<>();
             mapped.put("input_tokens", toInt(u.get("prompt_tokens")));
             mapped.put("output_tokens", toInt(u.get("completion_tokens")));
+            // issue #26 计费口径修复: OpenAI cached_tokens → Anthropic 标准键 cache_read_input_tokens,
+            // 修复 Messages 非流式链 (OpenAI 上游) cacheRead 被丢计 0 的口径损失
+            Object cached = u.get("prompt_tokens_details") instanceof Map<?, ?> d
+                    ? d.get("cached_tokens") : null;
+            if (cached instanceof Number && ((Number) cached).intValue() > 0) {
+                mapped.put("cache_read_input_tokens", ((Number) cached).intValue());
+            }
+            // 网关扩展键 (Anthropic 官方无此字段, SDK 忽略未知字段; issue #26 口径:
+            // 仅在有值时注入, null 不加键): 供 Messages 非流式链 fromAnthropic 回收
+            // reasoning / audio 细分留痕, 避免 OpenAI→Anthropic 转换丢维
+            Long reasoning = detailsNullableLong(u, "completion_tokens_details", "reasoning_tokens");
+            if (reasoning != null) {
+                mapped.put("reasoning_tokens", reasoning);
+            }
+            Long audio = sumNullable(
+                    detailsNullableLong(u, "prompt_tokens_details", "audio_tokens"),
+                    detailsNullableLong(u, "completion_tokens_details", "audio_tokens"));
+            if (audio != null) {
+                mapped.put("audio_tokens", audio);
+            }
             result.put("usage", mapped);
         }
         return result;
+    }
+
+    /** 从 usage 的 *_details 子对象读可选 long (缺失/坏值 → null, 不造数). */
+    private static Long detailsNullableLong(Map<?, ?> usage, String detailsKey, String field) {
+        if (usage.get(detailsKey) instanceof Map<?, ?> details) {
+            Object v = details.get(field);
+            if (v instanceof Number n) {
+                return n.longValue();
+            }
+        }
+        return null;
+    }
+
+    /** 两侧求和: 任一侧有值即求和, 双侧均无 → null (audio 求和口径, issue #26). */
+    private static Long sumNullable(Long a, Long b) {
+        if (a == null) {
+            return b;
+        }
+        if (b == null) {
+            return a;
+        }
+        return a + b;
     }
 
     private String mapOpenAiFinishToAnthropicStop(String finishReason) {

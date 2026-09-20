@@ -11,11 +11,17 @@ import java.util.function.Consumer;
  * <p>喂入原始 SSE 帧字符串, 只解析含 {@code "usage"} 的帧:
  * <ul>
  *   <li>OpenAI: 末帧 {@code usage.{prompt_tokens, completion_tokens,
- *       prompt_tokens_details.cached_tokens}} (需请求注入 stream_options.include_usage=true)</li>
+ *       prompt_tokens_details.cached_tokens}} (需请求注入 stream_options.include_usage=true);
+ *       细分留痕 (issue #26): prompt_tokens_details.audio_tokens +
+ *       completion_tokens_details.audio_tokens 求和 → audio,
+ *       completion_tokens_details.reasoning_tokens → reasoning (帧间覆盖 latest wins)</li>
  *   <li>Anthropic: {@code message_start.message.usage.input_tokens} +
- *       {@code message_delta.usage.output_tokens} (后者累计值, 覆盖取最新)</li>
+ *       {@code message_delta.usage.output_tokens} (后者累计值, 覆盖取最新);
+ *       口径定版 (issue #26): cache_read_input_tokens → cachedTokens (覆盖取最新),
+ *       cache_creation_input_tokens → cacheCreationTokens 独立成维 (跨帧累加),
+ *       不再合并进 cachedTokens</li>
  * </ul>
- * <p>线程模型: 帧按 Reactor 串行推送, 字段用普通 int 即可.
+ * <p>线程模型: 帧按 Reactor 串行推送, 字段用普通字段即可 (细分维用 Long 以区分 "无源" 与 0).
  */
 @Slf4j
 public class StreamUsageAccumulator implements Consumer<String> {
@@ -23,6 +29,10 @@ public class StreamUsageAccumulator implements Consumer<String> {
     private int promptTokens;
     private int completionTokens;
     private int cachedTokens;
+    /** issue #26 细分留痕: null = 上游未回报 (不造数). */
+    private Long reasoningTokens;
+    private Long audioTokens;
+    private Long cacheCreationTokens;
     private boolean hasUsage;
 
     @Override
@@ -44,8 +54,8 @@ public class StreamUsageAccumulator implements Consumer<String> {
         }
         parseOpenAiUsage(chunk);
         parseAnthropicUsage(chunk);
-        log.debug("[StreamUsage] post-parse hasUsage={}, prompt={}, completion={}, cached={}",
-                hasUsage, promptTokens, completionTokens, cachedTokens);
+        log.debug("[StreamUsage] post-parse hasUsage={}, prompt={}, completion={}, cached={}, reasoning={}, audio={}, cacheCreation={}",
+                hasUsage, promptTokens, completionTokens, cachedTokens, reasoningTokens, audioTokens, cacheCreationTokens);
     }
 
     /**
@@ -56,7 +66,8 @@ public class StreamUsageAccumulator implements Consumer<String> {
     }
 
     public TokenUsage result() {
-        return new TokenUsage(promptTokens, completionTokens, cachedTokens);
+        return new TokenUsage(promptTokens, completionTokens, cachedTokens,
+                reasoningTokens, audioTokens, cacheCreationTokens);
     }
 
     private void parseOpenAiUsage(Map<String, Object> chunk) {
@@ -72,9 +83,26 @@ public class StreamUsageAccumulator implements Consumer<String> {
             completionTokens = n.intValue();
             hasUsage = true;
         }
-        if (usage.get("prompt_tokens_details") instanceof Map<?, ?> details
-                && details.get("cached_tokens") instanceof Number n) {
-            cachedTokens = n.intValue();
+        Long promptAudio = null;
+        if (usage.get("prompt_tokens_details") instanceof Map<?, ?> details) {
+            if (details.get("cached_tokens") instanceof Number n) {
+                cachedTokens = n.intValue();
+            }
+            promptAudio = toNullableLong(details.get("audio_tokens"));
+        }
+        Long reasoning = null;
+        Long completionAudio = null;
+        if (usage.get("completion_tokens_details") instanceof Map<?, ?> details) {
+            reasoning = toNullableLong(details.get("reasoning_tokens"));
+            completionAudio = toNullableLong(details.get("audio_tokens"));
+        }
+        // 单帧内 prompt/completion 两侧求和; 帧间覆盖 (latest wins, 与 completion_tokens 同语义)
+        Long frameAudio = sumNullable(promptAudio, completionAudio);
+        if (frameAudio != null) {
+            audioTokens = frameAudio;
+        }
+        if (reasoning != null) {
+            reasoningTokens = reasoning;
         }
     }
 
@@ -87,11 +115,12 @@ public class StreamUsageAccumulator implements Consumer<String> {
                 promptTokens = n.intValue();
                 hasUsage = true;
             }
+            // issue #26 口径定版: read → cached (覆盖), creation → 独立维 (累加, 保留既有 += 语义)
             if (usage.get("cache_read_input_tokens") instanceof Number n) {
                 cachedTokens = n.intValue();
             }
             if (usage.get("cache_creation_input_tokens") instanceof Number n) {
-                cachedTokens += n.intValue();
+                cacheCreationTokens = accumulate(cacheCreationTokens, n);
             }
         }
         // message_delta: usage 在 chunk.usage 顶层 (Anthropic standard + MiniMax 兼容)
@@ -111,7 +140,7 @@ public class StreamUsageAccumulator implements Consumer<String> {
                 hasUsage = true;
             }
             if (usage.get("cache_creation_input_tokens") instanceof Number n) {
-                cachedTokens += n.intValue();
+                cacheCreationTokens = accumulate(cacheCreationTokens, n);
                 hasUsage = true;
             }
         }
@@ -126,6 +155,28 @@ public class StreamUsageAccumulator implements Consumer<String> {
                 hasUsage = true;
             }
         }
+    }
+
+    /** creation 跨帧累加 (保留既有 += 语义, 含 message_start 首帧自 0 起累). */
+    private static Long accumulate(Long current, Number n) {
+        return (current != null ? current : 0L) + n.longValue();
+    }
+
+    private static Long toNullableLong(Object v) {
+        if (v instanceof Number n) {
+            return n.longValue();
+        }
+        return null;
+    }
+
+    private static Long sumNullable(Long a, Long b) {
+        if (a == null) {
+            return b;
+        }
+        if (b == null) {
+            return a;
+        }
+        return a + b;
     }
 
     private static String extractDataPayload(String frame) {

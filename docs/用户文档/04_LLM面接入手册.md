@@ -69,6 +69,7 @@ for chunk in stream:          # 标准 OpenAI SSE 增量
 ### 响应说明
 
 - **成功 = 上游原样（协议归一后）透传，非信封**；`usage.prompt_tokens / completion_tokens / cached_tokens` 是计费结算依据。
+- 细分留痕（issue #26）：`usage.completion_tokens_details.reasoning_tokens`（推理）与 `prompt/completion_tokens_details.audio_tokens`（音频）为留痕维，**不参与计价**，仅用于调用日志观测；Anthropic 协议下缓存写入 tokens（`cache_creation_input_tokens`）与缓存读取（`cache_read_input_tokens` → `cached_tokens`）分列上报。
 - 缺 `usage` 的上游：按估算 tokens 结算（估算值略高于实际，误差方向对调用方无成本损失）。
 - 计费 saga：转发前预扣（余额不足 → **10617 / HTTP 402**）→ 转发 → 按实际 usage 结算；全失败自动全额退款。
 - `tools` 调用链自动做 Anthropic 工具链 sanitizer 清洗（跨协议工具调用兼容）。

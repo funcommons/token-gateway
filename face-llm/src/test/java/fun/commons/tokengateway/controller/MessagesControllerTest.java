@@ -203,6 +203,46 @@ class MessagesControllerTest {
     }
 
     @Test
+    @DisplayName("issue #26 非流式 anthropic 上游: usage 细分随 settle 下发 (cache_creation 独立成维, 不再并账 cacheRead)")
+    void nonStreamAnthropicSettleCarriesBreakdown() throws Exception {
+        mockTokenOk();
+        mockDistribute("anthropic");
+        mockScanPass();
+        mockAuditPass();
+        upstream.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\","
+                        + "\"content\":[{\"type\":\"text\",\"text\":\"你好\"}],"
+                        + "\"usage\":{\"input_tokens\":36,\"output_tokens\":16,"
+                        + "\"cache_read_input_tokens\":128,\"cache_creation_input_tokens\":64}}"));
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
+
+        StepVerifier.create(controller.messages(null, "sk-ant-x", anthropicBody(), exchange()))
+                .assertNext(entity -> assertThat(entity.getStatusCode().value()).isEqualTo(200))
+                .verifyComplete();
+
+        String settleBody = null;
+        for (int i = 0; i < 6 && settleBody == null; i++) {
+            var recorded = backend.takeRequest(3, java.util.concurrent.TimeUnit.SECONDS);
+            if (recorded == null) {
+                break;
+            }
+            if (recorded.getPath().contains("/billing/settle")) {
+                settleBody = recorded.getBody().readUtf8();
+            }
+        }
+        assertThat(settleBody).isNotNull();
+        assertThat(settleBody).contains("\"actualPromptTokens\":36");
+        assertThat(settleBody).contains("\"actualCompletionTokens\":16");
+        // 口径定版: read → cacheReadTokens=128 (旧口径曾把 creation 并入成 128+64)
+        assertThat(settleBody).contains("\"cacheReadTokens\":128");
+        assertThat(settleBody).contains("\"cacheCreationTokens\":64");
+    }
+
+    @Test
     @DisplayName("非流式 openai 上游: 响应转 anthropic shape (type=message)")
     void nonStreamOpenaiTranslated() {
         mockTokenOk();

@@ -13,8 +13,29 @@ public class SettleRequest {
     private String preConsumeId;
     private int actualPromptTokens;
     private int actualCompletionTokens;
+
+    /**
+     * 缓存写入 tokens (Anthropic cache_creation_input_tokens). 既有字段, issue #26 起由
+     * 主链路真实填充 (此前恒 0 缺省); int 缺省 0 语义不变, 与 cacheReadTokens 合计仍含于
+     * actualPromptTokens (Anthropic 口径), 拆分只发生在细分字段.
+     */
     private int cacheCreationTokens;
+
     private int cacheReadTokens;
+
+    /**
+     * 细分留痕维 (issue #26 可选增量, 不参与计价; null = 无源数据不造数,
+     * 旧计费后端忽略未知字段). OpenAI completion_tokens_details.reasoning_tokens
+     * (completion 子集); Anthropic 原生无此维恒 null.
+     */
+    private Long reasoningTokens;
+
+    /**
+     * 细分留痕维 (issue #26 可选增量): OpenAI prompt/completion 两侧
+     * audio_tokens 求和的留痕维; null = 无源数据不造数.
+     */
+    private Long audioTokens;
+
     private boolean success;
     private String requestId;
     private String upstreamRequestId;

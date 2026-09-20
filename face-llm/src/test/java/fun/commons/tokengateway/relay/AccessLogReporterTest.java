@@ -98,6 +98,46 @@ class AccessLogReporterTest {
     }
 
     @Test
+    @DisplayName("issue #26: reportSuccess(TokenUsage) 请求体携带 reasoning/audio/cacheCreation 细分留痕")
+    void reportSuccessCarriesBreakdown() throws Exception {
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":null}"));
+
+        StepVerifier.create(reporter.reportSuccess(prepared, "gpt-4o",
+                        "/v1/chat/completions",
+                        new TokenUsage(36, 16, 5, 9L, 8L, 64L),
+                        java.math.BigDecimal.valueOf(7.5), 250, "trace-26"))
+                .verifyComplete();
+
+        String body = backend.takeRequest().getBody().readUtf8();
+        assertThat(body).contains("\"promptTokens\":36");
+        assertThat(body).contains("\"completionTokens\":16");
+        assertThat(body).contains("\"cachedTokens\":5");
+        assertThat(body).contains("\"reasoningTokens\":9");
+        assertThat(body).contains("\"audioTokens\":8");
+        assertThat(body).contains("\"cacheCreationTokens\":64");
+    }
+
+    @Test
+    @DisplayName("issue #26: 旧 int 签名细分字段为 null (向后兼容, 不造数)")
+    void legacySignatureBreakdownNull() throws Exception {
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":null}"));
+
+        StepVerifier.create(reporter.reportSuccess(prepared, "gpt-4o",
+                        "/v1/chat/completions", 36, 16, 5,
+                        java.math.BigDecimal.valueOf(7.5), 250, "trace-26"))
+                .verifyComplete();
+
+        String body = backend.takeRequest().getBody().readUtf8();
+        assertThat(body).contains("\"reasoningTokens\":null");
+        assertThat(body).contains("\"audioTokens\":null");
+        assertThat(body).contains("\"cacheCreationTokens\":null");
+    }
+
+    @Test
     @DisplayName("prepared=null → 直接 Mono.empty() (不调 RPC)")
     void preparedNullSkipped() {
         StepVerifier.create(reporter.reportSuccess(null, "m", "/p", 0, 0, 0, null, 0, null))

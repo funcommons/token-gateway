@@ -120,11 +120,10 @@ public class MessagesController {
                                         fun.commons.tokengateway.relay.TokenUsageExtractor.fromAnthropic(resp);
                                 int latency = elapsedMs(startNs);
                                 settled.set(true);
-                                orchestrator.settle(current, u.promptTokens(), u.completionTokens(), u.cachedTokens(),
-                                        latency, lossAttempts)
+                                // issue #26: settle/access-log 携带 reasoning/audio/cacheCreation 细分留痕
+                                orchestrator.settle(current, u, latency, lossAttempts)
                                         .flatMap(credit -> accessLogReporter.reportSuccess(
-                                                current, model, REQUEST_PATH,
-                                                u.promptTokens(), u.completionTokens(), u.cachedTokens(),
+                                                current, model, REQUEST_PATH, u,
                                                 credit, latency, traceId))
                                         .subscribe(
                                                 v -> {},
@@ -373,9 +372,10 @@ public class MessagesController {
                     fun.commons.tokengateway.relay.StreamUsageAccumulator usageAcc = activeAcc.get();
                     fun.commons.tokengateway.relay.TokenUsage u = usageAcc.hasUsage()
                             ? usageAcc.result() : estimateFallback(body);
-                    orchestrator.settle(current, u.promptTokens(), u.completionTokens(), u.cachedTokens(), latency, lossAttempts)
+                    // issue #26: settle/access-log 携带 reasoning/audio/cacheCreation 细分留痕
+                    orchestrator.settle(current, u, latency, lossAttempts)
                             .flatMap(credit -> accessLogReporter.reportSuccess(current, model, REQUEST_PATH,
-                                    u.promptTokens(), u.completionTokens(), u.cachedTokens(), credit, latency, traceId))
+                                    u, credit, latency, traceId))
                             .subscribe(
                                     v -> {},
                                     e -> log.warn("[Saga/settle+AccessLog] preConsumeId={}, err={}",

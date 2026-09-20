@@ -114,11 +114,10 @@ public class ChatCompletionController {
                                         fun.commons.tokengateway.relay.TokenUsageExtractor.fromOpenAi(resp);
                                 int latency = elapsedMs(startNs);
                                 settled.set(true);
-                                orchestrator.settle(current, u.promptTokens(), u.completionTokens(), u.cachedTokens(),
-                                        latency, lossAttempts)
+                                // issue #26: settle/access-log 携带 reasoning/audio/cacheCreation 细分留痕
+                                orchestrator.settle(current, u, latency, lossAttempts)
                                         .flatMap(credit -> accessLogReporter.reportSuccess(
-                                                current, model, REQUEST_PATH,
-                                                u.promptTokens(), u.completionTokens(), u.cachedTokens(),
+                                                current, model, REQUEST_PATH, u,
                                                 credit, latency, traceId))
                                         .subscribe(
                                                 v -> {},
@@ -259,9 +258,10 @@ public class ChatCompletionController {
                     log.info("[ChatCompletion/stream] traceId={}, model={}, hasUsage={}, prompt={}, completion={}, cached={}",
                             traceId, model, usageAcc.hasUsage(),
                             u.promptTokens(), u.completionTokens(), u.cachedTokens());
-                    orchestrator.settle(current, u.promptTokens(), u.completionTokens(), u.cachedTokens(), latency, lossAttempts)
+                    // issue #26: settle/access-log 携带 reasoning/audio/cacheCreation 细分留痕
+                    orchestrator.settle(current, u, latency, lossAttempts)
                             .flatMap(credit -> accessLogReporter.reportSuccess(current, model, REQUEST_PATH,
-                                    u.promptTokens(), u.completionTokens(), u.cachedTokens(), credit, latency, traceId))
+                                    u, credit, latency, traceId))
                             .subscribe(
                                     v -> {},
                                     e -> log.warn("[Saga/settle+AccessLog] preConsumeId={}, err={}",

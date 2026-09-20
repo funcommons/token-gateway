@@ -32,6 +32,19 @@ public class AccessLogRequest {
     private Integer promptTokens;
     private Integer completionTokens;
     private Integer cachedTokens;
+
+    /**
+     * 细分留痕维 (issue #26 可选新增, 不参与计价; null = 无源数据, 旧消费方忽略未知字段;
+     * 主应用 AccessLogEntity 落列由 token 侧同步). OpenAI completion_tokens_details.reasoning_tokens.
+     */
+    private Integer reasoningTokens;
+
+    /** 细分留痕维 (issue #26): OpenAI prompt/completion 两侧 audio_tokens 求和. */
+    private Integer audioTokens;
+
+    /** 细分留痕维 (issue #26): Anthropic cache_creation_input_tokens 口径定版独立成维. */
+    private Integer cacheCreationTokens;
+
     private BigDecimal creditConsumed;
     private String billingMode;
     private Integer latencyMs;

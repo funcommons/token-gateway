@@ -395,7 +395,9 @@ class ChatCompletionControllerTest {
                 .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_END)
                 .setBody("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
                         + "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,"
-                        + "\"completion_tokens\":7}}\n\n"
+                        + "\"completion_tokens\":7,"
+                        + "\"prompt_tokens_details\":{\"cached_tokens\":4,\"audio_tokens\":6},"
+                        + "\"completion_tokens_details\":{\"reasoning_tokens\":3,\"audio_tokens\":2}}}\n\n"
                         + "data: [DONE]\n\n"));
         backendServer.enqueue(new MockResponse()
                 .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
@@ -442,6 +444,10 @@ class ChatCompletionControllerTest {
         assertThat(settleBody).contains("\"actualCompletionTokens\":7");
         // ③⑦ 对账 owner 桥: settle 契约携带 token 侧 user_id 数值化（userId:"2" → ownerPartyId:2）
         assertThat(settleBody).contains("\"ownerPartyId\":2");
+        // issue #26: 细分留痕随 settle 下发 (OpenAI 流式末帧 details → settle 新字段)
+        assertThat(settleBody).contains("\"cacheReadTokens\":4");
+        assertThat(settleBody).contains("\"reasoningTokens\":3");
+        assertThat(settleBody).contains("\"audioTokens\":8");
     }
 
     private MockResponse jsonOk() {

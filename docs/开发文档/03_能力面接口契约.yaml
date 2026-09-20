@@ -656,6 +656,23 @@ components:
           type: integer
         cached_tokens:
           type: integer
+          description: 缓存读取 tokens（Anthropic cache_read_input_tokens /
+            OpenAI prompt_tokens_details.cached_tokens）；含于 prompt_tokens（Anthropic 口径）
+        cache_creation_tokens:
+          type: integer
+          description: 缓存写入 tokens（Anthropic cache_creation_input_tokens，issue #26
+            起独立成维不再并入 cached_tokens；含于 prompt_tokens）。旧字段，历史上恒 0，
+            消费方按「缺省 0 = 未上报」兼容
+        reasoning_tokens:
+          type: integer
+          nullable: true
+          description: 推理 tokens（OpenAI completion_tokens_details.reasoning_tokens；
+            留痕维，不参与计价；null = 上游未回报，不造数）
+        audio_tokens:
+          type: integer
+          nullable: true
+          description: 音频 tokens（OpenAI prompt/completion 两侧 audio_tokens 求和；
+            留痕维，不参与计价；null = 上游未回报，不造数）
         latency_ms:
           type: integer
 
@@ -683,6 +700,19 @@ components:
           type: integer
         cached_tokens:
           type: integer
+        reasoning_tokens:
+          type: integer
+          nullable: true
+          description: 推理 tokens 留痕（issue #26；不参与计价；null = 无源数据）
+        audio_tokens:
+          type: integer
+          nullable: true
+          description: 音频 tokens 留痕（issue #26，两侧求和口径；null = 无源数据）
+        cache_creation_tokens:
+          type: integer
+          nullable: true
+          description: 缓存写入 tokens 留痕（issue #26，与 cached_tokens 分离；
+            null = 无源数据）
         credit:
           type: string
           nullable: true

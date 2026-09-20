@@ -99,7 +99,7 @@ class StreamUsageAccumulatorTest {
     }
 
     @Test
-    @DisplayName("Anthropic message_delta 含 cache_creation_input_tokens: 累加到 cachedTokens")
+    @DisplayName("Anthropic message_delta 含 cache_creation_input_tokens: 独立成维不并入 cached (issue #26 口径定版)")
     void anthropicMessageDeltaCacheCreationAccumulated() {
         StreamUsageAccumulator acc = new StreamUsageAccumulator();
         acc.accept("event: message_delta\ndata: {\"type\":\"message_delta\","
@@ -109,12 +109,13 @@ class StreamUsageAccumulatorTest {
         assertThat(acc.hasUsage()).isTrue();
         assertThat(acc.result().promptTokens()).isEqualTo(100);
         assertThat(acc.result().completionTokens()).isEqualTo(50);
-        // cache_creation + cache_read 累加
-        assertThat(acc.result().cachedTokens()).isEqualTo(1024 + 2048);
+        // issue #26: read → cached, creation → 独立维 (旧口径曾并账 cached=1024+2048)
+        assertThat(acc.result().cachedTokens()).isEqualTo(2048);
+        assertThat(acc.result().cacheCreationTokens()).isEqualTo(1024);
     }
 
     @Test
-    @DisplayName("Anthropic 多 message_delta 累计: 多次 cache_creation_input_tokens 累加")
+    @DisplayName("Anthropic 多 message_delta 累计: 多次 cache_creation_input_tokens 累加到独立维")
     void anthropicMessageDeltaCacheCreationMultipleDelta() {
         StreamUsageAccumulator acc = new StreamUsageAccumulator();
         acc.accept("event: message_delta\ndata: {\"type\":\"message_delta\","
@@ -125,7 +126,9 @@ class StreamUsageAccumulatorTest {
                 + "\"usage\":{\"cache_creation_input_tokens\":50}}\n\n");
 
         assertThat(acc.hasUsage()).isTrue();
-        assertThat(acc.result().cachedTokens()).isEqualTo(350);
+        // issue #26: 累加语义保留, 但落到 cacheCreationTokens (cached 不再被并账)
+        assertThat(acc.result().cacheCreationTokens()).isEqualTo(350);
+        assertThat(acc.result().cachedTokens()).isZero();
     }
 
     @Test
@@ -142,6 +145,7 @@ class StreamUsageAccumulatorTest {
         assertThat(acc.hasUsage()).isTrue();
         // 覆盖式, latest=50
         assertThat(acc.result().cachedTokens()).isEqualTo(50);
+        assertThat(acc.result().cacheCreationTokens()).isNull();
     }
 
     @Test
@@ -202,5 +206,73 @@ class StreamUsageAccumulatorTest {
         // type=null 兜底分支会覆盖 type=message_delta 已设值 (latest 帧为准)
         assertThat(acc.result().promptTokens()).isEqualTo(200);
         assertThat(acc.result().completionTokens()).isEqualTo(80);
+    }
+
+    // ---- issue #26: usage 细分对齐 (四象限之 OpenAI 流式) ----
+
+    @Test
+    @DisplayName("issue #26 OpenAI 流式细分: 末帧 cached/audio/reasoning details 全取")
+    void openaiStreamBreakdownDims() {
+        StreamUsageAccumulator acc = new StreamUsageAccumulator();
+        acc.accept("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":7,"
+                + "\"prompt_tokens_details\":{\"cached_tokens\":4,\"audio_tokens\":6},"
+                + "\"completion_tokens_details\":{\"reasoning_tokens\":3,\"audio_tokens\":2}}}\n\n");
+        acc.accept("data: [DONE]\n\n");
+
+        assertThat(acc.hasUsage()).isTrue();
+        assertThat(acc.result().promptTokens()).isEqualTo(12);
+        assertThat(acc.result().completionTokens()).isEqualTo(7);
+        assertThat(acc.result().cachedTokens()).isEqualTo(4);
+        assertThat(acc.result().reasoningTokens()).isEqualTo(3);
+        // 两侧 audio 求和 (留痕维口径)
+        assertThat(acc.result().audioTokens()).isEqualTo(8);
+        assertThat(acc.result().cacheCreationTokens()).isNull();
+    }
+
+    @Test
+    @DisplayName("issue #26 OpenAI 流式无细分 → null 不造 0")
+    void openaiStreamBreakdownAbsentNull() {
+        StreamUsageAccumulator acc = new StreamUsageAccumulator();
+        acc.accept("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":7}}\n\n");
+        acc.accept("data: [DONE]\n\n");
+
+        assertThat(acc.hasUsage()).isTrue();
+        assertThat(acc.result().reasoningTokens()).isNull();
+        assertThat(acc.result().audioTokens()).isNull();
+        assertThat(acc.result().cacheCreationTokens()).isNull();
+    }
+
+    // ---- issue #26: Anthropic 口径定版 (四象限之 Anthropic 流式) ----
+
+    @Test
+    @DisplayName("issue #26 Anthropic 拆分: message_start 带 creation + message_delta 覆盖 read, 互不并账")
+    void anthropicStartCreationDeltaReadSplit() {
+        StreamUsageAccumulator acc = new StreamUsageAccumulator();
+        acc.accept("event: message_start\ndata: {\"type\":\"message_start\","
+                + "\"message\":{\"usage\":{\"input_tokens\":25,"
+                + "\"cache_creation_input_tokens\":100,\"cache_read_input_tokens\":3}}}\n\n");
+        acc.accept("event: message_delta\ndata: {\"type\":\"message_delta\","
+                + "\"usage\":{\"output_tokens\":9,\"cache_read_input_tokens\":30}}\n\n");
+
+        assertThat(acc.hasUsage()).isTrue();
+        assertThat(acc.result().promptTokens()).isEqualTo(25);
+        assertThat(acc.result().completionTokens()).isEqualTo(9);
+        // read 覆盖取最新; creation 独立成维不再并入 cached
+        assertThat(acc.result().cachedTokens()).isEqualTo(30);
+        assertThat(acc.result().cacheCreationTokens()).isEqualTo(100);
+    }
+
+    @Test
+    @DisplayName("issue #26 Anthropic 拆分: OpenAI 式末帧无 cache 字段 → 全 null")
+    void anthropicStreamBreakdownAbsentNull() {
+        StreamUsageAccumulator acc = new StreamUsageAccumulator();
+        acc.accept("event: message_start\ndata: {\"type\":\"message_start\","
+                + "\"message\":{\"usage\":{\"input_tokens\":25}}}\n\n");
+        acc.accept("event: message_delta\ndata: {\"type\":\"message_delta\","
+                + "\"usage\":{\"output_tokens\":9}}\n\n");
+
+        assertThat(acc.hasUsage()).isTrue();
+        assertThat(acc.result().cachedTokens()).isZero();
+        assertThat(acc.result().cacheCreationTokens()).isNull();
     }
 }

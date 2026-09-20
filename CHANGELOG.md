@@ -6,6 +6,8 @@
 
 ### 新增
 
+- **usage 细分对齐（issue #26）**：`TokenUsage` 扩 reasoning/audio/cacheCreation 三维（无源 null 不造数）；settle/access-log 留痕透传；**两条转换链计费口径损失修复**——`openAiToAnthropicResponse` 此前丢 `cached_tokens`（Messages+OpenAI 上游 cacheRead 计 0）、`anthropicToOpenAIResponse` 此前丢 `cache_creation_input_tokens`；Anthropic cache 拆分定版（creation 不再并入 cached，prompt 总量语义不变）；四象限（双协议×流式/非流式）断言 + 端到端 settle body 校验；字段映射对齐 Spring AI 1.1.2 `OpenAiApi.Usage`
+
 - **validate 契约补位（issue #27）**：`clientIp` 死字段激活——新增 `ClientIpResolver`（信任代理策略 `gateway.client-ip.{enabled,trusted-proxies}`，默认 0=恒取 TCP 对端防伪造；XFF 按标准逐跳追加语义从右数第 N 段，对端 null/段耗尽/畸形 fail-safe 回退）+ `TokenValidateVO.subAccountId` 可选回传；LLM 面 6 controller + 任务面 create/poll 全链路填充，controller 级透传断言 4 条
 - **渠道健康上报补维度（issue #25）**：`RecordFailureRequest` 增 `upstreamStatus`/`latencyMs` 可选字段；`CANCELLED` errorCode 常量口径定版（499 当前不上报）；`ChannelHealthReporter` javadoc 漂移修正（4xx/5xx+软失败均报）；03 契约 yaml 分区补 Mmagix 形态 record-success/failure 真实契约
 
