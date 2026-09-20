@@ -119,6 +119,20 @@ gateway:
     max-attempts: 5
     base-backoff: 30s
 
+  # 客户端错误契约 (issue #24): LLM 面 (/v1/chat/completions, /v1/messages 前缀) 错误响应形状.
+  # envelope (默认) = 6 字段信封 (文档化既定契约); openai = {"error":{...}} 形状 (OpenAI SDK
+  # 直接可解析)。任务面/内部端点恒为信封。切换前与接入方对齐契约 — 信封是既定公开契约,
+  # 未对齐即切 openai 对存量接入方是 breaking。
+  # error-shape: envelope
+  # 能力面业务码透传白名单 (原码 → 透传 HTTP 状态; 与默认白名单按键合并, 同键覆盖):
+  # distribute/preConsume 失败分支原码命中 → 客户端直接收原码 + 语义 HTTP 状态 (两种形状均
+  # 生效); 未命中走既有映射 (10400·20103→404 / 10617→402 / 其余 502+10004)。白名单之外的
+  # 原码不进网关公开错误码空间 (仅 message 文本残存)。默认: 4090→403, 10601→402,
+  # 10602→404, 10603→404, 10402→409
+  # error-passthrough-codes:
+  #   4090: 403
+  #   10601: 402
+
   # THMP 契约面影子双跑 (22 号 S2-W1): enabled=true 后旧 distribute 与中台 resolve 并行比对,
   # 结果只埋点不执行; secret 环境变量注入 (thmp_tenants 契约租户, 禁入仓).
   thmp:

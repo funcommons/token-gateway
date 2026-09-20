@@ -7,6 +7,7 @@
 ### 新增
 
 - **LLM 面 settle/refund 失败重放兜底（issue #23，P0）**：新增 `BillingPendingStore`（Redis ZSET `tgw:billing:pending`，score=下次重试时刻）+ `BillingReconcileJob`（`gateway.billing-reconcile.*` 默认 true/30s/5 次/30s 指数退避）——settle/refund **基础设施失败**（10003 折叠码）按原参重放（preConsumeId 幂等锚），重放成功/退避重排/耗尽死信三态日志（`[Billing-Reconcile]`/`[Billing-DeadLetter]` 单行 JSON 快照含全部结算参数）；业务拒绝不重试直接死信；入队失败兜底死信
+- **错误契约保真（issue #24，P0）**：LLM 面（/v1/chat、/v1/messages 前缀）错误响应形状可切换 `gateway.error-shape: envelope（默认）|openai`——openai 形状 `{"error":{message,type,param,code}}` + 顶层 `trace_id`（OpenAI SDK 直接可解析；`error.type` 按 HTTP 状态映射：401→authentication_error / 402→insufficient_quota / 403→permission_error / 404→not_found_error / 429→rate_limit_error / 5xx→api_error / 其余 4xx→invalid_request_error；`error.code`=网关业务码字符串，message/trace_id 原样保留）；默认 envelope 存量接入方零影响，任务面/内部端点恒信封。**能力面业务码透传白名单** `gateway.error-passthrough-codes`（默认 4090→403、10601→402、10602→404、10603→404、10402→409；配置按键合并、同键覆盖）：distribute/preConsume 失败原码命中 → 客户端直收原码 + 语义 HTTP 状态（白名单优先于既有 10400·20103→404、10617→402 映射），未命中走既有映射，白名单外原码不进网关公开错误码空间。通用约定/FAQ/部署手册（中英）同步
 - **任务面 access-log 接线（issue #29）**：新增 `TaskAccessLogger`——任务受理（3 controller create 成功路径）+ 终态（TerminalEventHandler onTerminal/onExpired）各上报 1 条，fire-and-forget 不阻塞主链；taskNo 以 `?task_no=` 附 requestPath（契约不变）；排障四系统（work→网关→lotask→worker）串联缺口闭合
 
 - **幂等回放语义（issue #30 完整修 + #28 主解）**：`Idempotency-Key` 从拒绝式升级为**首响回放**——2xx 非流式 ≤1MB 响应缓存（`IdempotentResponse` record + 单 key 双形态：占位 "1"/响应 JSON，TTL 回填无孤儿），TTL 内同凭证同 key 原样回放（同 status/body + `Idempotency-Replayed: true` 头）；处理中/流式/超限 → 409+10501（message 区分「处理中」）；失败不占键（非 2xx 释放，语义较旧版收紧：4xx 也释放）；`IdempotencyStore` 以 default 方法扩展三 API，存量实现零破坏。**#30 头语义 bug 修复**：非数字 `Idempotency-Key` 不再透传 billing requestId 位（workId 要求纯数字，此前按文档带 uuidgen key 100% 失败 502/10004），distribute 幂等透传保留、纯数字 key 语义不变（#12）。契约 yaml（08/09）「拒绝式」表述同步回放语义
@@ -23,10 +24,6 @@
 
 ## [0.11.0] - 2026-09-18
 
-- **文档治理二轮**：中英镜像缺口补齐（backend-onboarding/security-contract 补 #22 的 504/10003 分支、任务面手册 en 补资源代理 `.{ext}` 与轮询 504 语义）；《在线文档方案》归入开发文档编号体系（09）；新增关键文档模板三件（`docs/_templates/`：ADR/测试报告/发布说明，站点构建排除）；README（中英）与 sidebar 同步
-
-## [0.11.0] - 2026-09-18
-
 ### 新增
 
 - **OneToken BASE64 大载荷入站口径 128MB（可配置）**：入站请求体 `spring.codec.max-in-memory-size` 默认 16MB→**128MB**（env `GATEWAY_MAX_BODY_SIZE`）；submit 出站载荷保持无网关侧上限（随入站请求体边界）。FAQ/部署手册同步
@@ -34,6 +31,7 @@
 ### 文档
 
 - **文档治理一轮**：README（中英）对齐当前状态（阶段标记、446 测试、v0.10.0 版本引用、模块树补 starter/demo、文档表补 06/部署手册、新增贡献/安全段）；快速开始（中英）修正第三步端点形状（`/v1/videos` OpenAI job 形状误配 OneToken 形状 → 改 `/v1/onetoken/videos`）与 starter 版本引用；任务面手册（中英）状态横幅更新为全链路可用 + 资源代理 `.{ext}`/inline/`base64` 输出语义；FAQ（中英）新增 504/10003 与 base64 参考图条目；v0.1.0 测试报告归档至 `docs/archive/`；新增《部署运维手册》《CONTRIBUTING》《SECURITY》；vitepress 关闭 `ignoreDeadLinks`（构建即死链检查）
+- **文档治理二轮**：中英镜像缺口补齐（backend-onboarding/security-contract 补 #22 的 504/10003 分支、任务面手册 en 补资源代理 `.{ext}` 与轮询 504 语义）；《在线文档方案》归入开发文档编号体系（09）；新增关键文档模板三件（`docs/_templates/`：ADR/测试报告/发布说明，站点构建排除）；README（中英）与 sidebar 同步
 
 ## [0.10.0] - 2026-09-18
 

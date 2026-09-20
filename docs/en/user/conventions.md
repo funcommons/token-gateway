@@ -1,6 +1,6 @@
 # Conventions
 
-**Required reading for all callers**: authentication, response shapes, error codes, rate limiting, idempotency, tracing, timeouts. Identical across the LLM face and the task face.
+**Required reading for all callers**: authentication, response shapes, error codes, error shape switching, rate limiting, idempotency, tracing, timeouts. Identical across the LLM face and the task face.
 
 ## 1. Authentication
 
@@ -58,12 +58,67 @@ Error envelope (6 fields):
 
 > When the upstream channel returns 4xx/5xx, the gateway passes through the real upstream HTTP status and envelope code (e.g. 401→10202, 429→10500, 5xx→10001/10004); the error message carries an `upstream error HTTP_<status>` prefix — use it to tell upstream failures apart from your own credential issues (no more one-size-fits-all 502).
 
-## 4. Tracing
+## 4. Error Shape Switching (`gateway.error-shape`)
+
+The gateway supports two error-response shapes, selected by the gateway-side setting `gateway.error-shape`:
+
+| Value | Shape | Notes |
+|---|---|---|
+| `envelope` (default) | The 6-field envelope of §2 in this document | The established public contract; existing integrations are unaffected |
+| `openai` | The OpenAI `{"error":{message,type,param,code}}` shape + top-level `trace_id` | Directly parseable by OpenAI SDKs |
+
+Wire sample of the `openai` shape (HTTP 401):
+
+```json
+{"error":{"message":"令牌无效","type":"authentication_error","param":null,"code":"10202"},"trace_id":"c0a80101-..."}
+```
+
+Field mapping:
+
+- `error.message` = the envelope `message`, passed through verbatim with no prefix/suffix.
+- `error.type` is mapped from the HTTP status:
+
+| HTTP status | `error.type` |
+|---|---|
+| 401 | `authentication_error` |
+| 402 | `insufficient_quota` |
+| 403 | `permission_error` |
+| 404 | `not_found_error` |
+| 429 | `rate_limit_error` |
+| 5xx | `api_error` |
+| Any other 4xx (incl. 400) | `invalid_request_error` |
+
+- `error.code` = the gateway business code as a **string** (in whitelist-passthrough cases, the capability-face original code, e.g. `"4090"`). OpenAI-native semantic code strings (`invalid_api_key` / `model_not_found` / `insufficient_quota`) are **not** given separate fields — their semantics are carried one-to-one by `error.type` (see the table above). OpenAI SDKs classify errors by HTTP status + `error.type`; `error.code` is a free-form string field anyway, so holding the gateway business code keeps both the SDK parseable and the gateway code table intact (full code table: [LLM Face Guide §7](./llm-guide.md)).
+- `error.param` is always `null` (the key is kept per OpenAI wire-format convention).
+- The top-level `trace_id` shares the same source as the `X-Trace-Id` response header (§5 Tracing).
+
+**Scope**: only **error** responses under the LLM-face `/v1/chat` and `/v1/messages` prefixes (including `/v1/messages/count_tokens`); the task face / internal endpoints always use the envelope, regardless of the switch. Success responses are upstream passthrough shapes under both settings (§2) and are unaffected.
+
+> ⚠️ **Breaking warning**: the 6-field envelope is the established public contract. Before switching to `error-shape=openai`, align with **every existing integration** — switching without alignment is a breaking change for them (they will no longer find the `code` field).
+
+### 4.1 Capability-Face Code Passthrough Whitelist (`gateway.error-passthrough-codes`)
+
+When LLM-face routing (distribute) or pre-deduction (preConsume) fails, if the capability-face original code hits the whitelist, the client **receives the original code directly** plus a semantic HTTP status (effective under **both** error shapes, independent of `error-shape`):
+
+| Capability-face code | Passthrough HTTP status | Meaning |
+|---|---|---|
+| 4090 | 403 | Risk-control rejection |
+| 10601 | 402 | Insufficient balance (capability-face semantics) |
+| 10602 | 404 | Model not found (capability-face semantics) |
+| 10603 | 404 | — |
+| 10402 | 409 | State conflict |
+
+- **Whitelist first**: a hit short-circuits and returns immediately; the legacy mapping is skipped.
+- **No hit** falls through to the legacy mapping: 10400·20103→404 / 10617→402 / everything else 502+10004.
+- Capability-face codes outside the whitelist **never enter the gateway's public error-code space** (only leftover message text).
+- Configuration is **merged by key with the default whitelist, same-key overrides** (default keys cannot be removed via configuration; to narrow the whitelist, override the same key).
+
+## 5. Tracing
 
 - Requests may carry `X-Trace-Id` (the gateway generates one if absent); the response **always** returns `X-Trace-Id`.
 - For troubleshooting, the `trace_id` stitches gateway logs ↔ backend logs ↔ access logs.
 
-## 5. Rate Limiting
+## 6. Rate Limiting
 
 - Dimensions: per credential (apiKey) + global; fixed window.
 - On limit: **HTTP 429** + envelope (10500) + response headers:
@@ -75,7 +130,7 @@ Error envelope (6 fields):
 | `X-RateLimit-Remaining` | Remaining quota |
 | `X-RateLimit-Reset` | Seconds until reset |
 
-## 6. Idempotency (Replay Semantics)
+## 7. Idempotency (Replay Semantics)
 
 - All write operations (every POST `/v1/**`) accept `Idempotency-Key: <uuid v4>`. Scope = credential + key; window = TTL (48h by default).
 - **Replay semantics** (the standard way to recover from a timeout):
@@ -86,7 +141,7 @@ Error envelope (6 fields):
 - **The key value never leaks into downstream parameters**: the key is used only for dedup and replay, never mapped into any downstream business parameter slot (e.g. task-face workId, billing requestId); the billing requestId accepts digits only — for non-numeric keys the gateway generates a numeric request ID automatically.
 - Recommended: always send it for non-idempotent-safe calls (image generation, task creation, …); on 10501, check the message — "in progress" → retry the same request shortly and await replay, otherwise use a new key.
 
-## 7. Timeout Budget
+## 8. Timeout Budget
 
 | Stage | Budget |
 |---|---|

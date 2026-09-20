@@ -9,6 +9,7 @@ import fun.commons.tokengateway.contract.RefundRequest;
 import fun.commons.tokengateway.contract.SettleRequest;
 import fun.commons.tokengateway.contract.TokenValidateRequest;
 import fun.commons.tokengateway.contract.TokenValidateVO;
+import fun.commons.tokengateway.config.ErrorContractProperties;
 import fun.commons.tokengateway.exception.RelayException;
 import fun.commons.tokengateway.framework.ApiResponse;
 import fun.commons.tokengateway.moderation.ModerationGate;
@@ -92,6 +93,13 @@ public class RelayOrchestrator {
     private final BillingPendingStore billingPendingStore;
 
     /**
+     * 客户端错误契约 (issue #24): distribute/preConsume 失败分支的能力面业务码透传白名单
+     * (gateway.error-passthrough-codes). 兼容构造传默认实例 (默认白名单 4090→403,
+     * 10601→402, 10602→404, 10603→404, 10402→409); 生产装配由 Spring 注入.
+     */
+    private final ErrorContractProperties errorContract;
+
+    /**
      * 六参兼容构造 (测试/存量装配): adapter 缺省 mmagix, route 恒走旧 distribute,
      * tokenRouteClient 恒不触达, 待重放队列不接 (传 null 安全, 失败仅死信日志).
      */
@@ -115,6 +123,20 @@ public class RelayOrchestrator {
     }
 
     /**
+     * 九参兼容构造 (issue #23 形态): 错误契约取默认实例 (默认透传白名单,
+     * gateway.error-passthrough-codes 不经配置定制时与此等价).
+     */
+    public RelayOrchestrator(HttpTokenApi tokenApi, HttpChannelApi channelApi,
+                             HttpBillingApi billingApi, ModerationGate moderationGate,
+                             ThmpShadow thmpShadow, ThmpCutover thmpCutover,
+                             AdapterSelector adapterSelector, TokenRouteClient tokenRouteClient,
+                             BillingPendingStore billingPendingStore) {
+        this(tokenApi, channelApi, billingApi, moderationGate, thmpShadow, thmpCutover,
+                adapterSelector, tokenRouteClient, billingPendingStore,
+                new ErrorContractProperties());
+    }
+
+    /**
      * 校验 token + 路由渠道 + 审核 + 预扣, 返回 prepared 上下文.
      *
      * <p>失败场景 (任一) 直接抛 RelayException:
@@ -124,6 +146,8 @@ public class RelayOrchestrator {
      *   <li>channel RPC 失败 / 渠道为空 → 502</li>
      *   <li>moderation BLOCK → 400</li>
      *   <li>preConsume 失败 → 502; 信封 10617 (余额不足) → 402 + 10617</li>
+     *   <li>distribute/preConsume 失败且能力面原码命中透传白名单 (issue #24,
+     *   gateway.error-passthrough-codes) → 原码 + 语义 HTTP 状态透传 (白名单优先)</li>
      * </ul>
      *
      * @param clientIp 调用方客户端 IP (issue #27, controller 层经 ClientIpResolver 解析,
@@ -197,6 +221,15 @@ public class RelayOrchestrator {
                     if (distResp == null || !distResp.isSuccess() || distResp.getData() == null) {
                         String reason = distResp == null ? "no response"
                                 : (distResp.getMessage() == null ? "unknown" : distResp.getMessage());
+                        // issue #24 白名单透传 (白名单优先, 命中即短路): 能力面原码命中
+                        // gateway.error-passthrough-codes → RelayException(透传状态, 原码,
+                        // 原始 message); 未命中走既有映射
+                        Integer passStatus = errorContract.passthroughStatusOf(
+                                distResp == null ? null : distResp.getCode());
+                        if (passStatus != null) {
+                            return Mono.error(new RelayException(passStatus,
+                                    distResp.getCode(), reason));
+                        }
                         // 后端业务码 10400 / 20103 (模型不存在: bootstrap WorkDistributeService 抛
                         // ErrorCode.MODEL_NOT_FOUND, P1-5) 语义透传: HTTP 404 + 信封 10400;
                         // 其余失败 (RPC 降级/未知) 按上游故障 502 + 10004
@@ -287,6 +320,15 @@ public class RelayOrchestrator {
                             reason = resp.getData().getFailReason();
                         } else if (resp != null && resp.getMessage() != null) {
                             reason = resp.getMessage();
+                        }
+                        // issue #24 白名单透传 (白名单优先, 命中即短路): 能力面原码命中
+                        // gateway.error-passthrough-codes → RelayException(透传状态, 原码,
+                        // 原始 message); 未命中走既有映射
+                        Integer passStatus = errorContract.passthroughStatusOf(
+                                resp == null ? null : resp.getCode());
+                        if (passStatus != null) {
+                            throw new RelayException(passStatus, resp.getCode(),
+                                    reason == null ? "billing preConsume failed" : reason);
                         }
                         // 余额不足语义透传: HTTP 402 + 信封 10617 (对齐用户手册 §7 错误码表);
                         // 其余失败按上游故障 502 + 10004

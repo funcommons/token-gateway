@@ -209,7 +209,7 @@ Error envelope:
 ### 6.3 Idempotency
 
 - Write operations (all POST `/v1/**`) may carry `Idempotency-Key: <uuid v4>`.
-- **Replay semantics**: a successful first response (2xx, non-streaming, ≤ 1MB) is cached and replayed verbatim for same credential + key within the TTL window (`Idempotency-Replayed: true` header) — no double billing, no duplicate work. While the first request is in flight (or for streaming/oversized responses) same-key retries get **409 + 10501**; failed first requests hold no key — the same key is processed as a new request. Full rules: [Conventions §6](./conventions.md).
+- **Replay semantics**: a successful first response (2xx, non-streaming, ≤ 1MB) is cached and replayed verbatim for same credential + key within the TTL window (`Idempotency-Replayed: true` header) — no double billing, no duplicate work. While the first request is in flight (or for streaming/oversized responses) same-key retries get **409 + 10501**; failed first requests hold no key — the same key is processed as a new request. Full rules: [Conventions §7](./conventions.md).
 - Recommendation: always send it for non-idempotent-safe calls (image generation, etc.).
 
 ### 6.4 Timeout Budgets

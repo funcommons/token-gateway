@@ -65,7 +65,8 @@ class RelayOrchestratorBillingPendingTest {
                 new RpcInternalAuth(props));
         pendingStore = mock(BillingPendingStore.class);
         when(pendingStore.enqueue(any())).thenReturn(Mono.just(true));
-        // 九参全量构造 (Spring 生产装配形态); settle/refund 链不触达
+        // 九参兼容构造 (错误契约走默认白名单; Spring 生产装配为十参注入
+        // ErrorContractProperties); settle/refund 链不触达
         // moderationGate/thmp/adapter/tokenRoute, null 安全
         orchestrator = new RelayOrchestrator(null, null, billingApi, null,
                 new fun.commons.tokengateway.thmp.ThmpShadow.Noop(),
