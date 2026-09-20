@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-21
+
 ### 新增
 
 - **billing 双 face 拆分（issue #31，P0）**：第 8 面 `token-gateway.task.billing.{url,path-prefix,auth,jwt-secret,internal-token,timeout}`——**逐字段**缺省回退 `token-gateway.billing.*`。任务三端点（全额 amount 直传 + settle 确认制）与 LLM 面三端点（token 估价 + settle 四维重算退差）在 face=all 单体内不再互斥：`TaskBillingSaga` 走 task 面（新增任务族方法），`RelayOrchestrator`/`BillingReconcileJob`（#23 重放）恒通用面（隔离测试实证不串）。存量 #12 全局前缀指 task 路径 → 行为不变零迁移。demo-control-plane 计费桩补 `/v1/internal/billing/task/*` 双前缀 + 账本 amount 直传修正（此前被忽略一律 flat price）
