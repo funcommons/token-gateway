@@ -31,14 +31,18 @@ import static org.mockito.Mockito.when;
 class OpenAiTaskControllerTest {
 
     private TaskRelayOrchestrator orchestrator;
+    private fun.commons.tokengateway.task.log.TaskAccessLogger taskAccessLogger;
     private OpenAiTaskController controller;
     private OpenAiImagesTaskController imagesController;
 
     @BeforeEach
     void setUp() {
         orchestrator = mock(TaskRelayOrchestrator.class);
-        controller = new OpenAiTaskController(orchestrator, new ClientIpResolver(new ClientIpProperties()));
-        imagesController = new OpenAiImagesTaskController(orchestrator, new ClientIpResolver(new ClientIpProperties()));
+        taskAccessLogger = mock(fun.commons.tokengateway.task.log.TaskAccessLogger.class);
+        controller = new OpenAiTaskController(orchestrator,
+                new ClientIpResolver(new ClientIpProperties()), taskAccessLogger);
+        imagesController = new OpenAiImagesTaskController(orchestrator,
+                new ClientIpResolver(new ClientIpProperties()), taskAccessLogger);
     }
 
     @Test

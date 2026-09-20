@@ -6,6 +6,9 @@
 
 ### 新增
 
+- **LLM 面 settle/refund 失败重放兜底（issue #23，P0）**：新增 `BillingPendingStore`（Redis ZSET `tgw:billing:pending`，score=下次重试时刻）+ `BillingReconcileJob`（`gateway.billing-reconcile.*` 默认 true/30s/5 次/30s 指数退避）——settle/refund **基础设施失败**（10003 折叠码）按原参重放（preConsumeId 幂等锚），重放成功/退避重排/耗尽死信三态日志（`[Billing-Reconcile]`/`[Billing-DeadLetter]` 单行 JSON 快照含全部结算参数）；业务拒绝不重试直接死信；入队失败兜底死信
+- **任务面 access-log 接线（issue #29）**：新增 `TaskAccessLogger`——任务受理（3 controller create 成功路径）+ 终态（TerminalEventHandler onTerminal/onExpired）各上报 1 条，fire-and-forget 不阻塞主链；taskNo 以 `?task_no=` 附 requestPath（契约不变）；排障四系统（work→网关→lotask→worker）串联缺口闭合
+
 - **幂等回放语义（issue #30 完整修 + #28 主解）**：`Idempotency-Key` 从拒绝式升级为**首响回放**——2xx 非流式 ≤1MB 响应缓存（`IdempotentResponse` record + 单 key 双形态：占位 "1"/响应 JSON，TTL 回填无孤儿），TTL 内同凭证同 key 原样回放（同 status/body + `Idempotency-Replayed: true` 头）；处理中/流式/超限 → 409+10501（message 区分「处理中」）；失败不占键（非 2xx 释放，语义较旧版收紧：4xx 也释放）；`IdempotencyStore` 以 default 方法扩展三 API，存量实现零破坏。**#30 头语义 bug 修复**：非数字 `Idempotency-Key` 不再透传 billing requestId 位（workId 要求纯数字，此前按文档带 uuidgen key 100% 失败 502/10004），distribute 幂等透传保留、纯数字 key 语义不变（#12）。契约 yaml（08/09）「拒绝式」表述同步回放语义
 
 - **usage 细分对齐（issue #26）**：`TokenUsage` 扩 reasoning/audio/cacheCreation 三维（无源 null 不造数）；settle/access-log 留痕透传；**两条转换链计费口径损失修复**——`openAiToAnthropicResponse` 此前丢 `cached_tokens`（Messages+OpenAI 上游 cacheRead 计 0）、`anthropicToOpenAIResponse` 此前丢 `cache_creation_input_tokens`；Anthropic cache 拆分定版（creation 不再并入 cached，prompt 总量语义不变）；四象限（双协议×流式/非流式）断言 + 端到端 settle body 校验；字段映射对齐 Spring AI 1.1.2 `OpenAiApi.Usage`

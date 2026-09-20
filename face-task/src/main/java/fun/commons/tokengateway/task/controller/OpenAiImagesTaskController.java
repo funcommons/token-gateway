@@ -1,5 +1,6 @@
 package fun.commons.tokengateway.task.controller;
 
+import fun.commons.tokengateway.task.log.TaskAccessLogger;
 import fun.commons.tokengateway.task.relay.TaskRelayOrchestrator;
 import fun.commons.tokengateway.util.ClientIpResolver;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +36,8 @@ public class OpenAiImagesTaskController {
     private final TaskRelayOrchestrator orchestrator;
     /** 客户端 IP 解析 (issue #27): token-validate clientIp 填充, 信任代理策略可配. */
     private final ClientIpResolver clientIpResolver;
+    /** 受理 access-log 上报 (issue #29): create 成功路径 fire-and-forget, 不阻塞响应. */
+    private final TaskAccessLogger taskAccessLogger;
 
     @PostMapping("/v1/images/generations")
     public Mono<Map<String, Object>> createImages(
@@ -44,13 +47,16 @@ public class OpenAiImagesTaskController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody Map<String, Object> body,
             ServerWebExchange exchange) {
-        if (isBackground(body)) {
-            return orchestrator.createImageJob(extractApiKey(authorization, xApiKey), body, traceId,
-                    idempotencyKey, clientIpResolver.resolve(exchange));
-        }
-        return orchestrator.createImageGenerations(
-                extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey,
-                clientIpResolver.resolve(exchange));
+        String apiKey = extractApiKey(authorization, xApiKey);
+        String clientIp = clientIpResolver.resolve(exchange);
+        long start = System.currentTimeMillis();
+        Mono<Map<String, Object>> created = isBackground(body)
+                ? orchestrator.createImageJob(apiKey, body, traceId, idempotencyKey, clientIp)
+                : orchestrator.createImageGenerations(apiKey, body, traceId, idempotencyKey,
+                        clientIp);
+        return created.doOnNext(view -> taskAccessLogger.reportCreated("/v1/images/generations",
+                TaskAccessLogger.modelOf(body), TaskAccessLogger.taskNoOf(view),
+                apiKey, clientIp, traceId, System.currentTimeMillis() - start));
     }
 
     @GetMapping("/v1/images/generations/{taskNo}")

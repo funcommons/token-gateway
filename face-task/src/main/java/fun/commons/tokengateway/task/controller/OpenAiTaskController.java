@@ -1,5 +1,6 @@
 package fun.commons.tokengateway.task.controller;
 
+import fun.commons.tokengateway.task.log.TaskAccessLogger;
 import fun.commons.tokengateway.task.relay.TaskRelayOrchestrator;
 import fun.commons.tokengateway.util.ClientIpResolver;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,8 @@ public class OpenAiTaskController {
     private final TaskRelayOrchestrator orchestrator;
     /** 客户端 IP 解析 (issue #27): token-validate clientIp 填充, 信任代理策略可配. */
     private final ClientIpResolver clientIpResolver;
+    /** 受理 access-log 上报 (issue #29): create 成功路径 fire-and-forget, 不阻塞响应. */
+    private final TaskAccessLogger taskAccessLogger;
 
     @PostMapping("/v1/videos")
     public Mono<Map<String, Object>> createVideo(
@@ -45,8 +48,13 @@ public class OpenAiTaskController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody Map<String, Object> body,
             ServerWebExchange exchange) {
-        return orchestrator.createVideoJob(extractApiKey(authorization, xApiKey), body, traceId,
-                idempotencyKey, clientIpResolver.resolve(exchange));
+        String apiKey = extractApiKey(authorization, xApiKey);
+        String clientIp = clientIpResolver.resolve(exchange);
+        long start = System.currentTimeMillis();
+        return orchestrator.createVideoJob(apiKey, body, traceId, idempotencyKey, clientIp)
+                .doOnNext(view -> taskAccessLogger.reportCreated("/v1/videos",
+                        TaskAccessLogger.modelOf(body), TaskAccessLogger.taskNoOf(view),
+                        apiKey, clientIp, traceId, System.currentTimeMillis() - start));
     }
 
     @GetMapping("/v1/videos/{taskNo}")

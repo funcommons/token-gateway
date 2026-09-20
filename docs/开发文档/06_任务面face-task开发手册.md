@@ -33,6 +33,7 @@ M2.5 交付三个部署单元 + 一类脚本资产：
 | `task.billing` | `TaskBillingSaga` | 预扣/退款/预扣转消费；全部按 `pre_consume_id` 幂等 |
 | `task.notify` | `NotifyDispatcher` | notify_url 回调（X-THMP-Signature + 1m/10m/1h 退避） |
 | | `WebhookVerifier` | 三头校验：恒定时间验签 + ±5min 时间窗 + Event-Id 去重（复用 `RedisIdempotencyStore`）；无签名/验签失败 → verify-then-act 回查 |
+| `task.log` | `TaskAccessLogger` | 任务面 access-log 上报（issue #29）：受理（create 成功路径）+ 终态（TerminalEventHandler 收口）各一条，fire-and-forget 不阻塞主链；taskNo 以 `?task_no=` 附 requestPath（不二次改 AccessLogRequest 契约）；受理身份经后台 validate 回查补齐，终态串联键=taskNo，身份/细分 token 维无来源恒 null |
 | `task.schedule` | `TimeoutClockJob` | 超时钟：按 create 时固化的 deadline（粒度随 `submit-task-type`）扫描在途任务 → 到期反查 lotask4j 终态 → EXPIRED 映射 + 退款（R6 网关侧补偿） |
 | | `ReconcileJob` | 对账兜底：按 pre_consume_id 查未闭环预扣 → 反查 lotask4j 终态补偿（孤儿预扣释放） |
 | `task.state` | `TaskStateMapper` | lotask4j 状态 → 网关五态映射（《05》§6） |

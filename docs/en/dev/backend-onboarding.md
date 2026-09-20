@@ -97,6 +97,8 @@ On verification failure return HTTP 401 + envelope (code=10300); the gateway tre
 
 Saga guarantee: for each trace, exactly pre-charge − refund = actual consumption; your reconciliation basis = replay by events.
 
+Gateway-side fallback (issue #23): settle/refund **infrastructure failures** (RPC error / timeout / 5xx) are queued by the gateway in a Redis pending set and replayed automatically with the original parameters (**idempotency anchor `pre_consume_id`**, bounded exponential backoff); exhausted retries or business rejections (non-zero envelope code) land in the `[Billing-DeadLetter]` structured log (single-line JSON with all settlement parameters, harvestable for manual replay). Your side must be strictly idempotent by `pre_consume_id`: repeated settle/refund on the same pre-charge return the first result, never double-charging or double-refunding.
+
 ### 4.4 moderation — `POST /gw/v1/moderation/scan`
 
 - In: `{content, content_type}`; out: `data: {action: PASS|BLOCK|SANITIZE, sanitized_content, reason}`.

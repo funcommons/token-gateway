@@ -2,6 +2,7 @@ package fun.commons.tokengateway.task.notify;
 
 import fun.commons.tokengateway.spi.config.TokenGatewayProperties;
 import fun.commons.tokengateway.task.billing.TaskBillingSaga;
+import fun.commons.tokengateway.task.log.TaskAccessLogger;
 import fun.commons.tokengateway.task.lotask.LotaskTaskClient;
 import fun.commons.tokengateway.task.ResourceUrlConverter;
 import fun.commons.tokengateway.task.resource.ResourceSigner;
@@ -35,6 +36,7 @@ class TerminalEventHandlerTest {
     private TaskMetaStore metaStore;
     private TaskBillingSaga billingSaga;
     private NotifyDispatcher notifyDispatcher;
+    private TaskAccessLogger taskAccessLogger;
     private TerminalEventHandler handler;
 
     private static final TaskMeta META = new TaskMeta(
@@ -45,6 +47,7 @@ class TerminalEventHandlerTest {
         metaStore = mock(TaskMetaStore.class);
         billingSaga = mock(TaskBillingSaga.class);
         notifyDispatcher = mock(NotifyDispatcher.class);
+        taskAccessLogger = mock(TaskAccessLogger.class);
         TokenGatewayProperties props = new TokenGatewayProperties();
         props.getTask().setResourceSignKey("test-sign-key");
         when(billingSaga.refundOnce(anyString(), anyString(), anyString())).thenReturn(Mono.empty());
@@ -53,7 +56,7 @@ class TerminalEventHandlerTest {
         when(metaStore.clearDeadline(anyString())).thenReturn(Mono.empty());
         when(metaStore.closePending(anyString())).thenReturn(Mono.empty());
         handler = new TerminalEventHandler(metaStore, billingSaga, notifyDispatcher,
-                new ResourceUrlConverter(new ResourceSigner(props)), props);
+                new ResourceUrlConverter(new ResourceSigner(props)), props, taskAccessLogger);
     }
 
     @Test
@@ -123,6 +126,7 @@ class TerminalEventHandlerTest {
         StepVerifier.create(handler.onTerminal("T1", META, "RUNNING", null)).verifyComplete();
         verify(billingSaga, never()).refundOnce(anyString(), anyString(), anyString());
         verify(notifyDispatcher, never()).dispatch(anyString(), anyString(), any());
+        verify(taskAccessLogger, never()).reportTerminal(anyString(), anyString(), anyString());
     }
 
     @Test
@@ -137,5 +141,54 @@ class TerminalEventHandlerTest {
     void cancelledRefunds() {
         StepVerifier.create(handler.onTerminal("T1", META, "CANCELLED", null)).verifyComplete();
         verify(billingSaga).refundOnce("pc1", "task FAILED", "T1");
+    }
+
+    @Test
+    @DisplayName("终态上报 (issue #29): 收口成功后 reportTerminal (taskNo/submitTaskType/映射终态)")
+    void terminalReportedAfterCloseOut() {
+        StepVerifier.create(handler.onTerminal("T1", META, "SUCCESS",
+                        Map.of("resources", List.of("https://upstream/raw.mp4"))))
+                .verifyComplete();
+        verify(taskAccessLogger).reportTerminal("T1", "video", "SUCCEEDED");
+
+        StepVerifier.create(handler.onTerminal("T2", META, "FAILED", null)).verifyComplete();
+        verify(taskAccessLogger).reportTerminal("T2", "video", "FAILED");
+
+        StepVerifier.create(handler.onExpired("T3", META)).verifyComplete();
+        verify(taskAccessLogger).reportTerminal("T3", "video", "EXPIRED");
+    }
+
+    @Test
+    @DisplayName("终态上报: record 5xx → 终态主链不受影响 (fire-and-forget, StepVerifier 正常完成)")
+    void record5xxDoesNotBreakMainChain() throws Exception {
+        okhttp3.mockwebserver.MockWebServer backend = new okhttp3.mockwebserver.MockWebServer();
+        backend.start();
+        backend.enqueue(new okhttp3.mockwebserver.MockResponse().setResponseCode(500));
+        var legacy = new fun.commons.tokengateway.config.GatewayProperties();
+        legacy.setUrl(backend.url("/").toString().replaceAll("/$", ""));
+        legacy.setTimeout(java.time.Duration.ofSeconds(2));
+        var endpoints = new fun.commons.tokengateway.rpc.CapabilityEndpoints(
+                new TokenGatewayProperties(), legacy);
+        var internalAuth = new fun.commons.tokengateway.rpc.RpcInternalAuth(legacy);
+        TaskAccessLogger realLogger = new TaskAccessLogger(
+                new fun.commons.tokengateway.rpc.HttpTokenApi(
+                        org.springframework.web.reactive.function.client.WebClient.builder(),
+                        endpoints, internalAuth),
+                new fun.commons.tokengateway.rpc.HttpAccessLogApi(
+                        org.springframework.web.reactive.function.client.WebClient.builder(),
+                        endpoints, internalAuth));
+        TokenGatewayProperties props = new TokenGatewayProperties();
+        props.getTask().setResourceSignKey("test-sign-key");
+        TerminalEventHandler handlerWithRealLog = new TerminalEventHandler(metaStore, billingSaga,
+                notifyDispatcher, new ResourceUrlConverter(new ResourceSigner(props)), props,
+                realLogger);
+        try {
+            StepVerifier.create(handlerWithRealLog.onTerminal("T1", META, "FAILED", null))
+                    .verifyComplete();
+            assertThat(backend.takeRequest(2, java.util.concurrent.TimeUnit.SECONDS).getPath())
+                    .isEqualTo("/api/v1/internal/access-log/record");
+        } finally {
+            backend.shutdown();
+        }
     }
 }

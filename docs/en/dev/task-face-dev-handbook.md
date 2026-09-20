@@ -33,6 +33,7 @@ M2.5 delivers three deployment units plus one script asset class:
 | `task.billing` | `TaskBillingSaga` | Pre-charge/refund/pre-charge-to-consumption; all idempotent by `pre_consume_id` |
 | `task.notify` | `NotifyDispatcher` | notify_url callback (X-THMP-Signature + 1m/10m/1h backoff) |
 | | `WebhookVerifier` | Three-header checks: constant-time signature verify + ±5min timestamp window + Event-Id dedup (reusing `RedisIdempotencyStore`); unsigned/invalid → verify-then-act requery |
+| `task.log` | `TaskAccessLogger` | Task-face access-log reporting (issue #29): one record on accepted create + one on terminal close-out (TerminalEventHandler), fire-and-forget, never blocks the main chain; taskNo rides the `?task_no=` requestPath query (no second contract change to AccessLogRequest); acceptance identity resolved by an off-path validate re-check, terminal correlation key = taskNo; identity/subdivided token dimensions have no source and stay null |
 | `task.schedule` | `TimeoutClockJob` | Timeout clock: scan in-flight tasks by the create-time deadline (granularity follows `submit-task-type`) → requery lotask4j terminal state at deadline → EXPIRED mapping + refund (R6 gateway-side compensation) |
 | | `ReconcileJob` | Reconciliation fallback: find unclosed pre-charges by pre_consume_id → requery lotask4j terminal state and compensate (orphan pre-charge release) |
 | `task.state` | `TaskStateMapper` | lotask4j state → gateway five-state mapping (05 §6) |

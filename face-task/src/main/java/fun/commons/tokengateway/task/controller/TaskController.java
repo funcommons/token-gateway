@@ -1,5 +1,6 @@
 package fun.commons.tokengateway.task.controller;
 
+import fun.commons.tokengateway.task.log.TaskAccessLogger;
 import fun.commons.tokengateway.task.relay.TaskRelayOrchestrator;
 import fun.commons.tokengateway.util.ClientIpResolver;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,8 @@ public class TaskController {
     private final TaskRelayOrchestrator orchestrator;
     /** 客户端 IP 解析 (issue #27): token-validate clientIp 填充, 信任代理策略可配. */
     private final ClientIpResolver clientIpResolver;
+    /** 受理 access-log 上报 (issue #29): create 成功路径 fire-and-forget, 不阻塞响应. */
+    private final TaskAccessLogger taskAccessLogger;
 
     @PostMapping("/v1/onetoken/videos")
     public Mono<Map<String, Object>> createVideo(
@@ -40,8 +43,13 @@ public class TaskController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody Map<String, Object> body,
             ServerWebExchange exchange) {
-        return orchestrator.create("video", extractApiKey(authorization, xApiKey), body, traceId,
-                idempotencyKey, clientIpResolver.resolve(exchange));
+        String apiKey = extractApiKey(authorization, xApiKey);
+        String clientIp = clientIpResolver.resolve(exchange);
+        long start = System.currentTimeMillis();
+        return orchestrator.create("video", apiKey, body, traceId, idempotencyKey, clientIp)
+                .doOnNext(view -> taskAccessLogger.reportCreated("/v1/onetoken/videos",
+                        TaskAccessLogger.modelOf(body), TaskAccessLogger.taskNoOf(view),
+                        apiKey, clientIp, traceId, System.currentTimeMillis() - start));
     }
 
     /** 同步生图 (OpenAI 请求/响应形状): 内部 create+轮询, 60s 超时降级 PROCESSING+poll_url. */
@@ -53,9 +61,13 @@ public class TaskController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody Map<String, Object> body,
             ServerWebExchange exchange) {
-        return orchestrator.createImageGenerations(
-                extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey,
-                clientIpResolver.resolve(exchange));
+        String apiKey = extractApiKey(authorization, xApiKey);
+        String clientIp = clientIpResolver.resolve(exchange);
+        long start = System.currentTimeMillis();
+        return orchestrator.createImageGenerations(apiKey, body, traceId, idempotencyKey, clientIp)
+                .doOnNext(view -> taskAccessLogger.reportCreated("/v1/onetoken/images/sync",
+                        TaskAccessLogger.modelOf(body), TaskAccessLogger.taskNoOf(view),
+                        apiKey, clientIp, traceId, System.currentTimeMillis() - start));
     }
 
     @PostMapping("/v1/onetoken/images")
@@ -66,8 +78,13 @@ public class TaskController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody Map<String, Object> body,
             ServerWebExchange exchange) {
-        return orchestrator.create("image", extractApiKey(authorization, xApiKey), body, traceId,
-                idempotencyKey, clientIpResolver.resolve(exchange));
+        String apiKey = extractApiKey(authorization, xApiKey);
+        String clientIp = clientIpResolver.resolve(exchange);
+        long start = System.currentTimeMillis();
+        return orchestrator.create("image", apiKey, body, traceId, idempotencyKey, clientIp)
+                .doOnNext(view -> taskAccessLogger.reportCreated("/v1/onetoken/images",
+                        TaskAccessLogger.modelOf(body), TaskAccessLogger.taskNoOf(view),
+                        apiKey, clientIp, traceId, System.currentTimeMillis() - start));
     }
 
     @PostMapping("/v1/onetoken/audios")
@@ -78,8 +95,13 @@ public class TaskController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody Map<String, Object> body,
             ServerWebExchange exchange) {
-        return orchestrator.create("audio", extractApiKey(authorization, xApiKey), body, traceId,
-                idempotencyKey, clientIpResolver.resolve(exchange));
+        String apiKey = extractApiKey(authorization, xApiKey);
+        String clientIp = clientIpResolver.resolve(exchange);
+        long start = System.currentTimeMillis();
+        return orchestrator.create("audio", apiKey, body, traceId, idempotencyKey, clientIp)
+                .doOnNext(view -> taskAccessLogger.reportCreated("/v1/onetoken/audios",
+                        TaskAccessLogger.modelOf(body), TaskAccessLogger.taskNoOf(view),
+                        apiKey, clientIp, traceId, System.currentTimeMillis() - start));
     }
 
     @PostMapping("/v1/onetoken/tts")
@@ -90,8 +112,13 @@ public class TaskController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody Map<String, Object> body,
             ServerWebExchange exchange) {
-        return orchestrator.create("tts", extractApiKey(authorization, xApiKey), body, traceId,
-                idempotencyKey, clientIpResolver.resolve(exchange));
+        String apiKey = extractApiKey(authorization, xApiKey);
+        String clientIp = clientIpResolver.resolve(exchange);
+        long start = System.currentTimeMillis();
+        return orchestrator.create("tts", apiKey, body, traceId, idempotencyKey, clientIp)
+                .doOnNext(view -> taskAccessLogger.reportCreated("/v1/onetoken/tts",
+                        TaskAccessLogger.modelOf(body), TaskAccessLogger.taskNoOf(view),
+                        apiKey, clientIp, traceId, System.currentTimeMillis() - start));
     }
 
     @GetMapping("/v1/onetoken/videos/{taskNo}")

@@ -18,6 +18,10 @@ import fun.commons.tokengateway.rpc.HttpBillingApi;
 import fun.commons.tokengateway.rpc.HttpChannelApi;
 import fun.commons.tokengateway.rpc.HttpTokenApi;
 import fun.commons.tokengateway.rpc.TokenRouteClient;
+import fun.commons.tokengateway.relay.billing.BillingDeadLetters;
+import fun.commons.tokengateway.relay.billing.BillingPendingRecord;
+import fun.commons.tokengateway.relay.billing.BillingPendingStore;
+import fun.commons.tokengateway.relay.billing.BillingResponsePolicy;
 import fun.commons.tokengateway.thmp.ThmpCutover;
 import fun.commons.tokengateway.thmp.ThmpShadow;
 import lombok.RequiredArgsConstructor;
@@ -81,8 +85,15 @@ public class RelayOrchestrator {
     private final TokenRouteClient tokenRouteClient;
 
     /**
+     * settle/refund 失败待重放队列 (issue #23): 基础设施失败入 {@code tgw:billing:pending},
+     * 由 {@code BillingReconcileJob} 有界重放 (幂等锚 preConsumeId). 兼容构造传 null =
+     * 兜底关闭 (失败仅死信日志), 生产装配由 Spring 注入恒非空.
+     */
+    private final BillingPendingStore billingPendingStore;
+
+    /**
      * 六参兼容构造 (测试/存量装配): adapter 缺省 mmagix, route 恒走旧 distribute,
-     * tokenRouteClient 恒不触达 (传 null 安全).
+     * tokenRouteClient 恒不触达, 待重放队列不接 (传 null 安全, 失败仅死信日志).
      */
     public RelayOrchestrator(HttpTokenApi tokenApi, HttpChannelApi channelApi,
                              HttpBillingApi billingApi, ModerationGate moderationGate,
@@ -90,6 +101,17 @@ public class RelayOrchestrator {
         this(tokenApi, channelApi, billingApi, moderationGate, thmpShadow, thmpCutover,
                 new AdapterSelector(new fun.commons.tokengateway.spi.config.TokenGatewayProperties()),
                 null);
+    }
+
+    /**
+     * 八参兼容构造 (G2 存量装配): 不接待重放队列 (null, issue #23 兜底关闭).
+     */
+    public RelayOrchestrator(HttpTokenApi tokenApi, HttpChannelApi channelApi,
+                             HttpBillingApi billingApi, ModerationGate moderationGate,
+                             ThmpShadow thmpShadow, ThmpCutover thmpCutover,
+                             AdapterSelector adapterSelector, TokenRouteClient tokenRouteClient) {
+        this(tokenApi, channelApi, billingApi, moderationGate, thmpShadow, thmpCutover,
+                adapterSelector, tokenRouteClient, null);
     }
 
     /**
@@ -284,7 +306,8 @@ public class RelayOrchestrator {
     /**
      * 结算 (上游成功后调用).
      * <p>preConsumeId 为空 (如 count_tokens 不计费路径) 直接返回 ZERO; 否则走 settle RPC.
-     * <p>fire-and-forget: 失败仅记日志, 不影响主流程.
+     * <p>fire-and-forget: 失败不抛错不影响主流程, 但不再静默 (issue #23) —
+     * 基础设施失败入待重放队列由 BillingReconcileJob 重放, 业务拒绝死信留痕.
      */
     public Mono<java.math.BigDecimal> settle(PreparedRequest prepared, int actualPromptTokens,
                              int actualCompletionTokens, int cachedTokens, int responseTimeMs) {
@@ -347,17 +370,27 @@ public class RelayOrchestrator {
                         fun.commons.tokengateway.framework.ApiCode.SERVICE_TIMEOUT.getCode(),
                         "billing settle failed: " + e.getMessage())))
                 .map(resp -> {
-                    if (resp == null || resp.getData() == null || resp.getData().getCreditConsumed() == null) {
-                        log.warn("[Billing/settle] preConsumeId={}, resp code={}, dataNull={}",
-                                prepared.preConsumeId(),
-                                resp != null ? resp.getCode() : -1,
-                                resp == null || resp.getData() == null);
-                        return java.math.BigDecimal.ZERO;
+                    if (resp != null && resp.getData() != null
+                            && resp.getData().getCreditConsumed() != null) {
+                        java.math.BigDecimal credit = resp.getData().getCreditConsumed();
+                        log.info("[Billing/settle] preConsumeId={}, creditConsumed={}",
+                                prepared.preConsumeId(), credit);
+                        return credit;
                     }
-                    java.math.BigDecimal credit = resp.getData().getCreditConsumed();
-                    log.info("[Billing/settle] preConsumeId={}, creditConsumed={}",
-                            prepared.preConsumeId(), credit);
-                    return credit;
+                    log.warn("[Billing/settle] preConsumeId={}, resp code={}, dataNull={}",
+                            prepared.preConsumeId(),
+                            resp != null ? resp.getCode() : -1,
+                            resp == null || resp.getData() == null);
+                    // issue #23: settle 失败不再静默吞掉 — 基础设施失败入待重放队列
+                    // (幂等锚 preConsumeId), 业务拒绝同参数重试无意义, 死信留痕一次
+                    handleBillingFailure(BillingPendingRecord.forSettle(
+                                    prepared.preConsumeId(), prepared.requestId(),
+                                    ownerPartyIdOf(prepared.token()),
+                                    actualPromptTokens, actualCompletionTokens, cachedTokens,
+                                    cacheCreationTokens == null ? 0 : cacheCreationTokens.intValue(),
+                                    reasoningTokens, audioTokens, responseTimeMs, attempts),
+                            resp, "settle");
+                    return java.math.BigDecimal.ZERO;
                 });
         // G5: token-route 路径终态回报 SUCCESS (fire-and-forget, 不延长 settle 链)
         if (prepared.reportable()) {
@@ -372,7 +405,8 @@ public class RelayOrchestrator {
     /**
      * 退款 (上游失败/客户端取消).
      * <p>preConsumeId 为空直接 complete; 否则走 refund RPC.
-     * <p>fire-and-forget: 失败仅记日志.
+     * <p>失败不再静默吞掉 (issue #23): 基础设施失败入待重放队列 (幂等锚 preConsumeId),
+     * 业务拒绝死信留痕一次.
      */
     public Mono<Void> refund(PreparedRequest prepared, String reason) {
         if (prepared.preConsumeId() == null) {
@@ -385,8 +419,43 @@ public class RelayOrchestrator {
                         .build())
                 .doOnError(e -> log.error("[Billing/refund] preConsumeId={}, err={}",
                         prepared.preConsumeId(), e.getMessage()))
-                .onErrorResume(e -> Mono.empty())
+                .onErrorResume(e -> Mono.just(ApiResponse.fail(
+                        fun.commons.tokengateway.framework.ApiCode.SERVICE_TIMEOUT.getCode(),
+                        "billing refund failed: " + e.getMessage())))
+                .flatMap(resp -> {
+                    if (resp != null && resp.isSuccess()) {
+                        return Mono.empty();
+                    }
+                    // issue #23: refund 失败兜底 — 分类与 settle 同规
+                    handleBillingFailure(BillingPendingRecord.forRefund(
+                                    prepared.preConsumeId(), prepared.requestId(), reason),
+                            resp, "refund");
+                    return Mono.empty();
+                })
                 .then();
+    }
+
+    /**
+     * settle/refund 失败归口 (issue #23): 可重试基础设施失败 → 入待重放队列
+     * (fire-and-forget, 不延长主链); 业务拒绝 → 死信结构化快照一次.
+     * <p>兼容装配 (billingPendingStore 为 null) 不入队, 仅死信日志保参数不丢.
+     */
+    private void handleBillingFailure(BillingPendingRecord record,
+                                      fun.commons.tokengateway.framework.ApiResponse<?> resp,
+                                      String phase) {
+        if (!BillingResponsePolicy.retryableInfra(resp)) {
+            BillingDeadLetters.log(record, phase, "业务拒绝: code=" + resp.getCode()
+                    + ", message=" + resp.getMessage());
+            return;
+        }
+        if (billingPendingStore == null) {
+            BillingDeadLetters.log(record, phase, "待重放队列未装配, 快照兜底");
+            return;
+        }
+        billingPendingStore.enqueue(record).subscribe(
+                v -> { },
+                e -> log.error("[Billing/{}] preConsumeId={}, 入队订阅异常: err={}",
+                        phase, record.preConsumeId(), e.toString()));
     }
 
     /**

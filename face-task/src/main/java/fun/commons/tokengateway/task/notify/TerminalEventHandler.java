@@ -5,6 +5,7 @@ import com.alibaba.fastjson2.JSONObject;
 import fun.commons.tokengateway.spi.config.TokenGatewayProperties;
 import fun.commons.tokengateway.spi.model.TaskStatus;
 import fun.commons.tokengateway.task.billing.TaskBillingSaga;
+import fun.commons.tokengateway.task.log.TaskAccessLogger;
 import fun.commons.tokengateway.task.lotask.LotaskTaskClient;
 import fun.commons.tokengateway.task.lotask.LotaskTaskView;
 import fun.commons.tokengateway.task.resource.ResourceSigner;
@@ -28,6 +29,7 @@ import java.util.Map;
  *
  * <p>SUCCESS → result.resources 转 sig 代理 URL 落终态存储 (上游 URL 永不透传), 预扣转消费;
  * FAILED/CANCELLED → 全额退款 (幂等) → notify. 顺序: 先退款成功再 notify (《05》§7).
+ * 收口成功后补一条终态 access-log (issue #29, fire-and-forget).
  */
 @Slf4j
 @Service
@@ -39,6 +41,8 @@ public class TerminalEventHandler {
     private final NotifyDispatcher notifyDispatcher;
     private final fun.commons.tokengateway.task.ResourceUrlConverter resourceUrlConverter;
     private final TokenGatewayProperties props;
+    /** 终态 access-log 上报 (issue #29): 终态收口后 fire-and-forget, 不阻塞处理链. */
+    private final TaskAccessLogger taskAccessLogger;
 
     /**
      * 处理终态事件 (非终态/未知任务静默忽略——轮询中的进度事件不收).
@@ -77,8 +81,12 @@ public class TerminalEventHandler {
         return settle
                 .then(metaStore.clearDeadline(taskNo))
                 .then(metaStore.closePending(taskNo))
-                .then(Mono.fromRunnable(() -> notifyDispatcher.dispatch(
-                        taskNo, meta.notifyUrl(), notifyBody)));
+                .then(Mono.fromRunnable(() -> {
+                    notifyDispatcher.dispatch(taskNo, meta.notifyUrl(), notifyBody);
+                    // issue #29: 终态 access-log (fire-and-forget) — 收口成功后上报,
+                    // 处理异常时链路已 error, 不落记录 (缺失即处理失败信号)
+                    taskAccessLogger.reportTerminal(taskNo, meta.modality(), mapped.name());
+                }));
     }
 
     /**
@@ -95,8 +103,12 @@ public class TerminalEventHandler {
                         JSON.toJSONString(terminalEntry(TaskStatus.EXPIRED, null, error)), ttl))
                 .then(metaStore.clearDeadline(taskNo))
                 .then(metaStore.closePending(taskNo))
-                .then(Mono.fromRunnable(() -> notifyDispatcher.dispatch(
-                        taskNo, meta.notifyUrl(), notifyBody(taskNo, TaskStatus.EXPIRED, null, error))));
+                .then(Mono.fromRunnable(() -> {
+                    notifyDispatcher.dispatch(taskNo, meta.notifyUrl(),
+                            notifyBody(taskNo, TaskStatus.EXPIRED, null, error));
+                    // issue #29: EXPIRED 也算终态收口, 同受理/终态双条中的终态上报
+                    taskAccessLogger.reportTerminal(taskNo, meta.modality(), TaskStatus.EXPIRED.name());
+                }));
     }
 
     /** 终态条目 (poll 终态幂等读它, 不触 lotask): {status, result?|error?}. */
