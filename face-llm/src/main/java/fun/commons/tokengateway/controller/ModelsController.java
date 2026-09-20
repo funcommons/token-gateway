@@ -5,11 +5,13 @@ import fun.commons.tokengateway.exception.RelayException;
 import fun.commons.tokengateway.contract.TokenValidateRequest;
 import fun.commons.tokengateway.rpc.HttpChatModelApi;
 import fun.commons.tokengateway.rpc.HttpTokenApi;
+import fun.commons.tokengateway.util.ClientIpResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
@@ -37,12 +39,15 @@ public class ModelsController {
 
     private final HttpTokenApi tokenApi;
     private final HttpChatModelApi chatModelApi;
+    /** 客户端 IP 解析 (issue #27): token-validate clientIp 填充, 信任代理策略可配. */
+    private final ClientIpResolver clientIpResolver;
 
     @GetMapping("/v1/models")
     public Mono<Object> listModels(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
-            @RequestHeader(value = "anthropic-version", required = false) String anthropicVersion
+            @RequestHeader(value = "anthropic-version", required = false) String anthropicVersion,
+            ServerWebExchange exchange
     ) {
         String apiKey = extractApiKey(authorization, xApiKey);
         if (apiKey == null) {
@@ -50,7 +55,8 @@ public class ModelsController {
                     fun.commons.tokengateway.framework.ApiCode.UNAUTHORIZED.getCode(),
                     "缺少 bearer token"));
         }
-        return tokenApi.validate(TokenValidateRequest.builder().apiKey(apiKey).model(null).build())
+        return tokenApi.validate(TokenValidateRequest.builder()
+                .apiKey(apiKey).clientIp(clientIpResolver.resolve(exchange)).model(null).build())
                 .flatMap(tokenResp -> {
                     if (tokenResp == null || !tokenResp.isSuccess()) {
                         // token 校验 RPC 失败/超时 (fail 包络 10003) → 504 可重试基础设施错误,

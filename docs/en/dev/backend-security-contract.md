@@ -5,7 +5,7 @@
 | Document | Security contract for gateway ↔ capability-backend integration (authentication, credentials, transport security — authoritative definition) |
 | Status | **Authoritative** for security policy; design doc §5.2 and backend onboarding §3.4 are summary references of this document |
 | Companion | Capability-face contract `03_能力面接口契约.yaml` ([link](https://github.com/funcommons/token-gateway/blob/main/docs/开发文档/03_能力面接口契约.yaml)); [Backend Onboarding Manual](./backend-onboarding.md) |
-| Version | V1.0 (2026-08-31; decision: three auth modes — the static `token` mode removed) |
+| Version | V1.1 (2026-09-18; added §9 Client IP Resolution); V1.0 (2026-08-31; decision: three auth modes — the static `token` mode removed) |
 
 ---
 
@@ -133,7 +133,26 @@ stringToSign = HTTP_METHOD + "\n" + PATH + "\n" + TIMESTAMP + "\n" + NONCE + "\n
 - Audit storage is append-only; physical deletion is forbidden; retention per compliance requirements.
 - Audit emission failures never block the main path (quiet + alert).
 
-## 9. Acceptance Checklist
+## 9. Client IP Resolution (token-validate `clientIp`, issue #27)
+
+The token-validate request body carries a `clientIp` field (`client_ip` in the capability-face contract yaml) so the backend can apply IP whitelists / risk control / audit attribution. The field is **resolved by the gateway and pushed downstream** — the backend must not parse the client IP from request headers itself.
+
+**Spoofing risk (must understand)**: the first segment of `X-Forwarded-For` (XFF) is freely forgeable by the client — blindly trusting the first XFF entry means an IP whitelist can be bypassed with a single forged header. The gateway resolves by a "trusted proxy depth" policy and, by default, trusts no proxy header at all.
+
+**Policy** (`gateway.client-ip.*`):
+
+| Configuration | Behavior |
+|---|---|
+| `trusted-proxies: 0` (default) | Trust no proxy header — **always use the TCP peer address** (core anti-spoofing default) |
+| `trusted-proxies: N > 0` | N trusted proxies sit in front of the gateway (count of LB/Ingress hops): take the (N+1)-th entry counting from the right of XFF; the leftmost remaining segment is the original client |
+| XFF missing / entries ≤ N (exhausted) / malformed hit segment (blank) | Fall back to the TCP peer address |
+| `enabled: false` | No XFF trust resolution — always the TCP peer address (fail-safe, same effect as `trusted-proxies: 0`) |
+
+**Deployment requirement**: `trusted-proxies` must **equal** the real number of trusted proxies in front of the gateway (direct connection = 0; one LB = 1; LB + Ingress = 2). Set it too high and untrusted segments are treated as trusted; too low and the proxy address is mistaken for the client IP.
+
+**Gateway-side semantics**: clientIp is pass-through only (`TokenValidateRequest.clientIp` → backend); the gateway itself performs no hard IP enforcement. The backend-returned `subAccountId` (optional) is likewise pass-through only (available via `PreparedRequest.token`), with no hard dependency on its presence.
+
+## 10. Acceptance Checklist
 
 - [ ] Every capability face's `auth` follows the §3.4 matrix; S3 faces have §4 per-request signing
 - [ ] jwt three-step verification complete; key comparisons are constant-time
@@ -141,3 +160,4 @@ stringToSign = HTTP_METHOD + "\n" + PATH + "\n" + TIMESTAMP + "\n" + NONCE + "\n
 - [ ] Every `auth=none` face points at localhost (no CapabilityValidator warning at startup)
 - [ ] Secret rotation rehearsed once (dual-secret grace → full cutover → old secret revoked)
 - [ ] 401+10300 wired into ops alerting (distinct from caller-401 business flow)
+- [ ] `trusted-proxies` matches the real proxy depth (direct=0; count LB/Ingress hops, §9)

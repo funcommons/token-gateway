@@ -5,6 +5,7 @@ import fun.commons.tokengateway.exception.RelayException;
 import fun.commons.tokengateway.contract.DistributeVO;
 import fun.commons.tokengateway.format.FormatConverter;
 import fun.commons.tokengateway.relay.RelayOrchestrator;
+import fun.commons.tokengateway.util.ClientIpResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
@@ -34,12 +36,15 @@ public class CountTokensController {
     private final RelayOrchestrator orchestrator;
     private final FormatConverter formatConverter;
     private final WebClient.Builder webClientBuilder;
+    /** 客户端 IP 解析 (issue #27): token-validate clientIp 填充, 信任代理策略可配. */
+    private final ClientIpResolver clientIpResolver;
 
     @PostMapping("/v1/messages/count_tokens")
     public Mono<Map<String, Object>> countTokens(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
-            @RequestBody Map<String, Object> body
+            @RequestBody Map<String, Object> body,
+            ServerWebExchange exchange
     ) {
         if (body == null || body.isEmpty()) {
             return Mono.error(new RelayException(400,
@@ -54,7 +59,8 @@ public class CountTokensController {
         String model = (String) modelObj;
         String userContent = RelayOrchestrator.extractUserContent(body);
 
-        return orchestrator.prepare(apiKey, model, 0, 0, userContent, null)
+        return orchestrator.prepare(apiKey, model, 0, 0, userContent, null,
+                clientIpResolver.resolve(exchange))
                 .flatMap(prepared -> {
                     DistributeVO channel = prepared.channel();
                     if (!"anthropic".equalsIgnoreCase(channel.getProtocol())) {

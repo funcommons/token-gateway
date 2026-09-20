@@ -5,6 +5,7 @@ import fun.commons.tokengateway.relay.AccessLogReporter;
 import fun.commons.tokengateway.relay.RelayOrchestrator;
 import fun.commons.tokengateway.relay.TokenUsage;
 import fun.commons.tokengateway.relay.TokenUsageExtractor;
+import fun.commons.tokengateway.util.ClientIpResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
@@ -39,25 +41,31 @@ public class ImagesController {
     private final RelayOrchestrator orchestrator;
     private final AccessLogReporter accessLogReporter;
     private final WebClient.Builder webClientBuilder;
+    /** 客户端 IP 解析 (issue #27): token-validate clientIp 填充, 信任代理策略可配. */
+    private final ClientIpResolver clientIpResolver;
 
     @PostMapping(value = "/v1/images/generations")
     public Mono<ResponseEntity<Object>> generate(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
-            @RequestBody Map<String, Object> body
+            @RequestBody Map<String, Object> body,
+            ServerWebExchange exchange
     ) {
+        String clientIp = clientIpResolver.resolve(exchange);
         return Mono.deferContextual(cv -> doGenerate(authorization, xApiKey, body,
                 cv.getOrDefault(fun.commons.tokengateway.trace.TraceWebFilter.CONTEXT_KEY,
-                        (String) null)));
+                        (String) null), clientIp));
     }
 
     private Mono<ResponseEntity<Object>> doGenerate(
-            String authorization, String xApiKey, Map<String, Object> body, String traceId) {
+            String authorization, String xApiKey, Map<String, Object> body, String traceId,
+            String clientIp) {
         String apiKey = extractApiKey(authorization, xApiKey);
         String model = resolveModel(body);
         int estPromptTokens = estimateFromPrompt(body);
         long startNs = System.nanoTime();
-        return orchestrator.prepare(apiKey, model, estPromptTokens, EST_COMPLETION_TOKENS, null, traceId)
+        return orchestrator.prepare(apiKey, model, estPromptTokens, EST_COMPLETION_TOKENS, null,
+                traceId, clientIp)
                 .flatMap(prepared -> invokeUpstream(prepared.channel(), body)
                         .doOnNext(resp -> {
                             TokenUsage u = TokenUsageExtractor.fromOpenAi(resp);

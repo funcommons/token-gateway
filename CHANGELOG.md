@@ -4,7 +4,17 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **validate 契约补位（issue #27）**：`clientIp` 死字段激活——新增 `ClientIpResolver`（信任代理策略 `gateway.client-ip.{enabled,trusted-proxies}`，默认 0=恒取 TCP 对端防伪造；XFF 按标准逐跳追加语义从右数第 N 段，对端 null/段耗尽/畸形 fail-safe 回退）+ `TokenValidateVO.subAccountId` 可选回传；LLM 面 6 controller + 任务面 create/poll 全链路填充，controller 级透传断言 4 条
+- **渠道健康上报补维度（issue #25）**：`RecordFailureRequest` 增 `upstreamStatus`/`latencyMs` 可选字段；`CANCELLED` errorCode 常量口径定版（499 当前不上报）；`ChannelHealthReporter` javadoc 漂移修正（4xx/5xx+软失败均报）；03 契约 yaml 分区补 Mmagix 形态 record-success/failure 真实契约
+
 ### 文档
+
+- **任务面委托形态定版（issue #29 文档部分）**：`/gw/v1/task/*` 与 `TaskClient` SPI 全仓标注「预留契约、当前无实现、任务执行=lotask4j 托管形态」（中英 8 文档 + 03 yaml）；顺手修正 en design.md 形态表漂移
+- **客户端 IP 解析入安全契约**：《04_后端服务对接安全契约方案》新增「客户端 IP 解析」节（伪造风险 + 信任代理策略 + 部署要求），中英同步
+
+## [0.11.0] - 2026-09-18
 
 - **文档治理二轮**：中英镜像缺口补齐（backend-onboarding/security-contract 补 #22 的 504/10003 分支、任务面手册 en 补资源代理 `.{ext}` 与轮询 504 语义）；《在线文档方案》归入开发文档编号体系（09）；新增关键文档模板三件（`docs/_templates/`：ADR/测试报告/发布说明，站点构建排除）；README（中英）与 sidebar 同步
 

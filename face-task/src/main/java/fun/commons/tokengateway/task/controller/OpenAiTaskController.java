@@ -1,6 +1,7 @@
 package fun.commons.tokengateway.task.controller;
 
 import fun.commons.tokengateway.task.relay.TaskRelayOrchestrator;
+import fun.commons.tokengateway.util.ClientIpResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -9,6 +10,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.net.URI;
@@ -32,6 +34,8 @@ import java.util.Map;
 public class OpenAiTaskController {
 
     private final TaskRelayOrchestrator orchestrator;
+    /** 客户端 IP 解析 (issue #27): token-validate clientIp 填充, 信任代理策略可配. */
+    private final ClientIpResolver clientIpResolver;
 
     @PostMapping("/v1/videos")
     public Mono<Map<String, Object>> createVideo(
@@ -39,24 +43,30 @@ public class OpenAiTaskController {
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
             @RequestHeader(value = "X-Trace-Id", required = false) String traceId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            @RequestBody Map<String, Object> body) {
-        return orchestrator.createVideoJob(extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
+            @RequestBody Map<String, Object> body,
+            ServerWebExchange exchange) {
+        return orchestrator.createVideoJob(extractApiKey(authorization, xApiKey), body, traceId,
+                idempotencyKey, clientIpResolver.resolve(exchange));
     }
 
     @GetMapping("/v1/videos/{taskNo}")
     public Mono<Map<String, Object>> getVideo(
             @PathVariable String taskNo,
             @RequestHeader(value = "Authorization", required = false) String authorization,
-            @RequestHeader(value = "x-api-key", required = false) String xApiKey) {
-        return orchestrator.videoJob(taskNo, extractApiKey(authorization, xApiKey));
+            @RequestHeader(value = "x-api-key", required = false) String xApiKey,
+            ServerWebExchange exchange) {
+        return orchestrator.videoJob(taskNo, extractApiKey(authorization, xApiKey),
+                clientIpResolver.resolve(exchange));
     }
 
     @GetMapping("/v1/videos/{taskNo}/content")
     public Mono<ResponseEntity<Void>> videoContent(
             @PathVariable String taskNo,
             @RequestHeader(value = "Authorization", required = false) String authorization,
-            @RequestHeader(value = "x-api-key", required = false) String xApiKey) {
-        return orchestrator.videoContentUrl(taskNo, extractApiKey(authorization, xApiKey))
+            @RequestHeader(value = "x-api-key", required = false) String xApiKey,
+            ServerWebExchange exchange) {
+        return orchestrator.videoContentUrl(taskNo, extractApiKey(authorization, xApiKey),
+                clientIpResolver.resolve(exchange))
                 .map(url -> ResponseEntity.status(307).location(URI.create(url)).<Void>build());
     }
 

@@ -24,7 +24,7 @@
 - Deployment group `face: task | all` (mounts a resource cache disk, scales independently); shares credential/billing/moderation/logging/audit infrastructure with the LLM face.
 - **Control-plane decisions**: key validation and the routing table are owned by the control plane (token-validate / route capability faces); the gateway data plane executes. Billing order = route-first pricing (different models, different prices), then full pre-deduction.
 - Two forms: **lotask4j-hosted** (the default — task table / state machine / retry / zombie reaping hosted by the platform; a self-written Worker executes upstream via Groovy scripts; the upstream is a "dumb" task API) and
-  **delegated face** (the backend owns task state itself and implements the `task/create` + `task/poll` capability face — see [Backend Onboarding Guide](../dev/backend-onboarding.md) §4.8).
+  **delegated face** (the backend owns task state itself and implements the `task/create` + `task/poll` capability face — see [Backend Onboarding Guide](../dev/backend-onboarding.md) §4.8; **reserved: the SPI contract exists, no implementation yet**).
 - Resource proxying and notify are gateway-inherent: **upstream raw URLs are never passed through**; proxy URLs carry an exp+sig capability credential valid for 24h.
 
 ## 2. Endpoint Overview (Task Face)

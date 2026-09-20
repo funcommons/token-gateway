@@ -1,6 +1,8 @@
 package fun.commons.tokengateway.controller;
 
 import fun.commons.tokengateway.exception.RelayException;
+import fun.commons.tokengateway.config.ClientIpProperties;
+import fun.commons.tokengateway.util.ClientIpResolver;
 
 import fun.commons.tokengateway.rpc.HttpChatModelApi;
 import fun.commons.tokengateway.rpc.HttpTokenApi;
@@ -13,6 +15,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
+import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
+import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.web.server.ServerWebExchange;
 import reactor.test.StepVerifier;
 
 import java.util.List;
@@ -39,7 +44,8 @@ class ModelsControllerTest {
         WebClient.Builder b = WebClient.builder();
         controller = new ModelsController(
                 new HttpTokenApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props)),
-                new HttpChatModelApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props)));
+                new HttpChatModelApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props)),
+                new ClientIpResolver(new ClientIpProperties()));
     }
 
     @AfterEach
@@ -65,7 +71,7 @@ class ModelsControllerTest {
     void openaiShape() {
         mockTokenOk();
         mockModels();
-        StepVerifier.create((Mono<?>) controller.listModels("Bearer sk", null, null))
+        StepVerifier.create((Mono<?>) controller.listModels("Bearer sk", null, null, exchange()))
                 .assertNext(resp -> {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> r = (Map<String, Object>) resp;
@@ -85,7 +91,7 @@ class ModelsControllerTest {
     void anthropicShape() {
         mockTokenOk();
         mockModels();
-        StepVerifier.create((Mono<?>) controller.listModels(null, "sk-ant-x", "2023-06-01"))
+        StepVerifier.create((Mono<?>) controller.listModels(null, "sk-ant-x", "2023-06-01", exchange()))
                 .assertNext(resp -> {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> r = (Map<String, Object>) resp;
@@ -103,7 +109,7 @@ class ModelsControllerTest {
     @Test
     @DisplayName("缺 apiKey → 401")
     void missingApiKey() {
-        StepVerifier.create((Mono<?>) controller.listModels(null, null, null))
+        StepVerifier.create((Mono<?>) controller.listModels(null, null, null, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 401);
     }
@@ -114,7 +120,7 @@ class ModelsControllerTest {
         backend.enqueue(new MockResponse()
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"code\":0,\"data\":{\"valid\":false}}"));
-        StepVerifier.create((Mono<?>) controller.listModels("Bearer bad", null, null))
+        StepVerifier.create((Mono<?>) controller.listModels("Bearer bad", null, null, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 401);
     }
@@ -123,7 +129,7 @@ class ModelsControllerTest {
     @DisplayName("token 校验 RPC 失败 → 504 + 10003 (issue #22: 区别于 key 真失效 401)")
     void tokenRpcFailure() {
         backend.enqueue(new MockResponse().setResponseCode(500));
-        StepVerifier.create((Mono<?>) controller.listModels("Bearer sk", null, null))
+        StepVerifier.create((Mono<?>) controller.listModels("Bearer sk", null, null, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException re
                         && re.getHttpStatus() == 504
                         && re.getCode() == 10003);
@@ -135,7 +141,7 @@ class ModelsControllerTest {
         mockTokenOk();
         backend.enqueue(new MockResponse().setResponseCode(500));
 
-        StepVerifier.create((Mono<?>) controller.listModels("Bearer sk", null, null))
+        StepVerifier.create((Mono<?>) controller.listModels("Bearer sk", null, null, exchange()))
                 .assertNext(resp -> {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> r = (Map<String, Object>) resp;
@@ -145,5 +151,10 @@ class ModelsControllerTest {
                     assertThat(data).isEmpty();
                 })
                 .verifyComplete();
+    }
+
+    /** 直调注入 exchange (clientIp 解析入口; 缺省无 XFF → 取 mock 对端地址). */
+    private static ServerWebExchange exchange() {
+        return MockServerWebExchange.from(MockServerHttpRequest.post("/v1/test"));
     }
 }

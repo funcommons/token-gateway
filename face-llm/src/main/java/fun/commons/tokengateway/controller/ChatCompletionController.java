@@ -15,6 +15,7 @@ import fun.commons.tokengateway.rpc.HttpModerationApi;
 import fun.commons.tokengateway.upstream.SsePassthroughInvoker;
 import fun.commons.tokengateway.upstream.UpstreamModelMapper;
 import fun.commons.tokengateway.util.ChatTokenEstimator;
+import fun.commons.tokengateway.util.ClientIpResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -57,20 +59,25 @@ public class ChatCompletionController {
     private final HttpModerationApi moderationApi;
     private final WebClient.Builder webClientBuilder;
     private final FailoverProperties failoverProps;
+    /** 客户端 IP 解析 (issue #27): token-validate clientIp 填充, 信任代理策略可配. */
+    private final ClientIpResolver clientIpResolver;
 
     @PostMapping(value = "/v1/chat/completions")
     public Mono<org.springframework.http.ResponseEntity<Object>> complete(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
-            @RequestBody Map<String, Object> body
+            @RequestBody Map<String, Object> body,
+            ServerWebExchange exchange
     ) {
+        String clientIp = clientIpResolver.resolve(exchange);
         return Mono.deferContextual(cv -> doComplete(authorization, xApiKey, body,
                 cv.getOrDefault(fun.commons.tokengateway.trace.TraceWebFilter.CONTEXT_KEY,
-                        (String) null)));
+                        (String) null), clientIp));
     }
 
     private Mono<org.springframework.http.ResponseEntity<Object>> doComplete(
-            String authorization, String xApiKey, Map<String, Object> body, String traceId) {
+            String authorization, String xApiKey, Map<String, Object> body, String traceId,
+            String clientIp) {
         String apiKey = extractApiKey(authorization, xApiKey);
         String model = resolveModel(body);
         String userContent = RelayOrchestrator.extractUserContent(body);
@@ -78,14 +85,16 @@ public class ChatCompletionController {
         int estPrompt = ChatTokenEstimator.estimatePromptTokens(body);
         int estCompletion = ChatTokenEstimator.estimateCompletionTokens(isStream(body));
         if (isStream(body)) {
-            return orchestrator.prepare(apiKey, model, estPrompt, estCompletion, userContent, traceId)
+            return orchestrator.prepare(apiKey, model, estPrompt, estCompletion, userContent, traceId,
+                    clientIp)
                     .map(prepared -> org.springframework.http.ResponseEntity.ok()
                             .contentType(MediaType.TEXT_EVENT_STREAM)
                             .body((Object) invokeUpstreamStream(prepared, RelayOrchestrator.applyMask(body, prepared.moderationSanitized()),
                                     traceId, estPrompt, estCompletion)));
         }
         long startNs = System.nanoTime();
-        return orchestrator.prepare(apiKey, model, estPrompt, estCompletion, userContent, traceId)
+        return orchestrator.prepare(apiKey, model, estPrompt, estCompletion, userContent, traceId,
+                clientIp)
                 .flatMap(prepared -> {
                     Map<String, Object> effectiveBody = RelayOrchestrator.applyMask(body, prepared.moderationSanitized());
                     AtomicBoolean settled = new AtomicBoolean();

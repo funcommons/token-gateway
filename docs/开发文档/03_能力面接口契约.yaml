@@ -7,6 +7,10 @@ info:
     Go / Python / Node / Java 实现这些 HTTP 端点即可，网关以 `adapter: openapi` 调用。
     接入手册见 docs/开发文档/02_后端接入开发手册.md。
 
+    注意文件内含两种形态：`/gw/v1/*` 为 openapi 适配器契约（本文件主体）；
+    文末另有「Mmagix 形态内部 API」独立区块（`/api/v1/internal/channels/*` 健康上报，
+    网关经 route 面硬编码调用的历史路径），两种形态以注释标头隔离，勿混用。
+
     通用规则（违反 = 接入验收不过）：
     - 所有响应 HTTP 200 + 6 字段信封（code/message/data/error/trace_id/timestamp）；
       业务错误在 code（10202 凭证 / 10400 无路由 / 10617 余额 / 101xx 参数），
@@ -35,6 +39,8 @@ tags:
     description: 模型目录
   - name: task
     description: 任务委托面（可选；仅后端自持任务状态时实现。哑上游任务 API 无需实现——网关本地状态机经 route 面驱动）
+  - name: channel-health
+    description: 渠道健康上报（Mmagix 形态内部 API，网关→控制层方向；与 /gw/v1/* 适配器契约不同形，见文末独立区块）
 security:
   - apiKeyHeader: []
   - bearerJwt: []
@@ -59,6 +65,13 @@ paths:
                 credential:
                   type: string
                   description: 调用方原始凭证（网关原样转交）
+                client_ip:
+                  type: string
+                  description: |
+                    调用方客户端 IP（issue #27）。由网关按信任代理策略解析，见安全契约「客户端 IP 解析」节：
+                    `gateway.client-ip.trusted-proxies=0`（默认）恒取 TCP 对端地址；
+                    >0 时从 X-Forwarded-For 右起跳过 N 个可信代理后取第一个，缺失/耗尽/畸形回退 TCP 对端。
+                    客户端可伪造 XFF 首位，服务端不得自行从请求头解析客户端 IP。
       responses:
         '200':
           description: 校验结果（无效凭证也是 200 + code=10202）
@@ -349,6 +362,7 @@ paths:
 
   /gw/v1/task/create:
     post:
+      # SPI 预留契约, 当前无实现, 任务执行=lotask4j 托管形态 (issue #29 定版)
       tags: [task]
       operationId: createTask
       summary: 任务创建委托（网关已生成 task_no 并完成全额预扣后下发；失败回业务 code，网关将退款并置 FAILED）
@@ -398,6 +412,7 @@ paths:
 
   /gw/v1/task/poll:
     post:
+      # SPI 预留契约, 当前无实现, 任务执行=lotask4j 托管形态 (issue #29 定版)
       tags: [task]
       operationId: pollTask
       summary: 任务轮询委托（只读；终态后网关停止轮询）
@@ -444,6 +459,59 @@ paths:
                                 type: object
                                 nullable: true
                                 additionalProperties: true
+
+  # ── Mmagix 形态内部 API（网关→控制层，非 /gw/v1/* 适配器契约）──
+  # 网关经 route 面硬编码调用以下路径（HttpChannelApi，路径不可按 face 配置）；
+  # openapi 适配器部署的控制层可按同 schema 在自选路径实现同语义端点。
+  # 上报口径（issue #25 定版）：
+  #   上游 200 → record-success；
+  #   上游 4xx/5xx（含 200+错误载荷软失败）→ record-failure，errorCode=HTTP_<status>，
+  #     并附 upstreamStatus（上游真实 HTTP 状态）与 latencyMs（本次上游调用耗时，毫秒）；
+  #   客户端取消（499）→ 不上报（非渠道责任；预留 errorCode=CANCELLED 单列，未来上报也不计失败）。
+  # 字段向后兼容：upstreamStatus/latencyMs 为可选新增，旧控制层忽略未知字段零影响。
+  /api/v1/internal/channels/{channel_id}/record-success:
+    post:
+      tags: [channel-health]
+      operationId: recordChannelSuccess
+      summary: 渠道成功上报（网关在请求完结点 fire-and-forget 调用；无请求体）
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 受理结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /api/v1/internal/channels/{channel_id}/record-failure:
+    post:
+      tags: [channel-health]
+      operationId: recordChannelFailure
+      summary: 渠道失败上报（失败计数/冻结/亲和清除的唯一数据源；fire-and-forget）
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordFailureRequest'
+      responses:
+        '200':
+          description: 受理结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
 
 components:
   securitySchemes:
@@ -513,6 +581,9 @@ components:
           type: string
         user_id:
           type: string
+        sub_account_id:
+          type: string
+          description: 子账号 ID（可选，issue #27）；网关仅透传消费，不做存在性强依赖
         active:
           type: boolean
         masked_credential:
@@ -647,3 +718,33 @@ components:
           additionalProperties: true
         trace_id:
           type: string
+
+    RecordFailureRequest:
+      type: object
+      description: 渠道失败上报请求体（Mmagix 形态，字段 camelCase 与网关 Java 契约一致）；
+        5 个基础字段为既有契约，upstreamStatus/latencyMs 为 issue #25 可选新增（向后兼容）
+      required: [errorCode]
+      properties:
+        tenantId:
+          type: string
+          description: 调用方租户（token-validate 的 tenant_id）
+        errorCode:
+          type: string
+          description: 'HTTP_<status>（上游真实状态）或 UPSTREAM_ERROR（超时/连接拒绝等无 HTTP 语义失败）；
+            预留 CANCELLED（客户端取消，当前网关不上报，未来上报也不计失败）'
+        errorMessage:
+          type: string
+        apiKeyId:
+          type: string
+          description: 触发失败的 API Key ID（亲和清除定位用）
+        model:
+          type: string
+          description: 失败请求的模型编码（亲和 key 的 model 维度）
+        upstreamStatus:
+          type: integer
+          description: 上游真实 HTTP 状态码（硬错误=上游响应状态；软失败=错误载荷 status 字段，
+            缺省 502）；无 HTTP 语义的失败为 null。与 errorCode=HTTP_<status> 同口径
+        latencyMs:
+          type: integer
+          format: int64
+          description: 本次上游调用耗时（毫秒，网关侧 elapsed）；滑动窗口/半开判定建议采用

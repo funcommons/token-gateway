@@ -103,17 +103,21 @@ public class RelayOrchestrator {
      *   <li>moderation BLOCK → 400</li>
      *   <li>preConsume 失败 → 502; 信封 10617 (余额不足) → 402 + 10617</li>
      * </ul>
+     *
+     * @param clientIp 调用方客户端 IP (issue #27, controller 层经 ClientIpResolver 解析,
+     *                 信任代理策略见 ClientIpProperties; 透传给 token-validate 供能力面
+     *                 IP 白名单/风控, 网关自身不做强依赖)
      */
     public Mono<PreparedRequest> prepare(String apiKey, String model,
                                          int estPromptTokens, int estCompletionTokens,
-                                         String userContent, String requestId) {
+                                         String userContent, String requestId, String clientIp) {
         if (apiKey == null) {
             return Mono.error(new RelayException(401,
                     fun.commons.tokengateway.framework.ApiCode.UNAUTHORIZED.getCode(),
                     "缺少 bearer token"));
         }
         return tokenApi.validate(TokenValidateRequest.builder()
-                        .apiKey(apiKey).model(model).build())
+                        .apiKey(apiKey).clientIp(clientIp).model(model).build())
                 .flatMap(tokenResp -> {
                     if (tokenResp == null || !tokenResp.isSuccess()) {
                         // token 校验 RPC 失败/超时 (fail 包络 10003) → 504 可重试基础设施错误,

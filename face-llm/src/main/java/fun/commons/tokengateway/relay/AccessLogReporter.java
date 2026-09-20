@@ -17,7 +17,8 @@ import java.util.UUID;
  *
  * <p>把字段收集 (traceId / tenantId / token usage / latency) 与 RPC 调用封装到一处,
  * 避免每个 Controller 重复; 同点代理渠道健康上报 (ChannelHealthReporter):
- * 成功 → record-success, 上游错误 (4xx/5xx, 真实状态码入 errorCode) → record-failure,
+ * 成功 → record-success, 上游错误 (4xx/5xx, 真实状态码入 errorCode, 附
+ * upstreamStatus/latencyMs 维度 — issue #25) → record-failure,
  * 客户端取消 (499) 不上报; 审核失败/内容违规走 {@link #reportErrorWithoutHealth} 不触健康.
  *
  * <p>失败仅记日志, 不影响主响应.
@@ -97,7 +98,8 @@ public class AccessLogReporter {
                 .creditConsumed(creditConsumed)
                 .latencyMs(latencyMs)
                 .build();
-        Mono<Void> health = withHealth ? reportChannelHealth(channel, token, statusCode) : Mono.empty();
+        Mono<Void> health = withHealth
+                ? reportChannelHealth(channel, token, statusCode, latencyMs) : Mono.empty();
         return accessLogApi.record(entity).then(health);
     }
 
@@ -105,8 +107,12 @@ public class AccessLogReporter {
      * 渠道健康信号 (issue #1 缺口 3: 上游真实状态码透传, 不再恒 502):
      * 200 → record-success; 客户端取消 (499) → 不上报;
      * 上游错误 (4xx/5xx, 含 200+错误载荷软失败) → record-failure, errorCode=HTTP_&lt;status&gt;.
+     *
+     * <p>issue #25: record-failure 附 upstreamStatus (上游真实 HTTP 状态) 与
+     * latencyMs (本次上游调用耗时) 两个可选维度, 口径与 errorCode 同源.
      */
-    private Mono<Void> reportChannelHealth(DistributeVO channel, TokenValidateVO token, int statusCode) {
+    private Mono<Void> reportChannelHealth(DistributeVO channel, TokenValidateVO token,
+                                           int statusCode, int latencyMs) {
         if (statusCode == 200) {
             return channelHealthReporter.reportSuccess(channel);
         }
@@ -116,7 +122,9 @@ public class AccessLogReporter {
         return channelHealthReporter.reportFailure(channel,
                 token != null ? token.getTenantId() : null,
                 statusCode > 0 ? "HTTP_" + statusCode : "UPSTREAM_ERROR",
-                "upstream error");
+                "upstream error",
+                statusCode > 0 ? statusCode : null,
+                (long) latencyMs);
     }
 
     private static Long parseLong(String s) {

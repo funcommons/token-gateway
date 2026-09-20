@@ -20,6 +20,7 @@ import fun.commons.tokengateway.task.state.TaskNoMappingStore;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.RecordedRequest;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -126,9 +127,9 @@ class TaskRelayOrchestratorTest {
         success.put("status", "SUCCEEDED");
         success.put("result", Map.of("resources", List.of("https://gw/v1/resources/T1/0?exp=1&sig=x")));
         org.mockito.Mockito.doReturn(Mono.just(processing)).doReturn(Mono.just(success))
-                .when(spy).poll("image", "T1", "key");
+                .when(spy).poll("image", "T1", "key", null);
 
-        StepVerifier.create(spy.pollUntilTerminal("image", "T1", "key",
+        StepVerifier.create(spy.pollUntilTerminal("image", "T1", "key", null,
                         java.time.Instant.now().plusSeconds(5), java.time.Duration.ofMillis(10)))
                 .assertNext(resp -> {
                     assertThat(resp.get("created")).isNotNull();
@@ -146,9 +147,9 @@ class TaskRelayOrchestratorTest {
         Map<String, Object> processing = new java.util.LinkedHashMap<>();
         processing.put("task_no", "T2");
         processing.put("status", "PROCESSING");
-        org.mockito.Mockito.doReturn(Mono.just(processing)).when(spy).poll("image", "T2", "key");
+        org.mockito.Mockito.doReturn(Mono.just(processing)).when(spy).poll("image", "T2", "key", null);
 
-        StepVerifier.create(spy.pollUntilTerminal("image", "T2", "key",
+        StepVerifier.create(spy.pollUntilTerminal("image", "T2", "key", null,
                         java.time.Instant.now().minusSeconds(1), java.time.Duration.ofMillis(10)))
                 .assertNext(resp -> {
                     assertThat(resp.get("status")).isEqualTo("PROCESSING");
@@ -166,9 +167,9 @@ class TaskRelayOrchestratorTest {
         failed.put("task_no", "T3");
         failed.put("status", "FAILED");
         failed.put("error", Map.of("code", "SCRIPT_ERROR", "message", "waibibabo HTTP 502"));
-        org.mockito.Mockito.doReturn(Mono.just(failed)).when(spy).poll("image", "T3", "key");
+        org.mockito.Mockito.doReturn(Mono.just(failed)).when(spy).poll("image", "T3", "key", null);
 
-        StepVerifier.create(spy.pollUntilTerminal("image", "T3", "key",
+        StepVerifier.create(spy.pollUntilTerminal("image", "T3", "key", null,
                         java.time.Instant.now().plusSeconds(5), java.time.Duration.ofMillis(10)))
                 .expectErrorSatisfies(e -> {
                     org.assertj.core.api.Assertions.assertThat(e)
@@ -182,7 +183,7 @@ class TaskRelayOrchestratorTest {
     @DisplayName("generations: n>1 直接拒绝 (任务面单图语义)")
     void generationsRejectsMultiImage() {
         StepVerifier.create(orchestrator.createImageGenerations("key",
-                        Map.of("model", "waibibabo-gpt-image-2", "prompt", "x", "n", 2), null, null))
+                        Map.of("model", "waibibabo-gpt-image-2", "prompt", "x", "n", 2), null, null, null))
                 .expectErrorSatisfies(e -> {
                     org.assertj.core.api.Assertions.assertThat(e)
                             .isInstanceOf(fun.commons.tokengateway.exception.RelayException.class);
@@ -203,7 +204,7 @@ class TaskRelayOrchestratorTest {
 
         StepVerifier.create(orchestrator.createVideoJob("sk-caller",
                         Map.of("model", "sora-2", "prompt", "猫滑滑板", "seconds", "8",
-                                "size", "1280x720"), "trace-v", null))
+                                "size", "1280x720"), "trace-v", null, null))
                 .assertNext(job -> {
                     assertThat(String.valueOf(job.get("id"))).startsWith("T");
                     assertThat(job.get("object")).isEqualTo("video_generation");
@@ -225,8 +226,8 @@ class TaskRelayOrchestratorTest {
         Map<String, Object> running = new java.util.LinkedHashMap<>();
         running.put("task_no", "T9");
         running.put("status", "RUNNING");
-        org.mockito.Mockito.doReturn(Mono.just(running)).when(spy).poll("video", "T9", "key");
-        StepVerifier.create(spy.videoJob("T9", "key"))
+        org.mockito.Mockito.doReturn(Mono.just(running)).when(spy).poll("video", "T9", "key", null);
+        StepVerifier.create(spy.videoJob("T9", "key", null))
                 .assertNext(v -> assertThat(v.get("status")).isEqualTo("in_progress"))
                 .verifyComplete();
 
@@ -234,8 +235,8 @@ class TaskRelayOrchestratorTest {
         done.put("task_no", "T9");
         done.put("status", "SUCCEEDED");
         done.put("result", Map.of("resources", List.of("/v1/resources/T9/0?exp=1&sig=x")));
-        org.mockito.Mockito.doReturn(Mono.just(done)).when(spy).poll("image", "T9", "key");
-        StepVerifier.create(spy.imageJob("T9", "key"))
+        org.mockito.Mockito.doReturn(Mono.just(done)).when(spy).poll("image", "T9", "key", null);
+        StepVerifier.create(spy.imageJob("T9", "key", null))
                 .assertNext(img -> {
                     assertThat(img.get("status")).isEqualTo("completed");
                     assertThat(img.get("object")).isEqualTo("image_generation");
@@ -253,8 +254,8 @@ class TaskRelayOrchestratorTest {
         failed.put("task_no", "T9");
         failed.put("status", "EXPIRED");
         failed.put("error", Map.of("code", "TIMEOUT", "message", "任务超时"));
-        org.mockito.Mockito.doReturn(Mono.just(failed)).when(spy).poll("video", "T9", "key");
-        StepVerifier.create(spy.videoJob("T9", "key"))
+        org.mockito.Mockito.doReturn(Mono.just(failed)).when(spy).poll("video", "T9", "key", null);
+        StepVerifier.create(spy.videoJob("T9", "key", null))
                 .assertNext(v -> {
                     assertThat(v.get("status")).isEqualTo("failed");
                     assertThat(((Map<?, ?>) v.get("error")).get("code")).isEqualTo("TIMEOUT");
@@ -270,24 +271,24 @@ class TaskRelayOrchestratorTest {
         done.put("task_no", "T8");
         done.put("status", "SUCCEEDED");
         done.put("result", Map.of("resources", List.of("/v1/resources/T8/0?exp=1&sig=y")));
-        org.mockito.Mockito.doReturn(Mono.just(done)).when(spy).poll("video", "T8", "key");
-        StepVerifier.create(spy.videoContentUrl("T8", "key"))
+        org.mockito.Mockito.doReturn(Mono.just(done)).when(spy).poll("video", "T8", "key", null);
+        StepVerifier.create(spy.videoContentUrl("T8", "key", null))
                 .expectNext("/v1/resources/T8/0?exp=1&sig=y")
                 .verifyComplete();
 
         Map<String, Object> running = new java.util.LinkedHashMap<>();
         running.put("task_no", "T8");
         running.put("status", "RUNNING");
-        org.mockito.Mockito.doReturn(Mono.just(running)).when(spy).poll("video", "T8", "key");
-        StepVerifier.create(spy.videoContentUrl("T8", "key"))
+        org.mockito.Mockito.doReturn(Mono.just(running)).when(spy).poll("video", "T8", "key", null);
+        StepVerifier.create(spy.videoContentUrl("T8", "key", null))
                 .expectErrorSatisfies(e -> assertThat(((RelayException) e).getHttpStatus()).isEqualTo(409))
                 .verify();
 
         Map<String, Object> noRes = new java.util.LinkedHashMap<>();
         noRes.put("task_no", "T8");
         noRes.put("status", "SUCCEEDED");
-        org.mockito.Mockito.doReturn(Mono.just(noRes)).when(spy).poll("video", "T8", "key");
-        StepVerifier.create(spy.videoContentUrl("T8", "key"))
+        org.mockito.Mockito.doReturn(Mono.just(noRes)).when(spy).poll("video", "T8", "key", null);
+        StepVerifier.create(spy.videoContentUrl("T8", "key", null))
                 .expectErrorSatisfies(e -> assertThat(((RelayException) e).getHttpStatus()).isEqualTo(404))
                 .verify();
     }
@@ -333,6 +334,27 @@ class TaskRelayOrchestratorTest {
         JSONObject decrypted = JSON.parseObject(cipher.decrypt(snapshot));
         assertThat(decrypted.getString("baseUrl")).isEqualTo("https://up");
         assertThat(decrypted.getString("apiKey")).isEqualTo("sk-upstream");
+    }
+
+    @Test
+    @DisplayName("clientIp 透传 (issue #27): create 六参重载 → validate 请求体携带 clientIp")
+    void createPassesClientIpToValidate() throws InterruptedException {
+        enqueueHappyControlPlane(backend);
+        when(lotaskClient.submit(eq("video"), anyString(), any(), anyString()))
+                .thenReturn(Mono.just("YeirYkxHuQ"));
+        when(mappingStore.put(anyString(), eq("YeirYkxHuQ"), any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(orchestrator.create("video", "sk-caller",
+                        Map.of("model", "kling-v1", "params", Map.of("seconds", 5)), "trace-1",
+                        null, "9.9.9.9"))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        okhttp3.mockwebserver.RecordedRequest validate =
+                backend.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(validate).isNotNull();
+        assertThat(validate.getPath()).contains("/api/v1/internal/tokens/validate");
+        assertThat(validate.getBody().readUtf8()).contains("\"clientIp\":\"9.9.9.9\"");
     }
 
     @Test
@@ -495,7 +517,7 @@ class TaskRelayOrchestratorTest {
     void pollTokenRpcFailure504() {
         backend.enqueue(new MockResponse().setResponseCode(500));
 
-        StepVerifier.create(orchestrator.poll("video", "T-x", "sk-caller"))
+        StepVerifier.create(orchestrator.poll("video", "T-x", "sk-caller", null))
                 .expectErrorMatches(e -> e instanceof RelayException re
                         && re.getHttpStatus() == 504
                         && re.getCode() == ApiCode.SERVICE_TIMEOUT.getCode())
@@ -509,7 +531,7 @@ class TaskRelayOrchestratorTest {
         backend.enqueue(json("{\"code\":0,\"data\":{\"valid\":true}}"));
         when(mappingStore.get("T-ghost")).thenReturn(Mono.empty());
 
-        StepVerifier.create(orchestrator.poll("video", "T-ghost", "sk-caller"))
+        StepVerifier.create(orchestrator.poll("video", "T-ghost", "sk-caller", null))
                 .expectErrorMatches(e -> e instanceof RelayException re
                         && re.getHttpStatus() == 404
                         && re.getCode() == ApiCode.NOT_FOUND.getCode())
@@ -526,7 +548,7 @@ class TaskRelayOrchestratorTest {
                 Map.of("resources", List.of("https://up/v.mp4"), "usage", Map.of("seconds", 5)),
                 null, null)));
 
-        StepVerifier.create(orchestrator.poll("video", "T-ok", "sk-caller"))
+        StepVerifier.create(orchestrator.poll("video", "T-ok", "sk-caller", null))
                 .assertNext(view -> {
                     assertThat(view.get("task_no")).isEqualTo("T-ok");
                     assertThat(view.get("status")).isEqualTo("SUCCEEDED");
@@ -546,7 +568,7 @@ class TaskRelayOrchestratorTest {
         when(lotaskClient.get("YeirYkxHuQ")).thenReturn(Mono.just(new LotaskTaskView(
                 "YeirYkxHuQ", "FAILED", null, "UPSTREAM_ERROR", "上游超时")));
 
-        StepVerifier.create(orchestrator.poll("video", "T-bad", "sk-caller"))
+        StepVerifier.create(orchestrator.poll("video", "T-bad", "sk-caller", null))
                 .assertNext(view -> {
                     assertThat(view.get("status")).isEqualTo("FAILED");
                     @SuppressWarnings("unchecked")
@@ -565,7 +587,7 @@ class TaskRelayOrchestratorTest {
                 com.alibaba.fastjson2.JSON.parseObject("{\"status\":\"SUCCEEDED\","
                         + "\"result\":{\"resources\":[\"/v1/resources/T-done/0?exp=1&sig=x\"]}}")));
 
-        StepVerifier.create(orchestrator.poll("video", "T-done", "sk-caller"))
+        StepVerifier.create(orchestrator.poll("video", "T-done", "sk-caller", null))
                 .assertNext(view -> {
                     assertThat(view.get("status")).isEqualTo("SUCCEEDED");
                     @SuppressWarnings("unchecked")

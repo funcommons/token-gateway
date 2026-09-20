@@ -94,6 +94,14 @@ gateway:
   health-report:
     enabled: true
 
+  # 客户端 IP 解析 (issue #27): token-validate 请求体 clientIp 的填充策略.
+  # X-Forwarded-For 首段客户端可任意伪造, 无脑取首位 = IP 白名单/风控被绕过;
+  # trusted-proxies=0 恒取 TCP 对端 (防伪造默认); >0 表示前面有 N 层可信代理 (LB/Ingress),
+  # XFF 从右往左跳过 N 个后取第一个, 缺失/耗尽/畸形回退 TCP 对端. 详见安全契约「客户端 IP 解析」.
+  client-ip:
+    enabled: true
+    trusted-proxies: 0
+
   # 请求内渠道轮换 (移植 MMagiX gateway cffc1ea): 上游可重试失败 (5xx/401/429/断连) 时
   # record-failure + refund + excludeChannelIds re-distribute + 重新预扣;
   # enabled=false 退化为单渠道快速失败. 终态失败健康计数由 access-log 健康上报兜底.

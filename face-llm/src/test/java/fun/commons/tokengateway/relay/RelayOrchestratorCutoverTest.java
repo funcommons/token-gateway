@@ -110,7 +110,7 @@ class RelayOrchestratorCutoverTest {
                         + "\"blocked\":[],\"affinity_hit\":false,\"cache_hit\":false},"
                         + "\"error\":null,\"trace_id\":\"t\",\"timestamp\":1}"));
 
-        StepVerifier.create(orchestrator(thmpProps()).prepare("sk", "gpt-4o", 0, 0, null, "req-1"))
+        StepVerifier.create(orchestrator(thmpProps()).prepare("sk", "gpt-4o", 0, 0, null, "req-1", null))
                 .assertNext(p -> {
                     assertThat(p.channel().getChannelId()).isEqualTo("55");
                     assertThat(p.channel().getBaseUrl()).isEqualTo("https://thmp-up.io/v1");
@@ -135,7 +135,7 @@ class RelayOrchestratorCutoverTest {
         enqueueModerationAndPreConsume();
         thmp.enqueue(new MockResponse().setResponseCode(500).setBody("thmp down"));
 
-        StepVerifier.create(orchestrator(thmpProps()).prepare("sk", "gpt-4o", 0, 0, null, "req-1"))
+        StepVerifier.create(orchestrator(thmpProps()).prepare("sk", "gpt-4o", 0, 0, null, "req-1", null))
                 .assertNext(p -> {
                     assertThat(p.channel().getChannelId()).isEqualTo("c1");
                     assertThat(p.channel().getApiKey()).isEqualTo("sk-old");
@@ -154,7 +154,7 @@ class RelayOrchestratorCutoverTest {
                         + "\"apiKey\":\"sk-old\",\"protocol\":\"openai\",\"ownerType\":\"PLATFORM\"}}"));
         enqueueModerationAndPreConsume();
 
-        StepVerifier.create(orchestrator(thmpProps()).prepare("sk", "claude-x", 0, 0, null, "req-1"))
+        StepVerifier.create(orchestrator(thmpProps()).prepare("sk", "claude-x", 0, 0, null, "req-1", null))
                 .assertNext(p -> assertThat(p.channel().getChannelId()).isEqualTo("c1"))
                 .verifyComplete();
         assertThat(thmp.getRequestCount()).isEqualTo(0);

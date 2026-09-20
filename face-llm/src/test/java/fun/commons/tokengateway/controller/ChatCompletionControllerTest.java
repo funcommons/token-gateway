@@ -1,6 +1,8 @@
 package fun.commons.tokengateway.controller;
 
 import fun.commons.tokengateway.exception.RelayException;
+import fun.commons.tokengateway.config.ClientIpProperties;
+import fun.commons.tokengateway.util.ClientIpResolver;
 
 import fun.commons.tokengateway.contract.TokenValidateRequest;
 import fun.commons.tokengateway.contract.TokenValidateVO;
@@ -19,6 +21,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
+import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.web.server.ServerWebExchange;
 import reactor.test.StepVerifier;
 
 import java.util.HashMap;
@@ -81,7 +86,8 @@ class ChatCompletionControllerTest {
                         fun.commons.tokengateway.relay.TestChannelHealthReporters.recording(healthCalls)),
                 moderationApi,
                 builder,
-                failoverProps);
+                failoverProps,
+                new ClientIpResolver(new ClientIpProperties()));
     }
 
     @AfterEach
@@ -125,7 +131,7 @@ class ChatCompletionControllerTest {
         body.put("model", "gpt-4o");
         body.put("messages", List.of(Map.of("role", "user", "content", "x")));
 
-        StepVerifier.create(controller.complete("Bearer sk-test", null, body))
+        StepVerifier.create(controller.complete("Bearer sk-test", null, body, exchange()))
                 .assertNext(entity -> {
                     assertThat(entity.getStatusCode().value()).isEqualTo(200);
                     @SuppressWarnings("unchecked")
@@ -151,7 +157,7 @@ class ChatCompletionControllerTest {
         body.put("model", "claude-3");
         body.put("messages", List.of(Map.of("role", "user", "content", "hi")));
 
-        StepVerifier.create(controller.complete("Bearer sk-test", null, body))
+        StepVerifier.create(controller.complete("Bearer sk-test", null, body, exchange()))
                 .assertNext(entity -> {
                     assertThat(entity.getStatusCode().value()).isEqualTo(200);
                     @SuppressWarnings("unchecked")
@@ -168,7 +174,7 @@ class ChatCompletionControllerTest {
         Map<String, Object> body = new HashMap<>();
         body.put("model", "gpt-4o");
         body.put("messages", List.of());
-        StepVerifier.create((Mono<?>) controller.complete(null, null, body))
+        StepVerifier.create((Mono<?>) controller.complete(null, null, body, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 401);
     }
@@ -184,7 +190,7 @@ class ChatCompletionControllerTest {
         body.put("model", "gpt-4o");
         body.put("messages", List.of());
 
-        StepVerifier.create((Mono<?>) controller.complete("Bearer bad", null, body))
+        StepVerifier.create((Mono<?>) controller.complete("Bearer bad", null, body, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 401);
     }
@@ -218,7 +224,7 @@ class ChatCompletionControllerTest {
         body.put("model", "gpt-4o");
         body.put("messages", List.of(Map.of("role", "user", "content", "x")));
 
-        StepVerifier.create((Mono<?>) controller.complete("Bearer sk-test", null, body))
+        StepVerifier.create((Mono<?>) controller.complete("Bearer sk-test", null, body, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException re
                         && re.getHttpStatus() == 429
                         && re.getMessage().contains("You exceeded your current quota"));
@@ -271,7 +277,7 @@ class ChatCompletionControllerTest {
         body.put("model", "gpt-4o");
         body.put("messages", List.of(Map.of("role", "user", "content", "x")));
 
-        StepVerifier.create((Mono<?>) controller.complete("Bearer sk-test", null, body))
+        StepVerifier.create((Mono<?>) controller.complete("Bearer sk-test", null, body, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException re
                         && re.getHttpStatus() == 401
                         && re.getMessage().contains("HTTP_401"));
@@ -299,7 +305,7 @@ class ChatCompletionControllerTest {
         body.put("model", "gpt-4o");
         body.put("messages", List.of(Map.of("role", "user", "content", "帮我做题")));
 
-        StepVerifier.create((Mono<?>) controller.complete("Bearer sk-test", null, body))
+        StepVerifier.create((Mono<?>) controller.complete("Bearer sk-test", null, body, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 400
                         && ((RelayException) e).getMessage().contains("sensitive_word"));
@@ -318,7 +324,7 @@ class ChatCompletionControllerTest {
         body.put("model", "gpt-4o");
         body.put("messages", List.of(Map.of("role", "user", "content", "违禁内容")));
 
-        StepVerifier.create((Mono<?>) controller.complete("Bearer sk-test", null, body))
+        StepVerifier.create((Mono<?>) controller.complete("Bearer sk-test", null, body, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 400);
 
@@ -356,7 +362,7 @@ class ChatCompletionControllerTest {
         body.put("model", "gpt-4o");
         body.put("messages", List.of(Map.of("role", "user", "content", "电话 13800138003")));
 
-        StepVerifier.create(controller.complete("Bearer sk-test", null, body))
+        StepVerifier.create(controller.complete("Bearer sk-test", null, body, exchange()))
                 .assertNext(entity -> assertThat(entity.getStatusCode().value()).isEqualTo(200))
                 .verifyComplete();
 
@@ -403,7 +409,7 @@ class ChatCompletionControllerTest {
 
         java.util.concurrent.atomic.AtomicReference<
                 org.springframework.http.ResponseEntity<Object>> entityRef = new java.util.concurrent.atomic.AtomicReference<>();
-        StepVerifier.create(controller.complete("Bearer sk-test", null, body))
+        StepVerifier.create(controller.complete("Bearer sk-test", null, body, exchange()))
                 .assertNext(entity -> {
                     assertThat(entity.getStatusCode().value()).isEqualTo(200);
                     entityRef.set(entity);
@@ -497,7 +503,7 @@ class ChatCompletionControllerTest {
         body.put("model", "gpt-4o");
         body.put("messages", List.of(Map.of("role", "user", "content", "x")));
 
-        StepVerifier.create(controller.complete("Bearer sk-test", null, body))
+        StepVerifier.create(controller.complete("Bearer sk-test", null, body, exchange()))
                 .assertNext(entity -> {
                     assertThat(entity.getStatusCode().value()).isEqualTo(200);
                     @SuppressWarnings("unchecked")
@@ -563,7 +569,7 @@ class ChatCompletionControllerTest {
 
         java.util.concurrent.atomic.AtomicReference<
                 org.springframework.http.ResponseEntity<Object>> entityRef = new java.util.concurrent.atomic.AtomicReference<>();
-        StepVerifier.create(controller.complete("Bearer sk-test", null, body))
+        StepVerifier.create(controller.complete("Bearer sk-test", null, body, exchange()))
                 .assertNext(entity -> {
                     assertThat(entity.getStatusCode().value()).isEqualTo(200);
                     entityRef.set(entity);
@@ -598,7 +604,7 @@ class ChatCompletionControllerTest {
         body.put("model", "gpt-4o");
         body.put("messages", List.of(Map.of("role", "user", "content", "x")));
 
-        StepVerifier.create(controller.complete("Bearer sk-test", null, body))
+        StepVerifier.create(controller.complete("Bearer sk-test", null, body, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException re && re.getHttpStatus() == 500);
 
         waitForHealthCall();
@@ -639,5 +645,10 @@ class ChatCompletionControllerTest {
                     fun.commons.tokengateway.contract.ModerationAuditVO.builder()
                             .passed(true).actionTaken("LOG").source("NONE").build()));
         }
+    }
+
+    /** 直调注入 exchange (clientIp 解析入口; 缺省无 XFF → 取 mock 对端地址). */
+    private static ServerWebExchange exchange() {
+        return MockServerWebExchange.from(MockServerHttpRequest.post("/v1/test"));
     }
 }

@@ -1,6 +1,8 @@
 package fun.commons.tokengateway.controller;
 
 import fun.commons.tokengateway.exception.RelayException;
+import fun.commons.tokengateway.config.ClientIpProperties;
+import fun.commons.tokengateway.util.ClientIpResolver;
 
 import fun.commons.tokengateway.format.FormatConverter;
 import fun.commons.tokengateway.relay.RelayOrchestrator;
@@ -17,6 +19,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
+import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
+import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.web.server.ServerWebExchange;
 import reactor.test.StepVerifier;
 
 import java.util.LinkedHashMap;
@@ -48,7 +53,8 @@ class CountTokensControllerTest {
                         new ModerationGate(new fun.commons.tokengateway.rpc.HttpModerationApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props), new fun.commons.tokengateway.spi.config.TokenGatewayProperties())),
                 new fun.commons.tokengateway.thmp.ThmpShadow.Noop(),
                 new fun.commons.tokengateway.thmp.ThmpCutover.Noop()),
-                new FormatConverter(), b);
+                new FormatConverter(), b,
+                new ClientIpResolver(new ClientIpProperties()));
     }
 
     @AfterEach
@@ -95,7 +101,7 @@ class CountTokensControllerTest {
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"input_tokens\":42}"));
 
-        StepVerifier.create(controller.countTokens(null, "sk-ant-x", body()))
+        StepVerifier.create(controller.countTokens(null, "sk-ant-x", body(), exchange()))
                 .assertNext(r -> assertThat(r.get("input_tokens")).isEqualTo(42))
                 .verifyComplete();
     }
@@ -105,7 +111,7 @@ class CountTokensControllerTest {
     void openaiUpstream501() {
         mockTokenOk();
         mockDistribute("openai");
-        StepVerifier.create(controller.countTokens("Bearer sk", null, body()))
+        StepVerifier.create(controller.countTokens("Bearer sk", null, body(), exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 501);
     }
@@ -113,7 +119,7 @@ class CountTokensControllerTest {
     @Test
     @DisplayName("缺 model → 400")
     void missingModel() {
-        StepVerifier.create(controller.countTokens(null, "sk", new LinkedHashMap<>()))
+        StepVerifier.create(controller.countTokens(null, "sk", new LinkedHashMap<>(), exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 400);
     }
@@ -121,8 +127,13 @@ class CountTokensControllerTest {
     @Test
     @DisplayName("缺 apiKey → 401")
     void missingApiKey() {
-        StepVerifier.create(controller.countTokens(null, null, body()))
+        StepVerifier.create(controller.countTokens(null, null, body(), exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 401);
+    }
+
+    /** 直调注入 exchange (clientIp 解析入口; 缺省无 XFF → 取 mock 对端地址). */
+    private static ServerWebExchange exchange() {
+        return MockServerWebExchange.from(MockServerHttpRequest.post("/v1/test"));
     }
 }

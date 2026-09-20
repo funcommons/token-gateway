@@ -29,7 +29,7 @@ Caller ──▶ token-gateway ──capability-face calls──▶ Your backend
 | Content moderation | moderation/scan | `moderation.enabled: true` |
 | Log aggregation | access-log/record **or** consume the log MQ | `access-log.transport: rpc / mq` |
 | Audit aggregation | audit/record | audit face config |
-| Async tasks (backend holds task state itself) | task/create + task/poll | face=task + delegation form (see §4.8; the dumb upstream task API **does not need** to be implemented) |
+| Async tasks (backend holds task state itself) | task/create + task/poll | face=task + delegation form (**reserved: the SPI contract exists, no implementation yet** — see the §4.8 status note; the dumb upstream task API **does not need** to be implemented) |
 
 Do not enable faces you have not implemented in the gateway yml (the gateway validates the intersection of switches and capabilities at startup; misconfiguration causes a hard startup failure).
 
@@ -74,8 +74,8 @@ On verification failure return HTTP 401 + envelope (code=10300); the gateway tre
 
 ### 4.1 token-validate — `POST /gw/v1/token/validate`
 
-- In: `{credential}` (the caller's raw credential, forwarded verbatim by the gateway).
-- Out: `data: {tenant_id, user_id, active, masked_credential}`.
+- In: `{credential, client_ip?}` (the caller's raw credential, forwarded verbatim by the gateway; `client_ip` is resolved by the gateway under its trusted-proxy policy and pushed downstream — the client can forge XFF, so never parse it from headers on your side; see the security contract §9).
+- Out: `data: {tenant_id, user_id, active, masked_credential, sub_account_id?}` (`sub_account_id` optional; the gateway consumes it pass-through only).
 - Invalid/expired → envelope 10202/10200 (**not 5xx**).
 - Validation endpoint itself unreachable/timing out → the gateway answers the caller **504 + 10003** (retryable infrastructure error; since v0.10.0, semantically separated from credential failure per issue #22).
 - High-frequency hot face: local cache recommended (60s TTL) + instant disable support (trade-off between receiving disable notifications and a short TTL).
@@ -119,6 +119,10 @@ Saga guarantee: for each trace, exactly pre-charge − refund = actual consumpti
 - Out: `data: {object: "list", data: [{id, owned_by}]}`; `id` is the model name the caller requests, and the input for routing binding with wildcard matching.
 
 ### 4.8 Task delegation face (optional — `POST /gw/v1/task/create` + `POST /gw/v1/task/poll`)
+
+> **Implementation status (2026-09-20)**: `task/create` + `task/poll` are a **reserved SPI contract with no implementation**; task-face execution = the **lotask4j platform-hosted form** (the gateway submits to the platform, a self-written Worker pulls and executes tasks, terminal state is reclaimed via webhook). Implementing this section's endpoints will not switch the task face to the delegation form — that is a separately-scoped project.
+>
+> The contract below is retained as the "target contract if that project is approved".
 
 There are two forms in the task domain; **most backends implement neither**:
 

@@ -1,6 +1,7 @@
 package fun.commons.tokengateway.task.controller;
 
 import fun.commons.tokengateway.task.relay.TaskRelayOrchestrator;
+import fun.commons.tokengateway.util.ClientIpResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -8,6 +9,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.util.Map;
@@ -27,6 +29,8 @@ import java.util.Map;
 public class TaskController {
 
     private final TaskRelayOrchestrator orchestrator;
+    /** 客户端 IP 解析 (issue #27): token-validate clientIp 填充, 信任代理策略可配. */
+    private final ClientIpResolver clientIpResolver;
 
     @PostMapping("/v1/onetoken/videos")
     public Mono<Map<String, Object>> createVideo(
@@ -34,8 +38,10 @@ public class TaskController {
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
             @RequestHeader(value = "X-Trace-Id", required = false) String traceId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            @RequestBody Map<String, Object> body) {
-        return orchestrator.create("video", extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
+            @RequestBody Map<String, Object> body,
+            ServerWebExchange exchange) {
+        return orchestrator.create("video", extractApiKey(authorization, xApiKey), body, traceId,
+                idempotencyKey, clientIpResolver.resolve(exchange));
     }
 
     /** 同步生图 (OpenAI 请求/响应形状): 内部 create+轮询, 60s 超时降级 PROCESSING+poll_url. */
@@ -45,9 +51,11 @@ public class TaskController {
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
             @RequestHeader(value = "X-Trace-Id", required = false) String traceId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            @RequestBody Map<String, Object> body) {
+            @RequestBody Map<String, Object> body,
+            ServerWebExchange exchange) {
         return orchestrator.createImageGenerations(
-                extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
+                extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey,
+                clientIpResolver.resolve(exchange));
     }
 
     @PostMapping("/v1/onetoken/images")
@@ -56,8 +64,10 @@ public class TaskController {
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
             @RequestHeader(value = "X-Trace-Id", required = false) String traceId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            @RequestBody Map<String, Object> body) {
-        return orchestrator.create("image", extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
+            @RequestBody Map<String, Object> body,
+            ServerWebExchange exchange) {
+        return orchestrator.create("image", extractApiKey(authorization, xApiKey), body, traceId,
+                idempotencyKey, clientIpResolver.resolve(exchange));
     }
 
     @PostMapping("/v1/onetoken/audios")
@@ -66,8 +76,10 @@ public class TaskController {
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
             @RequestHeader(value = "X-Trace-Id", required = false) String traceId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            @RequestBody Map<String, Object> body) {
-        return orchestrator.create("audio", extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
+            @RequestBody Map<String, Object> body,
+            ServerWebExchange exchange) {
+        return orchestrator.create("audio", extractApiKey(authorization, xApiKey), body, traceId,
+                idempotencyKey, clientIpResolver.resolve(exchange));
     }
 
     @PostMapping("/v1/onetoken/tts")
@@ -76,40 +88,50 @@ public class TaskController {
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
             @RequestHeader(value = "X-Trace-Id", required = false) String traceId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            @RequestBody Map<String, Object> body) {
-        return orchestrator.create("tts", extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
+            @RequestBody Map<String, Object> body,
+            ServerWebExchange exchange) {
+        return orchestrator.create("tts", extractApiKey(authorization, xApiKey), body, traceId,
+                idempotencyKey, clientIpResolver.resolve(exchange));
     }
 
     @GetMapping("/v1/onetoken/videos/{taskNo}")
     public Mono<Map<String, Object>> pollVideo(
             @PathVariable String taskNo,
             @RequestHeader(value = "Authorization", required = false) String authorization,
-            @RequestHeader(value = "x-api-key", required = false) String xApiKey) {
-        return orchestrator.poll("video", taskNo, extractApiKey(authorization, xApiKey));
+            @RequestHeader(value = "x-api-key", required = false) String xApiKey,
+            ServerWebExchange exchange) {
+        return orchestrator.poll("video", taskNo, extractApiKey(authorization, xApiKey),
+                clientIpResolver.resolve(exchange));
     }
 
     @GetMapping("/v1/onetoken/images/{taskNo}")
     public Mono<Map<String, Object>> pollImage(
             @PathVariable String taskNo,
             @RequestHeader(value = "Authorization", required = false) String authorization,
-            @RequestHeader(value = "x-api-key", required = false) String xApiKey) {
-        return orchestrator.poll("image", taskNo, extractApiKey(authorization, xApiKey));
+            @RequestHeader(value = "x-api-key", required = false) String xApiKey,
+            ServerWebExchange exchange) {
+        return orchestrator.poll("image", taskNo, extractApiKey(authorization, xApiKey),
+                clientIpResolver.resolve(exchange));
     }
 
     @GetMapping("/v1/onetoken/audios/{taskNo}")
     public Mono<Map<String, Object>> pollAudio(
             @PathVariable String taskNo,
             @RequestHeader(value = "Authorization", required = false) String authorization,
-            @RequestHeader(value = "x-api-key", required = false) String xApiKey) {
-        return orchestrator.poll("audio", taskNo, extractApiKey(authorization, xApiKey));
+            @RequestHeader(value = "x-api-key", required = false) String xApiKey,
+            ServerWebExchange exchange) {
+        return orchestrator.poll("audio", taskNo, extractApiKey(authorization, xApiKey),
+                clientIpResolver.resolve(exchange));
     }
 
     @GetMapping("/v1/onetoken/tts/{taskNo}")
     public Mono<Map<String, Object>> pollTts(
             @PathVariable String taskNo,
             @RequestHeader(value = "Authorization", required = false) String authorization,
-            @RequestHeader(value = "x-api-key", required = false) String xApiKey) {
-        return orchestrator.poll("tts", taskNo, extractApiKey(authorization, xApiKey));
+            @RequestHeader(value = "x-api-key", required = false) String xApiKey,
+            ServerWebExchange exchange) {
+        return orchestrator.poll("tts", taskNo, extractApiKey(authorization, xApiKey),
+                clientIpResolver.resolve(exchange));
     }
 
     /** Bearer 优先, x-api-key 兜底 (与 LLM 面一致). */

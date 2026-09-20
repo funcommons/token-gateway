@@ -1,6 +1,8 @@
 package fun.commons.tokengateway.controller;
 
 import fun.commons.tokengateway.exception.RelayException;
+import fun.commons.tokengateway.config.ClientIpProperties;
+import fun.commons.tokengateway.util.ClientIpResolver;
 
 import fun.commons.tokengateway.relay.RelayOrchestrator;
 import fun.commons.tokengateway.format.FormatConverter;
@@ -9,6 +11,7 @@ import fun.commons.tokengateway.rpc.HttpBillingApi;
 import fun.commons.tokengateway.rpc.RpcInternalAuth;
 import fun.commons.tokengateway.upstream.SsePassthroughInvoker;
 import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.RecordedRequest;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,8 +21,12 @@ import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
+import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.web.server.ServerWebExchange;
 import reactor.test.StepVerifier;
 
+import java.net.InetSocketAddress;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,6 +47,8 @@ class MessagesControllerTest {
     private MessagesController controller;
     private fun.commons.tokengateway.relay.FailoverProperties failoverProps;
     private final java.util.List<String> healthCalls = new java.util.ArrayList<>();
+    /** clientIp 信任策略 (issue #27 透传用例动态调整 trusted-proxies). */
+    private ClientIpProperties clientIpProps;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -52,6 +61,7 @@ class MessagesControllerTest {
         failoverProps = new fun.commons.tokengateway.relay.FailoverProperties();
         // 退避压到 1ms, 轮换用例不被 1s/2s 退避拖慢
         failoverProps.setBaseBackoffMs(1L);
+        clientIpProps = new ClientIpProperties();
         WebClient.Builder b = WebClient.builder();
         var tokenApi = new fun.commons.tokengateway.rpc.HttpTokenApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props));
         var channelApi = new fun.commons.tokengateway.rpc.HttpChannelApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props));
@@ -68,7 +78,8 @@ class MessagesControllerTest {
                         fun.commons.tokengateway.relay.TestChannelHealthReporters.recording(healthCalls)),
                 new fun.commons.tokengateway.rpc.HttpModerationApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props), new fun.commons.tokengateway.spi.config.TokenGatewayProperties()),
                 b,
-                failoverProps);
+                failoverProps,
+                new ClientIpResolver(clientIpProps));
     }
 
     @AfterEach
@@ -137,7 +148,7 @@ class MessagesControllerTest {
         backend.enqueue(new MockResponse()
                 .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
 
-        StepVerifier.create((Mono<?>) controller.messages("Bearer sk-test", null, anthropicBody()))
+        StepVerifier.create((Mono<?>) controller.messages("Bearer sk-test", null, anthropicBody(), exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException re
                         && re.getHttpStatus() == 502
                         && re.getMessage().contains("model overloaded"));
@@ -161,7 +172,7 @@ class MessagesControllerTest {
         backend.enqueue(new MockResponse()
                 .setHeader("Content-Type", "application/json").setBody("{\"code\":0}"));
 
-        StepVerifier.create((Mono<?>) controller.messages("Bearer sk-test", null, anthropicBody()))
+        StepVerifier.create((Mono<?>) controller.messages("Bearer sk-test", null, anthropicBody(), exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException re
                         && re.getHttpStatus() == 401
                         && re.getMessage().contains("HTTP_401"));
@@ -180,7 +191,7 @@ class MessagesControllerTest {
                         + "\"content\":[{\"type\":\"text\",\"text\":\"你好\"}],"
                         + "\"usage\":{\"input_tokens\":5,\"output_tokens\":3}}"));
 
-        StepVerifier.create(controller.messages(null, "sk-ant-x", anthropicBody()))
+        StepVerifier.create(controller.messages(null, "sk-ant-x", anthropicBody(), exchange()))
                 .assertNext(entity -> {
                     assertThat(entity.getStatusCode().value()).isEqualTo(200);
                     @SuppressWarnings("unchecked")
@@ -205,7 +216,7 @@ class MessagesControllerTest {
                         + "\"finish_reason\":\"stop\"}],"
                         + "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}"));
 
-        StepVerifier.create(controller.messages(null, "sk-ant-x", anthropicBody()))
+        StepVerifier.create(controller.messages(null, "sk-ant-x", anthropicBody(), exchange()))
                 .assertNext(entity -> {
                     assertThat(entity.getStatusCode().value()).isEqualTo(200);
                     @SuppressWarnings("unchecked")
@@ -222,7 +233,7 @@ class MessagesControllerTest {
         Map<String, Object> body = new HashMap<>();
         body.put("max_tokens", 256);
         try {
-            controller.messages(null, "sk-ant-x", body);
+            controller.messages(null, "sk-ant-x", body, exchange());
         } catch (RelayException e) {
             assertThat(e.getHttpStatus()).isEqualTo(400);
         }
@@ -234,7 +245,7 @@ class MessagesControllerTest {
         Map<String, Object> body = new HashMap<>();
         body.put("model", "claude-3");
         try {
-            controller.messages(null, "sk-ant-x", body);
+            controller.messages(null, "sk-ant-x", body, exchange());
         } catch (RelayException e) {
             assertThat(e.getHttpStatus()).isEqualTo(400);
         }
@@ -243,7 +254,7 @@ class MessagesControllerTest {
     @Test
     @DisplayName("缺 apiKey → 401 RelayException")
     void missingApiKey() {
-        StepVerifier.create((Mono<?>) controller.messages(null, null, anthropicBody()))
+        StepVerifier.create((Mono<?>) controller.messages(null, null, anthropicBody(), exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 401);
     }
@@ -266,7 +277,7 @@ class MessagesControllerTest {
         body.put("system", Map.of("type", "text", "text", "sys",
                 "cache_control", Map.of("type", "ephemeral")));
 
-        StepVerifier.create(controller.messages(null, "sk-ant-x", body))
+        StepVerifier.create(controller.messages(null, "sk-ant-x", body, exchange()))
                 .assertNext(entity -> {
                     assertThat(entity.getStatusCode().value()).isEqualTo(200);
                     @SuppressWarnings("unchecked")
@@ -340,7 +351,7 @@ class MessagesControllerTest {
                         + "\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],"
                         + "\"usage\":{\"input_tokens\":5,\"output_tokens\":3}}"));
 
-        StepVerifier.create(controller.messages(null, "sk-ant-x", anthropicBody()))
+        StepVerifier.create(controller.messages(null, "sk-ant-x", anthropicBody(), exchange()))
                 .assertNext(entity -> {
                     assertThat(entity.getStatusCode().value()).isEqualTo(200);
                     @SuppressWarnings("unchecked")
@@ -363,7 +374,7 @@ class MessagesControllerTest {
         backend.enqueue(jsonOk());                                  // refund pc-1 (终态)
         backend.enqueue(jsonOk());                                  // access-log (fire-and-forget)
 
-        StepVerifier.create((Mono<?>) controller.messages(null, "sk-ant-x", anthropicBody()))
+        StepVerifier.create((Mono<?>) controller.messages(null, "sk-ant-x", anthropicBody(), exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 400);
 
@@ -393,7 +404,7 @@ class MessagesControllerTest {
         java.util.concurrent.atomic.AtomicReference<
                 org.springframework.http.ResponseEntity<Object>> entityRef =
                 new java.util.concurrent.atomic.AtomicReference<>();
-        StepVerifier.create(controller.messages(null, "sk-ant-x", body))
+        StepVerifier.create(controller.messages(null, "sk-ant-x", body, exchange()))
                 .assertNext(entity -> {
                     assertThat(entity.getStatusCode().value()).isEqualTo(200);
                     entityRef.set(entity);
@@ -432,7 +443,7 @@ class MessagesControllerTest {
         backend.enqueue(jsonOk());                                  // 终态 refund pc-1 (幂等)
         backend.enqueue(jsonOk());                                  // access-log (fire-and-forget)
 
-        StepVerifier.create((Mono<?>) controller.messages(null, "sk-ant-x", anthropicBody()))
+        StepVerifier.create((Mono<?>) controller.messages(null, "sk-ant-x", anthropicBody(), exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 500);
 
@@ -441,5 +452,74 @@ class MessagesControllerTest {
         // 轮换中止时不再中间上报 record-failure, 该失败只由终态 reportError 计一次
         assertThat(backendPaths()).noneMatch(p -> p != null && p.contains("record-failure"));
         assertThat(healthCalls.stream().filter(c -> c.startsWith("failure:c1")).count()).isEqualTo(1L);
+    }
+
+    // ===== clientIp 透传 (issue #27): controller → validate RPC 端到端 =====
+
+    /** 指定对端地址的 exchange (无 XFF). */
+    private static ServerWebExchange exchangeAt(String remoteIp) {
+        return MockServerWebExchange.from(MockServerHttpRequest.post("/v1/messages")
+                .remoteAddress(new InetSocketAddress(remoteIp, 51000)));
+    }
+
+    /** 无效凭证最短路径: 只有 token-validate 一次 RPC, 便于 takeRequest 断言请求体. */
+    private void enqueueInvalidToken() {
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"valid\":false}}"));
+    }
+
+    private RecordedRequest takenValidateRequest() throws InterruptedException {
+        RecordedRequest req = backend.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(req).isNotNull();
+        assertThat(req.getPath()).contains("/api/v1/internal/tokens/validate");
+        return req;
+    }
+
+    @Test
+    @DisplayName("clientIp 透传 (issue #27): 无 XFF + trusted=0 → validate 请求体 = TCP 对端地址")
+    void clientIpPassesThroughRemoteAddress() throws Exception {
+        enqueueInvalidToken();
+        StepVerifier.create((Mono<?>) controller.messages(null, "sk-ant-x", anthropicBody(),
+                        exchangeAt("10.9.8.7")))
+                .verifyErrorMatches(e -> e instanceof RelayException re && re.getHttpStatus() == 401);
+        assertThat(takenValidateRequest().getBody().readUtf8())
+                .contains("\"clientIp\":\"10.9.8.7\"");
+    }
+
+    @Test
+    @DisplayName("clientIp 防伪造 (issue #27): trusted=0 时伪造首位 XFF 不采信, 恒取 TCP 对端")
+    void clientIpIgnoresSpoofedXffWhenUntrusted() throws Exception {
+        enqueueInvalidToken();
+        MockServerWebExchange spoofed = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/v1/messages")
+                        .remoteAddress(new InetSocketAddress("10.9.8.7", 51000))
+                        .header("X-Forwarded-For", "1.2.3.4"));
+        StepVerifier.create((Mono<?>) controller.messages(null, "sk-ant-x", anthropicBody(), spoofed))
+                .verifyErrorMatches(e -> e instanceof RelayException re && re.getHttpStatus() == 401);
+        assertThat(takenValidateRequest().getBody().readUtf8())
+                .contains("\"clientIp\":\"10.9.8.7\"")
+                .doesNotContain("1.2.3.4");
+    }
+
+    @Test
+    @DisplayName("clientIp 信任代理 (issue #27): trusted=1 → XFF 从右跳 1 取真实客户端")
+    void clientIpTrustedProxyTakesXff() throws Exception {
+        clientIpProps.setTrustedProxies(1);
+        enqueueInvalidToken();
+        MockServerWebExchange proxied = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/v1/messages")
+                        .remoteAddress(new InetSocketAddress("172.17.0.9", 51000))
+                        .header("X-Forwarded-For", "1.2.3.4, 10.0.0.1"));
+        StepVerifier.create((Mono<?>) controller.messages(null, "sk-ant-x", anthropicBody(), proxied))
+                .verifyErrorMatches(e -> e instanceof RelayException re && re.getHttpStatus() == 401);
+        assertThat(takenValidateRequest().getBody().readUtf8())
+                .contains("\"clientIp\":\"10.0.0.1\"")
+                .doesNotContain("1.2.3.4");
+    }
+
+    /** 直调注入 exchange (clientIp 解析入口; 缺省无 XFF → 取 mock 对端地址). */
+    private static ServerWebExchange exchange() {
+        return MockServerWebExchange.from(MockServerHttpRequest.post("/v1/test"));
     }
 }

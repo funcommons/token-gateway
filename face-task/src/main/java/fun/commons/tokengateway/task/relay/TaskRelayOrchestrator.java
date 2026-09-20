@@ -79,7 +79,7 @@ public class TaskRelayOrchestrator {
      */
     public Mono<Map<String, Object>> create(String modality, String apiKey,
                                             Map<String, Object> body, String traceId) {
-        return create(modality, apiKey, body, traceId, null);
+        return create(modality, apiKey, body, traceId, null, null);
     }
 
     /**
@@ -89,6 +89,16 @@ public class TaskRelayOrchestrator {
     public Mono<Map<String, Object>> create(String modality, String apiKey,
                                             Map<String, Object> body, String traceId,
                                             String idempotencyKey) {
+        return create(modality, apiKey, body, traceId, idempotencyKey, null);
+    }
+
+    /**
+     * create (重载, #27): clientIp 为调用方客户端 IP (controller 层经 ClientIpResolver 解析,
+     * 信任代理策略见 ClientIpProperties), 透传 token-validate 供能力面 IP 白名单/风控.
+     */
+    public Mono<Map<String, Object>> create(String modality, String apiKey,
+                                            Map<String, Object> body, String traceId,
+                                            String idempotencyKey, String clientIp) {
         String model = body == null ? null : (String) body.get("model");
         if (model == null || model.isBlank()) {
             return Mono.error(new RelayException(400, ApiCode.REQUIRED_MISSING.getCode(),
@@ -103,7 +113,8 @@ public class TaskRelayOrchestrator {
                 : String.valueOf(System.currentTimeMillis() * 1000
                         + java.util.concurrent.ThreadLocalRandom.current().nextInt(1000));
         final String idemKey = idempotencyKey;
-        return tokenApi.validate(TokenValidateRequest.builder().apiKey(apiKey).model(model).build())
+        return tokenApi.validate(TokenValidateRequest.builder()
+                .apiKey(apiKey).clientIp(clientIp).model(model).build())
                 .flatMap(tokenResp -> {
                     if (tokenResp == null || !tokenResp.isSuccess()) {
                         // token 校验 RPC 失败/超时 (fail 包络 10003) → 504 可重试基础设施错误,
@@ -255,13 +266,17 @@ public class TaskRelayOrchestrator {
     /**
      * 轮询 (终态幂等: 优先读终态条目——SUCCEEDED 返回 sig 代理 URL, EXPIRED 返回超时钟判定;
      * 非终态走 lotask 查询; lotask 不可达 → 502, 调用方退避重试, 状态不变不触计费).
+     *
+     * @param clientIp 调用方客户端 IP (issue #27, controller 层经 ClientIpResolver 解析,
+     *                 透传 token-validate 供能力面 IP 白名单/风控)
      */
-    public Mono<Map<String, Object>> poll(String modality, String taskNo, String apiKey) {
+    public Mono<Map<String, Object>> poll(String modality, String taskNo, String apiKey,
+                                          String clientIp) {
         if (apiKey == null) {
             return Mono.error(new RelayException(401, ApiCode.UNAUTHORIZED.getCode(),
                     "缺少 bearer token"));
         }
-        return tokenApi.validate(TokenValidateRequest.builder().apiKey(apiKey).build())
+        return tokenApi.validate(TokenValidateRequest.builder().apiKey(apiKey).clientIp(clientIp).build())
                 .flatMap(tokenResp -> {
                     if (tokenResp == null || !tokenResp.isSuccess()) {
                         // token 校验 RPC 失败/超时 (fail 包络 10003) → 504 可重试基础设施错误,
@@ -304,7 +319,8 @@ public class TaskRelayOrchestrator {
      * <p>仅支持 n=1 (任务面单图语义); size 原生透传 (gpt-image 3 档/auto), ratio 扩展 (9:16 等).
      */
     public Mono<Map<String, Object>> createImageGenerations(String apiKey, Map<String, Object> body,
-                                                            String traceId, String idempotencyKey) {
+                                                            String traceId, String idempotencyKey,
+                                                            String clientIp) {
         Object n = body == null ? null : body.get("n");
         if (n instanceof Number num && num.intValue() > 1) {
             return Mono.error(new RelayException(400, ApiCode.REQUIRED_MISSING.getCode(),
@@ -312,10 +328,11 @@ public class TaskRelayOrchestrator {
         }
         // 任务面契约: 业务参数在 body.params (openAiImagesParams 统一拼装, 与异步 job 共用)
         java.time.Instant deadline = java.time.Instant.now().plus(GENERATIONS_SYNC_TIMEOUT);
-        return create("image", apiKey, openAiImagesParams(body), traceId, idempotencyKey)
+        return create("image", apiKey, openAiImagesParams(body), traceId, idempotencyKey, clientIp)
                 .flatMap(created -> {
                     String taskNo = String.valueOf(created.get("task_no"));
-                    return pollUntilTerminal("image", taskNo, apiKey, deadline, GENERATIONS_POLL_INTERVAL);
+                    return pollUntilTerminal("image", taskNo, apiKey, clientIp,
+                            deadline, GENERATIONS_POLL_INTERVAL);
                 });
     }
 
@@ -323,9 +340,9 @@ public class TaskRelayOrchestrator {
     private static final java.time.Duration GENERATIONS_POLL_INTERVAL = java.time.Duration.ofSeconds(2);
 
     Mono<Map<String, Object>> pollUntilTerminal(String modality, String taskNo, String apiKey,
-                                                        java.time.Instant deadline,
+                                                        String clientIp, java.time.Instant deadline,
                                                         java.time.Duration interval) {
-        return poll(modality, taskNo, apiKey)
+        return poll(modality, taskNo, apiKey, clientIp)
                 .flatMap(view -> {
                     String status = String.valueOf(view.get("status"));
                     if ("SUCCEEDED".equals(status)) {
@@ -340,7 +357,8 @@ public class TaskRelayOrchestrator {
                     if (java.time.Instant.now().isAfter(deadline)) {
                         return Mono.just(processingFallbackBody(taskNo));
                     }
-                    return Mono.delay(interval).then(pollUntilTerminal(modality, taskNo, apiKey, deadline, interval));
+                    return Mono.delay(interval)
+                            .then(pollUntilTerminal(modality, taskNo, apiKey, clientIp, deadline, interval));
                 });
     }
 
@@ -374,7 +392,8 @@ public class TaskRelayOrchestrator {
      * 返回 OpenAI video_generation job 对象 (id=task_no, status=queued).
      */
     public Mono<Map<String, Object>> createVideoJob(String apiKey, Map<String, Object> body,
-                                                    String traceId, String idempotencyKey) {
+                                                    String traceId, String idempotencyKey,
+                                                    String clientIp) {
         Map<String, Object> inner = new LinkedHashMap<>();
         if (body != null) {
             inner.put("prompt", body.get("prompt"));
@@ -390,7 +409,7 @@ public class TaskRelayOrchestrator {
         if (body != null && body.get("notify_url") != null) {
             params.put("notify_url", body.get("notify_url"));
         }
-        return create("video", apiKey, params, traceId, idempotencyKey)
+        return create("video", apiKey, params, traceId, idempotencyKey, clientIp)
                 .map(created -> openAiJobCreated(created, "video_generation"));
     }
 
@@ -399,13 +418,14 @@ public class TaskRelayOrchestrator {
      * 建图像任务返回 image_generation job 对象; n 仅支持 1 (任务面单图语义).
      */
     public Mono<Map<String, Object>> createImageJob(String apiKey, Map<String, Object> body,
-                                                    String traceId, String idempotencyKey) {
+                                                    String traceId, String idempotencyKey,
+                                                    String clientIp) {
         Object n = body == null ? null : body.get("n");
         if (n instanceof Number num && num.intValue() > 1) {
             return Mono.error(new RelayException(400, ApiCode.REQUIRED_MISSING.getCode(),
                     "仅支持 n=1 (任务面单图语义)"));
         }
-        return create("image", apiKey, openAiImagesParams(body), traceId, idempotencyKey)
+        return create("image", apiKey, openAiImagesParams(body), traceId, idempotencyKey, clientIp)
                 .map(created -> openAiJobCreated(created, "image_generation"));
     }
 
@@ -427,21 +447,21 @@ public class TaskRelayOrchestrator {
     }
 
     /** GET /v1/videos/{task_no} → OpenAI video_generation job 视图. */
-    public Mono<Map<String, Object>> videoJob(String taskNo, String apiKey) {
-        return poll("video", taskNo, apiKey).map(TaskRelayOrchestrator::openAiVideoJobView);
+    public Mono<Map<String, Object>> videoJob(String taskNo, String apiKey, String clientIp) {
+        return poll("video", taskNo, apiKey, clientIp).map(TaskRelayOrchestrator::openAiVideoJobView);
     }
 
     /** GET /v1/images/generations/{task_no} → OpenAI image_generation job 视图. */
-    public Mono<Map<String, Object>> imageJob(String taskNo, String apiKey) {
-        return poll("image", taskNo, apiKey).map(TaskRelayOrchestrator::openAiImageJobView);
+    public Mono<Map<String, Object>> imageJob(String taskNo, String apiKey, String clientIp) {
+        return poll("image", taskNo, apiKey, clientIp).map(TaskRelayOrchestrator::openAiImageJobView);
     }
 
     /**
      * GET /v1/videos/{task_no}/content: SUCCEEDED 时返回首个资源代理 URL (307 重定向目标);
      * 非 SUCCEEDED → 409; 无资源 → 404.
      */
-    public Mono<String> videoContentUrl(String taskNo, String apiKey) {
-        return poll("video", taskNo, apiKey)
+    public Mono<String> videoContentUrl(String taskNo, String apiKey, String clientIp) {
+        return poll("video", taskNo, apiKey, clientIp)
                 .flatMap(view -> {
                     if (!"SUCCEEDED".equals(String.valueOf(view.get("status")))) {
                         return Mono.error(new RelayException(409, ApiCode.STATE_CONFLICT.getCode(),

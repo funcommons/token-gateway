@@ -26,4 +26,10 @@ public class TokenValidateVO {
     private BigDecimal remainQuota = BigDecimal.ZERO;
     private boolean modelAllowed;
     private boolean ipAllowed;
+
+    /**
+     * 子账号 ID (可选, issue #27): 能力面按自有账号体系回填, 网关仅透传消费
+     * (经 PreparedRequest.token 可取), 不做存在性强依赖; 缺省为 null.
+     */
+    private String subAccountId;
 }

@@ -1,6 +1,8 @@
 package fun.commons.tokengateway.controller;
 
 import fun.commons.tokengateway.exception.RelayException;
+import fun.commons.tokengateway.config.ClientIpProperties;
+import fun.commons.tokengateway.util.ClientIpResolver;
 
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -10,6 +12,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
+import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
+import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.web.server.ServerWebExchange;
 import reactor.test.StepVerifier;
 
 import java.util.HashMap;
@@ -59,7 +64,8 @@ class ImagesControllerTest {
                 new fun.commons.tokengateway.relay.AccessLogReporter(
                         new fun.commons.tokengateway.rpc.HttpAccessLogApi(builder, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props)),
                         fun.commons.tokengateway.relay.TestChannelHealthReporters.disabled()),
-                builder);
+                builder,
+                new ClientIpResolver(new ClientIpProperties()));
     }
 
     @AfterEach
@@ -106,7 +112,7 @@ class ImagesControllerTest {
         body.put("n", 1);
         body.put("size", "1024x1024");
 
-        StepVerifier.create(controller.generate("Bearer sk-test", null, body))
+        StepVerifier.create(controller.generate("Bearer sk-test", null, body, exchange()))
                 .assertNext(entity -> {
                     assertThat(entity.getStatusCode().value()).isEqualTo(200);
                     @SuppressWarnings("unchecked")
@@ -133,7 +139,7 @@ class ImagesControllerTest {
         Map<String, Object> body = new HashMap<>();
         body.put("prompt", "x");
 
-        StepVerifier.create(controller.generate("Bearer sk-test", null, body))
+        StepVerifier.create(controller.generate("Bearer sk-test", null, body, exchange()))
                 .assertNext(entity -> assertThat(entity.getStatusCode().value()).isEqualTo(200))
                 .verifyComplete();
     }
@@ -148,7 +154,7 @@ class ImagesControllerTest {
         Map<String, Object> body = new HashMap<>();
         body.put("prompt", "x");
 
-        StepVerifier.create((Mono<?>) controller.generate("Bearer sk-test", null, body))
+        StepVerifier.create((Mono<?>) controller.generate("Bearer sk-test", null, body, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException re
                         && re.getHttpStatus() == 500
                         && re.getMessage().contains("HTTP_500"));
@@ -170,7 +176,7 @@ class ImagesControllerTest {
         Map<String, Object> body = new HashMap<>();
         body.put("prompt", "x");
 
-        StepVerifier.create((Mono<?>) controller.generate("Bearer sk-test", null, body))
+        StepVerifier.create((Mono<?>) controller.generate("Bearer sk-test", null, body, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException re
                         && re.getHttpStatus() == 429
                         && re.getMessage().contains("HTTP_429"));
@@ -192,7 +198,7 @@ class ImagesControllerTest {
         Map<String, Object> body = new HashMap<>();
         body.put("prompt", "x");
 
-        StepVerifier.create((Mono<?>) controller.generate("Bearer sk-test", null, body))
+        StepVerifier.create((Mono<?>) controller.generate("Bearer sk-test", null, body, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException re
                         && re.getHttpStatus() == 502
                         && re.getMessage().contains("content policy violation"));
@@ -203,8 +209,13 @@ class ImagesControllerTest {
     void missingApiKey() {
         Map<String, Object> body = new HashMap<>();
         body.put("prompt", "x");
-        StepVerifier.create((Mono<?>) controller.generate(null, null, body))
+        StepVerifier.create((Mono<?>) controller.generate(null, null, body, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 401);
+    }
+
+    /** 直调注入 exchange (clientIp 解析入口; 缺省无 XFF → 取 mock 对端地址). */
+    private static ServerWebExchange exchange() {
+        return MockServerWebExchange.from(MockServerHttpRequest.post("/v1/test"));
     }
 }

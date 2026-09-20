@@ -161,7 +161,7 @@ class AccessLogReporterTest {
     }
 
     @Test
-    @DisplayName("客户端取消 499 → 访问日志照记, 渠道健康不上报")
+    @DisplayName("客户端取消 499 → 访问日志照记, 渠道健康不上报 (线上零 record-failure 请求)")
     void clientCancel499SkipsHealth() throws Exception {
         java.util.List<String> calls = new java.util.ArrayList<>();
         backend.enqueue(new MockResponse()
@@ -174,6 +174,46 @@ class AccessLogReporterTest {
         String body = backend.takeRequest().getBody().readUtf8();
         assertThat(body).contains("\"statusCode\":499");
         assertThat(calls).isEmpty();
+        assertThat(backend.getRequestCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("issue #25: failure 请求体携带 upstreamStatus + latencyMs (端到端)")
+    void failureCarriesUpstreamStatusAndLatency() throws Exception {
+        // 真 ChannelHealthReporter (真 HttpChannelApi → 同一 MockWebServer), health-report 默认开启
+        var healthProps = new fun.commons.tokengateway.config.HealthReportProperties();
+        healthProps.setEnabled(true);
+        reporter = new AccessLogReporter(new fun.commons.tokengateway.rpc.HttpAccessLogApi(
+                        WebClient.builder(),
+                        new fun.commons.tokengateway.rpc.CapabilityEndpoints(
+                                new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props()),
+                        new fun.commons.tokengateway.rpc.RpcInternalAuth(props())),
+                new ChannelHealthReporter(new fun.commons.tokengateway.rpc.HttpChannelApi(
+                        WebClient.builder(),
+                        new fun.commons.tokengateway.rpc.CapabilityEndpoints(
+                                new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props()),
+                        new fun.commons.tokengateway.rpc.RpcInternalAuth(props())),
+                        healthProps));
+
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":null}"));
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":null}"));
+
+        StepVerifier.create(reporter.reportError(prepared, "m", "/p", 502, 1500, "t6"))
+                .verifyComplete();
+
+        var accessLog = backend.takeRequest();
+        assertThat(accessLog.getPath()).isEqualTo("/api/v1/internal/access-log/record");
+        var health = backend.takeRequest();
+        assertThat(health.getPath()).isEqualTo("/api/v1/internal/channels/400/record-failure");
+        String body = health.getBody().readUtf8();
+        assertThat(body).contains("\"tenantId\":\"100\"");
+        assertThat(body).contains("\"errorCode\":\"HTTP_502\"");
+        assertThat(body).contains("\"upstreamStatus\":502");
+        assertThat(body).contains("\"latencyMs\":1500");
     }
 
     @Test

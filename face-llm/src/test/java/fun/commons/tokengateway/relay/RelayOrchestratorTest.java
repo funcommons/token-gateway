@@ -73,7 +73,7 @@ class RelayOrchestratorTest {
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"code\":0,\"data\":{\"preConsumeId\":\"pre-1\",\"estimatedQuota\":0,\"success\":true}}"));
 
-        StepVerifier.create(orchestrator.prepare("sk-test", "gpt-4o", 0, 0, null, null))
+        StepVerifier.create(orchestrator.prepare("sk-test", "gpt-4o", 0, 0, null, null, null))
                 .assertNext(p -> {
                     assertThat(p.token().getTokenId()).isEqualTo("1");
                     assertThat(p.channel().getChannelId()).isEqualTo("c1");
@@ -86,7 +86,7 @@ class RelayOrchestratorTest {
     @Test
     @DisplayName("apiKey 缺失 → 401 RelayException")
     void missingApiKey() {
-        StepVerifier.create(orchestrator.prepare(null, "gpt-4o", 0, 0, null, null))
+        StepVerifier.create(orchestrator.prepare(null, "gpt-4o", 0, 0, null, null, null))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 401);
     }
@@ -98,7 +98,7 @@ class RelayOrchestratorTest {
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"code\":0,\"data\":{\"valid\":false}}"));
 
-        StepVerifier.create(orchestrator.prepare("sk-bad", "gpt-4o", 0, 0, null, null))
+        StepVerifier.create(orchestrator.prepare("sk-bad", "gpt-4o", 0, 0, null, null, null))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 401);
     }
@@ -108,7 +108,7 @@ class RelayOrchestratorTest {
     void tokenRpcFailure() {
         backend.enqueue(new MockResponse().setResponseCode(500));
 
-        StepVerifier.create(orchestrator.prepare("sk-test", "gpt-4o", 0, 0, null, null))
+        StepVerifier.create(orchestrator.prepare("sk-test", "gpt-4o", 0, 0, null, null, null))
                 .verifyErrorMatches(e -> e instanceof RelayException re
                         && re.getHttpStatus() == 504
                         && re.getCode() == 10003);
@@ -124,7 +124,7 @@ class RelayOrchestratorTest {
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"code\":10400,\"message\":\"no channel\"}"));
 
-        StepVerifier.create(orchestrator.prepare("sk", "gpt-4o", 0, 0, null, null))
+        StepVerifier.create(orchestrator.prepare("sk", "gpt-4o", 0, 0, null, null, null))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 404
                         && ((RelayException) e).getCode() == 10400
@@ -141,7 +141,7 @@ class RelayOrchestratorTest {
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"code\":20103,\"message\":\"模型不存在或已下线: no-such-model\"}"));
 
-        StepVerifier.create(orchestrator.prepare("sk", "no-such-model", 0, 0, null, null))
+        StepVerifier.create(orchestrator.prepare("sk", "no-such-model", 0, 0, null, null, null))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 404
                         && ((RelayException) e).getCode() == 10400
@@ -165,7 +165,7 @@ class RelayOrchestratorTest {
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"code\":0,\"data\":{\"preConsumeId\":\"pre-2\",\"estimatedQuota\":0,\"success\":true}}"));
 
-        StepVerifier.create(orchestrator.prepare("sk", "claude", 0, 0, null, null))
+        StepVerifier.create(orchestrator.prepare("sk", "claude", 0, 0, null, null, null))
                 .assertNext(p -> assertThat(p.moderationSanitized()).isNull())
                 .verifyComplete();
     }
@@ -220,7 +220,7 @@ class RelayOrchestratorTest {
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"code\":10404,\"message\":\"无可用渠道: model=claude-haiku-4-5\"}"));
 
-        StepVerifier.create(orchestrator.prepare("sk", "claude-haiku-4-5", 0, 0, null, null))
+        StepVerifier.create(orchestrator.prepare("sk", "claude-haiku-4-5", 0, 0, null, null, null))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 502
                         && e.getMessage().contains("无可用渠道: model=claude-haiku-4-5"));
@@ -236,7 +236,7 @@ class RelayOrchestratorTest {
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"code\":10503,\"message\":\"rpc down\"}"));
 
-        StepVerifier.create(orchestrator.prepare("sk", "gpt-4o", 0, 0, null, null))
+        StepVerifier.create(orchestrator.prepare("sk", "gpt-4o", 0, 0, null, null, null))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 502
                         && e.getMessage().contains("rpc down"));
@@ -259,7 +259,7 @@ class RelayOrchestratorTest {
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"code\":0,\"data\":{\"success\":false,\"failReason\":\"用户算力余额不足\"}}"));
 
-        StepVerifier.create(orchestrator.prepare("sk", "gpt-4o", 0, 0, null, null))
+        StepVerifier.create(orchestrator.prepare("sk", "gpt-4o", 0, 0, null, null, null))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 502
                         && e.getMessage().contains("billing preConsume failed")
@@ -283,7 +283,7 @@ class RelayOrchestratorTest {
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"code\":10617,\"message\":\"用户算力余额不足\"}"));
 
-        StepVerifier.create(orchestrator.prepare("sk", "gpt-4o", 0, 0, null, null))
+        StepVerifier.create(orchestrator.prepare("sk", "gpt-4o", 0, 0, null, null, null))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 402
                         && ((RelayException) e).getCode() == 10617

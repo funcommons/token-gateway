@@ -1,6 +1,8 @@
 package fun.commons.tokengateway.controller;
 
 import fun.commons.tokengateway.exception.RelayException;
+import fun.commons.tokengateway.config.ClientIpProperties;
+import fun.commons.tokengateway.util.ClientIpResolver;
 
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -10,6 +12,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
+import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
+import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.web.server.ServerWebExchange;
 import reactor.test.StepVerifier;
 
 import java.util.HashMap;
@@ -60,7 +65,8 @@ class EmbeddingsControllerTest {
                 new fun.commons.tokengateway.relay.AccessLogReporter(
                         new fun.commons.tokengateway.rpc.HttpAccessLogApi(builder, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props)),
                         fun.commons.tokengateway.relay.TestChannelHealthReporters.disabled()),
-                builder);
+                builder,
+                new ClientIpResolver(new ClientIpProperties()));
     }
 
     @AfterEach
@@ -106,7 +112,7 @@ class EmbeddingsControllerTest {
         body.put("model", "text-embedding-3-small");
         body.put("input", "你好世界");
 
-        StepVerifier.create(controller.embeddings("Bearer sk-test", null, body))
+        StepVerifier.create(controller.embeddings("Bearer sk-test", null, body, exchange()))
                 .assertNext(entity -> {
                     assertThat(entity.getStatusCode().value()).isEqualTo(200);
                     @SuppressWarnings("unchecked")
@@ -134,7 +140,7 @@ class EmbeddingsControllerTest {
         Map<String, Object> body = new HashMap<>();
         body.put("input", List.of("a", "b"));
 
-        StepVerifier.create(controller.embeddings("Bearer sk-test", null, body))
+        StepVerifier.create(controller.embeddings("Bearer sk-test", null, body, exchange()))
                 .assertNext(entity -> assertThat(entity.getStatusCode().value()).isEqualTo(200))
                 .verifyComplete();
     }
@@ -149,7 +155,7 @@ class EmbeddingsControllerTest {
         Map<String, Object> body = new HashMap<>();
         body.put("input", "x");
 
-        StepVerifier.create((Mono<?>) controller.embeddings("Bearer sk-test", null, body))
+        StepVerifier.create((Mono<?>) controller.embeddings("Bearer sk-test", null, body, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException re
                         && re.getHttpStatus() == 500
                         && re.getMessage().contains("HTTP_500"));
@@ -171,7 +177,7 @@ class EmbeddingsControllerTest {
         Map<String, Object> body = new HashMap<>();
         body.put("input", "x");
 
-        StepVerifier.create((Mono<?>) controller.embeddings("Bearer sk-test", null, body))
+        StepVerifier.create((Mono<?>) controller.embeddings("Bearer sk-test", null, body, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException re
                         && re.getHttpStatus() == 429
                         && re.getMessage().contains("HTTP_429"));
@@ -193,7 +199,7 @@ class EmbeddingsControllerTest {
         Map<String, Object> body = new HashMap<>();
         body.put("input", "x");
 
-        StepVerifier.create((Mono<?>) controller.embeddings("Bearer sk-test", null, body))
+        StepVerifier.create((Mono<?>) controller.embeddings("Bearer sk-test", null, body, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException re
                         && re.getHttpStatus() == 403
                         && re.getMessage().contains("quota exceeded for project"));
@@ -204,8 +210,13 @@ class EmbeddingsControllerTest {
     void missingApiKey() {
         Map<String, Object> body = new HashMap<>();
         body.put("input", "x");
-        StepVerifier.create((Mono<?>) controller.embeddings(null, null, body))
+        StepVerifier.create((Mono<?>) controller.embeddings(null, null, body, exchange()))
                 .verifyErrorMatches(e -> e instanceof RelayException
                         && ((RelayException) e).getHttpStatus() == 401);
+    }
+
+    /** 直调注入 exchange (clientIp 解析入口; 缺省无 XFF → 取 mock 对端地址). */
+    private static ServerWebExchange exchange() {
+        return MockServerWebExchange.from(MockServerHttpRequest.post("/v1/test"));
     }
 }

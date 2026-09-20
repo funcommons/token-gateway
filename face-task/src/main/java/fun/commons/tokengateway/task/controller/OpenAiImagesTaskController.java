@@ -1,6 +1,7 @@
 package fun.commons.tokengateway.task.controller;
 
 import fun.commons.tokengateway.task.relay.TaskRelayOrchestrator;
+import fun.commons.tokengateway.util.ClientIpResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -9,6 +10,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.util.Map;
@@ -31,6 +33,8 @@ import java.util.Map;
 public class OpenAiImagesTaskController {
 
     private final TaskRelayOrchestrator orchestrator;
+    /** 客户端 IP 解析 (issue #27): token-validate clientIp 填充, 信任代理策略可配. */
+    private final ClientIpResolver clientIpResolver;
 
     @PostMapping("/v1/images/generations")
     public Mono<Map<String, Object>> createImages(
@@ -38,20 +42,25 @@ public class OpenAiImagesTaskController {
             @RequestHeader(value = "x-api-key", required = false) String xApiKey,
             @RequestHeader(value = "X-Trace-Id", required = false) String traceId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            @RequestBody Map<String, Object> body) {
+            @RequestBody Map<String, Object> body,
+            ServerWebExchange exchange) {
         if (isBackground(body)) {
-            return orchestrator.createImageJob(extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
+            return orchestrator.createImageJob(extractApiKey(authorization, xApiKey), body, traceId,
+                    idempotencyKey, clientIpResolver.resolve(exchange));
         }
         return orchestrator.createImageGenerations(
-                extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey);
+                extractApiKey(authorization, xApiKey), body, traceId, idempotencyKey,
+                clientIpResolver.resolve(exchange));
     }
 
     @GetMapping("/v1/images/generations/{taskNo}")
     public Mono<Map<String, Object>> getImageJob(
             @PathVariable String taskNo,
             @RequestHeader(value = "Authorization", required = false) String authorization,
-            @RequestHeader(value = "x-api-key", required = false) String xApiKey) {
-        return orchestrator.imageJob(taskNo, extractApiKey(authorization, xApiKey));
+            @RequestHeader(value = "x-api-key", required = false) String xApiKey,
+            ServerWebExchange exchange) {
+        return orchestrator.imageJob(taskNo, extractApiKey(authorization, xApiKey),
+                clientIpResolver.resolve(exchange));
     }
 
     private static boolean isBackground(Map<String, Object> body) {

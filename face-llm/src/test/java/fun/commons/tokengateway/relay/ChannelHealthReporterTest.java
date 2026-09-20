@@ -68,12 +68,13 @@ class ChannelHealthReporterTest {
     }
 
     @Test
-    @DisplayName("reportFailure → POST /record-failure 带 tenantId/errorCode/errorMessage")
+    @DisplayName("reportFailure → POST /record-failure 带 tenantId/errorCode + upstreamStatus/latencyMs (issue #25)")
     void reportFailure() throws Exception {
         backend.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
                 .setBody("{\"code\":0}"));
 
-        StepVerifier.create(reporter.reportFailure(channel("400"), "100", "502", "upstream error"))
+        StepVerifier.create(reporter.reportFailure(channel("400"), "100", "HTTP_502",
+                        "upstream error", 502, 1500L))
                 .verifyComplete();
 
         RecordedRequest req = backend.takeRequest(1, TimeUnit.SECONDS);
@@ -81,8 +82,27 @@ class ChannelHealthReporterTest {
         assertThat(req.getPath()).isEqualTo("/api/v1/internal/channels/400/record-failure");
         String body = req.getBody().readUtf8();
         assertThat(body).contains("\"tenantId\":\"100\"");
-        assertThat(body).contains("\"errorCode\":\"502\"");
+        assertThat(body).contains("\"errorCode\":\"HTTP_502\"");
         assertThat(body).contains("\"errorMessage\":\"upstream error\"");
+        assertThat(body).contains("\"upstreamStatus\":502");
+        assertThat(body).contains("\"latencyMs\":1500");
+    }
+
+    @Test
+    @DisplayName("4 参重载兼容: upstreamStatus/latencyMs 缺省为 null (向后兼容)")
+    void reportFailureLegacyOverloadDefaultsNullDimensions() throws Exception {
+        backend.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0}"));
+
+        StepVerifier.create(reporter.reportFailure(channel("400"), "100", "HTTP_429", "rate limited"))
+                .verifyComplete();
+
+        RecordedRequest req = backend.takeRequest(1, TimeUnit.SECONDS);
+        assertThat(req).isNotNull();
+        String body = req.getBody().readUtf8();
+        assertThat(body).contains("\"errorCode\":\"HTTP_429\"");
+        assertThat(body).contains("\"upstreamStatus\":null");
+        assertThat(body).contains("\"latencyMs\":null");
     }
 
     @Test

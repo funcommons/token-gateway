@@ -169,6 +169,8 @@ public interface TaskClient extends CapabilityFacade {
 }
 ```
 
+> **Implementation status (2026-09-20)**: the `TaskClient` above is a **reserved SPI contract** — the interface exists in `gateway-spi`, **with no implementation anywhere in the repo** and no task addressing in the capability surface; the actual task-face form = **lotask4j platform hosting** (default, decision 2026-09-01, see [Task Face lotask4j Hosting](./task-lotask4j-hosting.md)). The comment above stating "the default form is a gateway-local state machine" is outdated.
+
 > **Integration path without Java**: the SPI is only the gateway's internal implementation interface. Third-party backends can **write no Java at all** — they simply implement the capability-surface OpenAPI contract (HTTP endpoints / MQ messages) per the [Backend Onboarding Guide](./backend-onboarding.md), invoked by the gateway's built-in `openapi` generic adapter (§6.1).
 
 ### 4.3 SPI Iron Rules
@@ -312,10 +314,12 @@ The same adapter selects its mode from the §5 configuration (`billing` three-va
 
 ### 6.4 Two Task-Domain Forms (face=task)
 
+> **Status note (2026-09-20)**: the "Local state machine (default)" row below predates the 2026-09-01 lotask4j-hosting decision — the default task-execution form is now lotask4j platform hosting (see [Task Face lotask4j Hosting](./task-lotask4j-hosting.md)). The delegation-surface row is a reserved SPI contract with no implementation today.
+
 | Form | Routing | State machine location | Applies to |
 |---|---|---|---|
 | **Local state machine** (default) | route surface resolve → upstream base_url + outbound credential | Gateway face-task (THMP port): route-first pricing then full pre-consume → outbound → polling state machine (SUCCEEDED/FAILED/EXPIRED) → notify (HMAC signature + backoff redelivery) → resource proxy (sig capability credential, upstream URL never passed through) | The upstream is a "dumb" task API (create/poll); the gateway unifies the task experience and terminal-state guarantees |
-| **Delegation surface** | TASK_CREATE/TASK_POLL (task delegation surface) | Backend-owned (the backend is itself a task platform) | The backend has its own task state machine; the gateway only proxies and bills |
+| **Delegation surface** | TASK_CREATE/TASK_POLL (task delegation surface; **reserved SPI contract, no implementation today**) | Backend-owned (the backend is itself a task platform) | The backend has its own task state machine; the gateway only proxies and bills |
 
 Resource proxy and notify are gateway-inherent (sig signing, 24h expiry, upstream URL never passed through) and identical across both forms; task billing = full pre-consume at creation → refund on terminal state (full RELEASE on FAILED/EXPIRED), reusing the billing surface with no usage-settlement step.
 
