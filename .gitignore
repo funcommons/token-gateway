@@ -16,4 +16,4 @@ node_modules/
 docs/.vitepress/dist/
 docs/.vitepress/cache/
 data/
-.jqwik-database/
+.jqwik-database
