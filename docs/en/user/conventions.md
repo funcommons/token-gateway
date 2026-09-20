@@ -52,7 +52,7 @@ Error envelope (6 fields):
 | 10400 | 404 | Model not found / no available channel; task not found | Check model / task_no |
 | 10402 | 409 | State conflict (e.g. fetching resources of a non-SUCCEEDED task) | Handle per business logic |
 | 10500 | 429 | Rate limited | Back off per `Retry-After` |
-| 10501 | 409 | Duplicate submission (idempotency key hit) | Use a new Idempotency-Key |
+| 10501 | 409 | Duplicate submission (idempotency key hit: in progress or not replayable) | Retry the same request and await replay; or use a new Idempotency-Key |
 | 10617 | 402 | Insufficient balance | Top up and retry; no task is created on the task face |
 | 10700 | 200 | Partial success | Handle per the `data` details |
 
@@ -75,11 +75,16 @@ Error envelope (6 fields):
 | `X-RateLimit-Remaining` | Remaining quota |
 | `X-RateLimit-Reset` | Seconds until reset |
 
-## 6. Idempotency
+## 6. Idempotency (Replay Semantics)
 
-- All write operations (every POST `/v1/**`) accept `Idempotency-Key: <uuid v4>`.
-- A repeated request with the same credential + key within the window is **rejected as a duplicate** (10501) — never double-charged, never double-created.
-- Recommended: always send it for non-idempotent-safe calls (image generation, task creation, …).
+- All write operations (every POST `/v1/**`) accept `Idempotency-Key: <uuid v4>`. Scope = credential + key; window = TTL (48h by default).
+- **Replay semantics** (the standard way to recover from a timeout):
+  - If the first request succeeds (HTTP 2xx, non-streaming, body ≤ 1MB), the gateway caches that first response; within the TTL, resending the same credential + key **replays it verbatim** (same status / Content-Type / body) with the **`Idempotency-Replayed: true`** response header — never double-charged, never double-created; consume it exactly like a fresh response.
+  - If the first request is still in flight, or its response is streaming / oversized and cannot be cached → **409 + 10501** (message says "in progress") — retry shortly; once the first response is cached, retries turn into replays.
+  - If the first request failed (non-2xx or internal error) → the placeholder is **released immediately** (failures hold no key) and the same key is processed **as a new request**.
+  - Streaming responses (`text/event-stream`) and responses over 1MB **do not support replay**: the placeholder is held for the TTL and same-key retries get 409 + 10501 — streaming callers should not rely on idempotent replay; reconcile on your side after timeouts.
+- **The key value never leaks into downstream parameters**: the key is used only for dedup and replay, never mapped into any downstream business parameter slot (e.g. task-face workId, billing requestId); the billing requestId accepts digits only — for non-numeric keys the gateway generates a numeric request ID automatically.
+- Recommended: always send it for non-idempotent-safe calls (image generation, task creation, …); on 10501, check the message — "in progress" → retry the same request shortly and await replay, otherwise use a new key.
 
 ## 7. Timeout Budget
 

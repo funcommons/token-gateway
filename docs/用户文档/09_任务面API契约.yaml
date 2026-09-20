@@ -268,7 +268,7 @@ components:
       schema:
         type: string
         format: uuid
-      description: 幂等键（UUID v4 建议）。同凭证 + 同 key 在窗口内重复请求被拒绝式去重（10501）。
+      description: 幂等键（UUID v4 建议，回放语义）。成功首响（2xx 非流式 ≤1MB）在窗口内缓存，同凭证 + 同 key 重发原样回放（响应头 Idempotency-Replayed: true）；处理中/不可回放 → 409 + 10501；失败不占键可重试。键值不进入任何下游参数位。
 
   responses:
     BadRequest:

@@ -83,8 +83,9 @@ public class TaskRelayOrchestrator {
     }
 
     /**
-     * create (重载, #12): idempotencyKey 即接入方 Idempotency-Key, 优先作为 billing requestId
-     * (接入方幂等键透传); amount=渠道分发响应的 priceQuote (全额语义).
+     * create (重载, #12): idempotencyKey 即接入方 Idempotency-Key, 纯数字时作为 billing requestId
+     * (接入方幂等键=MMagiX workId 透传); 非数字键回落 traceId/生成值 (issue #30: Mmagix workId
+     * 要求纯数字, 幂等键值不得进入 billing requestId 参数位); amount=渠道分发响应的 priceQuote (全额语义).
      */
     public Mono<Map<String, Object>> create(String modality, String apiKey,
                                             Map<String, Object> body, String traceId,
@@ -108,7 +109,8 @@ public class TaskRelayOrchestrator {
             return Mono.error(new RelayException(401, ApiCode.UNAUTHORIZED.getCode(),
                     "缺少 bearer token"));
         }
-        // billing requestId 必须数字 (MMagiX credit related_id BIGINT); 接入方数字幂等键优先
+        // billing requestId 必须数字 (MMagiX credit related_id BIGINT); 数字 traceId 优先,
+        // 否则生成纯数字 — 非数字幂等键不得回落到这里之外的任何透传 (issue #30)
         String requestId = traceId != null && traceId.matches("\\d+") ? traceId
                 : String.valueOf(System.currentTimeMillis() * 1000
                         + java.util.concurrent.ThreadLocalRandom.current().nextInt(1000));
@@ -128,7 +130,7 @@ public class TaskRelayOrchestrator {
                     return resolveRoute(token, model, idemKey, body)
                             .flatMap(channel -> submitWithSaga(modality, token, channel,
                                     model, body,
-                                    idemKey != null ? idemKey : requestId,
+                                    idemKey != null && idemKey.matches("\\d+") ? idemKey : requestId,
                                     channel.getPriceQuote()));
                 });
     }

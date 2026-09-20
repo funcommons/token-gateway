@@ -358,6 +358,53 @@ class TaskRelayOrchestratorTest {
     }
 
     @Test
+    @DisplayName("issue #30: 非数字 Idempotency-Key → 正常受理, preConsume requestId 纯数字且 ≠ 键值")
+    void createNonNumericIdemKeyNotForwardedToBilling() throws InterruptedException {
+        enqueueHappyControlPlane(backend);
+        when(lotaskClient.submit(anyString(), anyString(), any(), anyString()))
+                .thenReturn(Mono.just("YeirYkxHuQ"));
+        when(mappingStore.put(anyString(), eq("YeirYkxHuQ"), any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(orchestrator.create("image", "sk-caller",
+                        Map.of("model", "token-mock-image-01"), null, "bl11-regression-test-001"))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        // distribute 仍透传幂等键 (路由去重专用字段, 不进业务参数位)
+        backend.takeRequest(); // validate
+        okhttp3.mockwebserver.RecordedRequest dist = backend.takeRequest();
+        assertThat(dist.getBody().readUtf8()).contains("bl11-regression-test-001");
+        // billing preConsume: requestId 必须纯数字且 ≠ 幂等键 (Mmagix workId BIGINT 契约)
+        okhttp3.mockwebserver.RecordedRequest preConsume = backend.takeRequest(5,
+                java.util.concurrent.TimeUnit.SECONDS);
+        JSONObject body = JSON.parseObject(preConsume.getBody().readUtf8());
+        String requestId = body.getString("requestId");
+        assertThat(requestId).matches("\\d+");
+        assertThat(requestId).isNotEqualTo("bl11-regression-test-001");
+    }
+
+    @Test
+    @DisplayName("issue #12/#30: 纯数字 Idempotency-Key → preConsume requestId = 原值")
+    void createNumericIdemKeyForwardedAsBillingRequestId() throws InterruptedException {
+        enqueueHappyControlPlane(backend);
+        when(lotaskClient.submit(anyString(), anyString(), any(), anyString()))
+                .thenReturn(Mono.just("YeirYkxHuQ"));
+        when(mappingStore.put(anyString(), eq("YeirYkxHuQ"), any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(orchestrator.create("image", "sk-caller",
+                        Map.of("model", "token-mock-image-01"), null, "9876543210"))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        backend.takeRequest(); // validate
+        backend.takeRequest(); // distribute
+        okhttp3.mockwebserver.RecordedRequest preConsume = backend.takeRequest(5,
+                java.util.concurrent.TimeUnit.SECONDS);
+        JSONObject body = JSON.parseObject(preConsume.getBody().readUtf8());
+        assertThat(body.getString("requestId")).isEqualTo("9876543210");
+    }
+
+    @Test
     @DisplayName("issue #13: submit-task-type=model → lotask task_type 取 body.model; poll_url 仍模态")
     void createModelGranularitySubmitType() {
         props.getTask().setSubmitTaskType("model");

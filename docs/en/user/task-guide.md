@@ -14,7 +14,7 @@
 |---|---|
 | Document | Task Face Onboarding Guide (videos / images / audios / tts — four asynchronous-task modalities) |
 | Companion | LLM face [LLM Face Onboarding Guide](./llm-guide.md); API contract [Task Face API Contract](https://github.com/funcommons/token-gateway/blob/main/docs/用户文档/09_任务面API契约.yaml); design proposal [Design Document](../dev/design.md) §6.4; hosting plan [Task Face lotask4j Hosting](../dev/task-lotask4j-hosting.md) |
-| Version | V1.3 (2026-09-18, Worker/batch-pull landed + resource-proxy visibility & base64 semantics + 504/10003 validation semantics) |
+| Version | V1.4 (2026-09-20, idempotency replay semantics #28 + idempotency-key value decoupled from billing workId #30) |
 | Implementation source | Task state hosted by the lotask4j platform (zero-modification onboarding, V4+ prerequisite) + self-written Worker with Groovy adaptation |
 
 ---
@@ -83,7 +83,7 @@ curl -sL "<proxy URL>" -o out.mp4
 | notify | If `notify_url` is provided at creation, a terminal-state callback is sent; `X-THMP-Signature` (HMAC) can be used to verify it; failures are re-sent by the gateway with backoff (1m/10m/1h tiers) — callers need no fallback |
 | Resource proxy | **Upstream raw URLs are never passed through**; proxy URLs expire after 24h (exp+sig) — after expiry, re-fetching the task can re-sign; expired/tampered signature → 10100, task not SUCCEEDED → 10402 |
 | Moderation switch | The task face shares the `moderation.enabled` configuration with the LLM face |
-| Idempotency | The create endpoint supports `Idempotency-Key` (same as LLM face §6.3) |
+| Idempotency | The create endpoint supports `Idempotency-Key` ([Conventions §6](./conventions.md) replay semantics): on timeout, **resend the same request with the same key** — the gateway replays the successful first response (`Idempotency-Replayed: true`), never double-creating or double-pre-deducting; failures (non-2xx) hold no key, so retry immediately; streaming does not apply (task-face create responses are JSON — safe to rely on in normal scenarios). The key value never enters any downstream parameter slot — the billing requestId accepts digits only; for non-numeric keys the gateway generates a numeric request ID (#30) |
 
 ## 5. Gateway-Side Task Configuration (effective when face=task/all)
 

@@ -6,6 +6,8 @@
 
 ### 新增
 
+- **幂等回放语义（issue #30 完整修 + #28 主解）**：`Idempotency-Key` 从拒绝式升级为**首响回放**——2xx 非流式 ≤1MB 响应缓存（`IdempotentResponse` record + 单 key 双形态：占位 "1"/响应 JSON，TTL 回填无孤儿），TTL 内同凭证同 key 原样回放（同 status/body + `Idempotency-Replayed: true` 头）；处理中/流式/超限 → 409+10501（message 区分「处理中」）；失败不占键（非 2xx 释放，语义较旧版收紧：4xx 也释放）；`IdempotencyStore` 以 default 方法扩展三 API，存量实现零破坏。**#30 头语义 bug 修复**：非数字 `Idempotency-Key` 不再透传 billing requestId 位（workId 要求纯数字，此前按文档带 uuidgen key 100% 失败 502/10004），distribute 幂等透传保留、纯数字 key 语义不变（#12）。契约 yaml（08/09）「拒绝式」表述同步回放语义
+
 - **usage 细分对齐（issue #26）**：`TokenUsage` 扩 reasoning/audio/cacheCreation 三维（无源 null 不造数）；settle/access-log 留痕透传；**两条转换链计费口径损失修复**——`openAiToAnthropicResponse` 此前丢 `cached_tokens`（Messages+OpenAI 上游 cacheRead 计 0）、`anthropicToOpenAIResponse` 此前丢 `cache_creation_input_tokens`；Anthropic cache 拆分定版（creation 不再并入 cached，prompt 总量语义不变）；四象限（双协议×流式/非流式）断言 + 端到端 settle body 校验；字段映射对齐 Spring AI 1.1.2 `OpenAiApi.Usage`
 
 - **validate 契约补位（issue #27）**：`clientIp` 死字段激活——新增 `ClientIpResolver`（信任代理策略 `gateway.client-ip.{enabled,trusted-proxies}`，默认 0=恒取 TCP 对端防伪造；XFF 按标准逐跳追加语义从右数第 N 段，对端 null/段耗尽/畸形 fail-safe 回退）+ `TokenValidateVO.subAccountId` 可选回传；LLM 面 6 controller + 任务面 create/poll 全链路填充，controller 级透传断言 4 条
