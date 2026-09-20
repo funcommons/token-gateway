@@ -94,7 +94,7 @@ Skip the standalone fat-jar: reference the starter inside your own **WebFlux** a
 <dependency>
     <groupId>com.github.funcommons.token-gateway</groupId>
     <artifactId>token-gateway-spring-boot-starter</artifactId>
-    <version>v0.13.0</version>
+    <version>v0.14.0</version>
 </dependency>
 ```
 
