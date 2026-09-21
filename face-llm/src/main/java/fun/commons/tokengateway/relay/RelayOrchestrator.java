@@ -95,7 +95,7 @@ public class RelayOrchestrator {
     /**
      * 客户端错误契约 (issue #24): distribute/preConsume 失败分支的能力面业务码透传白名单
      * (gateway.error-passthrough-codes). 兼容构造传默认实例 (默认白名单 4090→403,
-     * 10601→402, 10602→404, 10603→404, 10402→409); 生产装配由 Spring 注入.
+     * 10601→402, 10602→404, 10603→404, 10402→409, 10612→403); 生产装配由 Spring 注入.
      */
     private final ErrorContractProperties errorContract;
 
@@ -152,7 +152,8 @@ public class RelayOrchestrator {
      *
      * @param clientIp 调用方客户端 IP (issue #27, controller 层经 ClientIpResolver 解析,
      *                 信任代理策略见 ClientIpProperties; 透传给 token-validate 供能力面
-     *                 IP 白名单/风控, 网关自身不做强依赖)
+     *                 IP 白名单/风控, 网关自身不做强依赖; issue #37 起同值随 distribute
+     *                 下发并驻留 PreparedRequest, 请求内 failover 重分发保持同值)
      */
     public Mono<PreparedRequest> prepare(String apiKey, String model,
                                          int estPromptTokens, int estCompletionTokens,
@@ -174,7 +175,8 @@ public class RelayOrchestrator {
                         return Mono.error(new RelayException(401, "invalid token"));
                     }
                     TokenValidateVO token = tokenResp.getData();
-                    return obtainRoute(token, model, requestId, estPromptTokens, estCompletionTokens)
+                    return obtainRoute(token, model, requestId, estPromptTokens, estCompletionTokens,
+                                    clientIp)
                             .flatMap(res -> moderateInput(token, userContent)
                                     .flatMap(moderation -> {
                                         String sanitized = maskedContentOf(moderation);
@@ -184,10 +186,12 @@ public class RelayOrchestrator {
                                                 estPromptTokens, estCompletionTokens, requestId)
                                                 .map(preConsumeId -> new PreparedRequest(
                                                         token, res.channel(), preConsumeId, requestId,
-                                                        sanitized, codes, res.entryId(), res.leaseId()))
+                                                        sanitized, codes, res.entryId(), res.leaseId(),
+                                                        clientIp))
                                                 .switchIfEmpty(Mono.just(new PreparedRequest(
                                                         token, res.channel(), null, requestId,
-                                                        sanitized, codes, res.entryId(), res.leaseId())));
+                                                        sanitized, codes, res.entryId(), res.leaseId(),
+                                                        clientIp)));
                                     }));
                 });
     }
@@ -201,7 +205,8 @@ public class RelayOrchestrator {
      * data_json 契约字段映射 DistributeVO).
      */
     private Mono<RouteResolution> obtainRoute(TokenValidateVO token, String model, String requestId,
-                                              int estPromptTokens, int estCompletionTokens) {
+                                              int estPromptTokens, int estCompletionTokens,
+                                              String clientIp) {
         if (adapterSelector.routeViaTokenRoute()) {
             return tokenRouteClient.resolveFull(model, requestId, estPromptTokens, estCompletionTokens, null)
                     .map(r -> new RouteResolution(r.channel(), r.entryId(), r.leaseId()));
@@ -216,7 +221,8 @@ public class RelayOrchestrator {
                                 .userId(token.getUserId())
                                 .apiKeyId(token.getTokenId())
                                 .groupId(token.getGroupId())
-                                .model(model).build())
+                                .model(model)
+                                .clientIp(clientIp).build())
                 .flatMap(distResp -> {
                     if (distResp == null || !distResp.isSuccess() || distResp.getData() == null) {
                         String reason = distResp == null ? "no response"
@@ -360,32 +366,48 @@ public class RelayOrchestrator {
     /**
      * 结算 (G4 重载): 携带失败尝试明细 (billed=true 的 LOSS 供能力面记路由损耗).
      * <p>attempts 为空/null 时不带该字段语义 (向后兼容, 旧计费后端忽略未知字段).
+     * <p>usageSource 缺省 null = 旧版本语义 (issue #35 前存量调用点, 不造真相位).
      */
     public Mono<java.math.BigDecimal> settle(PreparedRequest prepared, int actualPromptTokens,
                              int actualCompletionTokens, int cachedTokens, int responseTimeMs,
                              java.util.List<SettleRequest.AttemptDetail> attempts) {
         return settleFull(prepared, actualPromptTokens, actualCompletionTokens, cachedTokens,
-                null, null, null, responseTimeMs, attempts);
+                null, null, null, responseTimeMs, attempts, null);
     }
 
     /**
      * 结算 (issue #26 细分重载): 直接携带 TokenUsage, 填充细分留痕维
      * reasoningTokens / audioTokens (null 透传) 与 cacheCreationTokens (null→0,
      * 沿用既有 int 字段缺省语义); prompt/completion/cached 总量语义不变.
+     * <p>usageSource 缺省 null = 旧版本语义 (不造真相位).
      */
     public Mono<java.math.BigDecimal> settle(PreparedRequest prepared, TokenUsage usage,
                              int responseTimeMs,
                              java.util.List<SettleRequest.AttemptDetail> attempts) {
+        return settle(prepared, usage, responseTimeMs, attempts, null);
+    }
+
+    /**
+     * 结算 (issue #35 真相位重载): usageSource 取值见
+     * {@link SettleRequest#USAGE_SOURCE_UPSTREAM} (上游实测) /
+     * {@link SettleRequest#USAGE_SOURCE_ESTIMATED} (#33 估算兜底); null = 旧版本语义.
+     * settle 失败入 #23 待重放队列时 usageSource 随记录保真, 重放请求体同参携带.
+     */
+    public Mono<java.math.BigDecimal> settle(PreparedRequest prepared, TokenUsage usage,
+                             int responseTimeMs,
+                             java.util.List<SettleRequest.AttemptDetail> attempts,
+                             String usageSource) {
         return settleFull(prepared, usage.promptTokens(), usage.completionTokens(),
                 usage.cachedTokens(), usage.reasoningTokens(), usage.audioTokens(),
-                usage.cacheCreationTokens(), responseTimeMs, attempts);
+                usage.cacheCreationTokens(), responseTimeMs, attempts, usageSource);
     }
 
     private Mono<java.math.BigDecimal> settleFull(PreparedRequest prepared,
                              int actualPromptTokens, int actualCompletionTokens, int cachedTokens,
                              Long reasoningTokens, Long audioTokens, Long cacheCreationTokens,
                              int responseTimeMs,
-                             java.util.List<SettleRequest.AttemptDetail> attempts) {
+                             java.util.List<SettleRequest.AttemptDetail> attempts,
+                             String usageSource) {
         if (prepared.preConsumeId() == null) {
             return Mono.just(java.math.BigDecimal.ZERO);
         }
@@ -398,6 +420,7 @@ public class RelayOrchestrator {
                                 ? 0 : cacheCreationTokens.intValue())
                         .reasoningTokens(reasoningTokens)
                         .audioTokens(audioTokens)
+                        .usageSource(usageSource)
                         .success(true)
                         .requestId(prepared.requestId())
                         .ownerPartyId(ownerPartyIdOf(prepared.token()))
@@ -430,7 +453,8 @@ public class RelayOrchestrator {
                                     ownerPartyIdOf(prepared.token()),
                                     actualPromptTokens, actualCompletionTokens, cachedTokens,
                                     cacheCreationTokens == null ? 0 : cacheCreationTokens.intValue(),
-                                    reasoningTokens, audioTokens, responseTimeMs, attempts),
+                                    reasoningTokens, audioTokens, responseTimeMs, attempts,
+                                    usageSource),
                             resp, "settle");
                     return java.math.BigDecimal.ZERO;
                 });
@@ -546,7 +570,7 @@ public class RelayOrchestrator {
         return refund(current, "channel failover")
                 .then(reportOld)
                 .then(routeDistribute(token, model, requestId, estPromptTokens,
-                        estCompletionTokens, excludeChannelIds))
+                        estCompletionTokens, excludeChannelIds, current.clientIp()))
                 .flatMap(res -> {
                     DistributeVO next = res.channel();
                     log.info("[Channel/failover] model={}, {} → {}, excluded={}",
@@ -555,11 +579,11 @@ public class RelayOrchestrator {
                             .map(preConsumeId -> new PreparedRequest(
                                     token, next, preConsumeId, requestId,
                                     current.moderationSanitized(), current.moderationRuleCodes(),
-                                    res.entryId(), res.leaseId()))
+                                    res.entryId(), res.leaseId(), current.clientIp()))
                             .switchIfEmpty(Mono.just(new PreparedRequest(
                                     token, next, null, requestId,
                                     current.moderationSanitized(), current.moderationRuleCodes(),
-                                    res.entryId(), res.leaseId())));
+                                    res.entryId(), res.leaseId(), current.clientIp())));
                 });
     }
 
@@ -569,7 +593,7 @@ public class RelayOrchestrator {
      */
     private Mono<RouteResolution> routeDistribute(TokenValidateVO token, String model, String requestId,
                                                   int estPromptTokens, int estCompletionTokens,
-                                                  List<String> excludeChannelIds) {
+                                                  List<String> excludeChannelIds, String clientIp) {
         if (adapterSelector.routeViaTokenRoute()) {
             return tokenRouteClient.resolveFull(model, requestId, estPromptTokens,
                             estCompletionTokens, excludeChannelIds)
@@ -582,6 +606,7 @@ public class RelayOrchestrator {
                         .groupId(token.getGroupId())
                         .model(model)
                         .excludeChannelIds(excludeChannelIds)
+                        .clientIp(clientIp)
                         .build())
                 .flatMap(distResp -> {
                     if (distResp == null || !distResp.isSuccess() || distResp.getData() == null) {
@@ -598,18 +623,31 @@ public class RelayOrchestrator {
      *
      * <p>routeEntryId/routeLeaseId: token-route 路由的 entry 凭据 (G2/G5, 三态回报用;
      * Mmagix distribute 路径为 null).
+     *
+     * <p>clientIp (issue #37): prepare 入参原值驻留, 请求内 failover 重分发时随
+     * DistributeRequest 再次下发 (与首次分发同值); 旧构造缺省 null = 旧语义.
      */
     public record PreparedRequest(TokenValidateVO token, DistributeVO channel,
                                   String preConsumeId, String requestId,
                                   String moderationSanitized, List<String> moderationRuleCodes,
-                                  String routeEntryId, String routeLeaseId) {
+                                  String routeEntryId, String routeLeaseId,
+                                  String clientIp) {
 
-        /** 六参兼容构造 (Mmagix distribute 路径, 无 token-route 凭据). */
+        /** 六参兼容构造 (Mmagix distribute 路径, 无 token-route 凭据, 无 clientIp). */
         public PreparedRequest(TokenValidateVO token, DistributeVO channel,
                                String preConsumeId, String requestId,
                                String moderationSanitized, List<String> moderationRuleCodes) {
             this(token, channel, preConsumeId, requestId, moderationSanitized, moderationRuleCodes,
-                    null, null);
+                    null, null, null);
+        }
+
+        /** 八参兼容构造 (G2 存量形态, 无 clientIp = 旧语义). */
+        public PreparedRequest(TokenValidateVO token, DistributeVO channel,
+                               String preConsumeId, String requestId,
+                               String moderationSanitized, List<String> moderationRuleCodes,
+                               String routeEntryId, String routeLeaseId) {
+            this(token, channel, preConsumeId, requestId, moderationSanitized, moderationRuleCodes,
+                    routeEntryId, routeLeaseId, null);
         }
 
         /** 是否 token-route 路由 (report 三态回报可达). */

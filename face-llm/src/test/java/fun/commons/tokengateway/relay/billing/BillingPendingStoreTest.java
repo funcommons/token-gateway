@@ -54,7 +54,8 @@ class BillingPendingStoreTest {
         Mockito.when(zsetOps.add(anyString(), anyString(), anyDouble()))
                 .thenReturn(Mono.just(true));
         BillingPendingRecord record = BillingPendingRecord.forSettle(
-                "pc-1", "req-1", 7L, 100, 20, 30, 5, null, null, 1234, null);
+                "pc-1", "req-1", 7L, 100, 20, 30, 5, null, null, 1234, null,
+                fun.commons.tokengateway.contract.SettleRequest.USAGE_SOURCE_UPSTREAM);
 
         long before = System.currentTimeMillis();
         StepVerifier.create(store.enqueue(record)).expectNext(true).verifyComplete();
@@ -75,6 +76,8 @@ class BillingPendingStoreTest {
         assertThat(parsed.cacheReadTokens()).isEqualTo(30);
         assertThat(parsed.cacheCreationTokens()).isEqualTo(5);
         assertThat(parsed.responseTimeMs()).isEqualTo(1234);
+        assertThat(parsed.usageSource()).isEqualTo(
+                fun.commons.tokengateway.contract.SettleRequest.USAGE_SOURCE_UPSTREAM);
         assertThat(parsed.retries()).isZero();
     }
 
@@ -132,7 +135,7 @@ class BillingPendingStoreTest {
     @DisplayName("重排: 先 zadd 新成员 (retries+1, 新 score) 再 zrem 旧成员 (顺序防丢)")
     void rescheduleAddsNextThenRemovesOld() {
         BillingPendingRecord old = BillingPendingRecord.forSettle(
-                "pc-5", "req-5", null, 10, 2, 0, 0, null, null, 100, null);
+                "pc-5", "req-5", null, 10, 2, 0, 0, null, null, 100, null, null);
         BillingPendingRecord next = old.withRetries(1);
         BillingPendingStore.BillingPendingEntry entry = new BillingPendingStore.BillingPendingEntry(
                 old, JSON.toJSONString(old));
@@ -164,7 +167,7 @@ class BillingPendingStoreTest {
                         .sequence(1).channelId("c9").model("m9")
                         .errorClass("HTTP_500").billed(true)
                         .promptTokens(3).completionTokens(1)
-                        .build()));
+                        .build()), null);
 
         StepVerifier.create(store.enqueue(record)).expectNext(true).verifyComplete();
         ArgumentCaptor<String> member = ArgumentCaptor.forClass(String.class);

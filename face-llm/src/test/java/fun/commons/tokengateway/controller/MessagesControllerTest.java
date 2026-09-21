@@ -226,13 +226,16 @@ class MessagesControllerTest {
                 .verifyComplete();
 
         String settleBody = null;
-        for (int i = 0; i < 6 && settleBody == null; i++) {
+        String accessLogBody = null;
+        for (int i = 0; i < 8 && (settleBody == null || accessLogBody == null); i++) {
             var recorded = backend.takeRequest(3, java.util.concurrent.TimeUnit.SECONDS);
             if (recorded == null) {
                 break;
             }
             if (recorded.getPath().contains("/billing/settle")) {
                 settleBody = recorded.getBody().readUtf8();
+            } else if (recorded.getPath().contains("/access-log/record")) {
+                accessLogBody = recorded.getBody().readUtf8();
             }
         }
         assertThat(settleBody).isNotNull();
@@ -241,6 +244,10 @@ class MessagesControllerTest {
         // 口径定版: read → cacheReadTokens=128 (旧口径曾把 creation 并入成 128+64)
         assertThat(settleBody).contains("\"cacheReadTokens\":128");
         assertThat(settleBody).contains("\"cacheCreationTokens\":64");
+        // issue #35: 非流式 usage 取自上游响应体 (实测) → 双侧 UPSTREAM
+        assertThat(settleBody).contains("\"usageSource\":\"UPSTREAM\"");
+        assertThat(accessLogBody).as("access-log body").isNotNull();
+        assertThat(accessLogBody).contains("\"usageSource\":\"UPSTREAM\"");
     }
 
     @Test
@@ -513,6 +520,54 @@ class MessagesControllerTest {
     }
 
     @Test
+    @DisplayName("issue #35 流式无 usage: settle 与 access-log 双侧 usageSource=ESTIMATED (估算兜底真相位)")
+    void streamNoUsageMarksEstimatedOnBothSides() throws Exception {
+        mockTokenOk();
+        mockDistribute("anthropic");
+        mockScanPass();
+        // "abcd" (4) + "efgh" (4) = 8 chars → completion = 8/4 = 2
+        upstream.enqueue(new MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_END)
+                .setBody("event: message_start\ndata: {\"type\":\"message_start\","
+                        + "\"message\":{\"id\":\"m1\",\"role\":\"assistant\",\"content\":[]}}\n\n"
+                        + "event: content_block_delta\ndata: {\"type\":\"content_block_delta\","
+                        + "\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"abcd\"}}\n\n"
+                        + "event: content_block_delta\ndata: {\"type\":\"content_block_delta\","
+                        + "\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"efgh\"}}\n\n"
+                        + "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"));
+        backend.enqueue(jsonOk());                                  // settle (fire-and-forget)
+        backend.enqueue(jsonOk());                                  // access-log (fire-and-forget)
+
+        Map<String, Object> body = anthropicBody();
+        body.put("stream", true);
+
+        java.util.concurrent.atomic.AtomicReference<
+                org.springframework.http.ResponseEntity<Object>> entityRef =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        StepVerifier.create(controller.messages(null, "sk-ant-x", body, exchange()))
+                .assertNext(entity -> {
+                    assertThat(entity.getStatusCode().value()).isEqualTo(200);
+                    entityRef.set(entity);
+                })
+                .verifyComplete();
+
+        @SuppressWarnings("unchecked")
+        Flux<ServerSentEvent<String>> flux =
+                (Flux<ServerSentEvent<String>>) entityRef.get().getBody();
+        flux.filter(e -> e.data() != null && !e.data().isBlank())
+                .collectList()
+                .block(java.time.Duration.ofSeconds(10));
+
+        String[] bodies = settleAndAccessLogAfterDrain();
+        assertThat(bodies[0]).as("settle body").isNotNull();
+        assertThat(bodies[0]).contains("\"usageSource\":\"ESTIMATED\"");
+        assertThat(bodies[0]).contains("\"actualCompletionTokens\":2");
+        assertThat(bodies[1]).as("access-log body").isNotNull();
+        assertThat(bodies[1]).contains("\"usageSource\":\"ESTIMATED\"");
+    }
+
+    @Test
     @DisplayName("流式 openai 上游 (Anthropic→OpenAI 转换) 无 usage: completion 按 delta.content chars/4 估算 (issue #33)")
     void streamOpenaiUpstreamNoUsageSettlesByEmittedChars() throws Exception {
         mockTokenOk();
@@ -604,6 +659,55 @@ class MessagesControllerTest {
         assertThat(settleBody).contains("\"actualPromptTokens\":25");
         assertThat(settleBody).contains("\"actualCompletionTokens\":9");
         assertThat(settleBody).contains("\"cacheReadTokens\":3");
+        // issue #35: 有 usage 帧 = 上游实测真相位
+        assertThat(settleBody).contains("\"usageSource\":\"UPSTREAM\"");
+    }
+
+    @Test
+    @DisplayName("issue #35 流式有 usage: settle 与 access-log 双侧 usageSource=UPSTREAM (实测真相位)")
+    void streamWithUsageMarksUpstreamOnBothSides() throws Exception {
+        mockTokenOk();
+        mockDistribute("anthropic");
+        mockScanPass();
+        upstream.enqueue(new MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_END)
+                .setBody("event: message_start\ndata: {\"type\":\"message_start\","
+                        + "\"message\":{\"usage\":{\"input_tokens\":25,\"cache_read_input_tokens\":3}}}\n\n"
+                        + "event: content_block_delta\ndata: {\"type\":\"content_block_delta\","
+                        + "\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello world\"}}\n\n"
+                        + "event: message_delta\ndata: {\"type\":\"message_delta\","
+                        + "\"usage\":{\"output_tokens\":9}}\n\n"
+                        + "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"));
+        backend.enqueue(jsonOk());                                  // settle (fire-and-forget)
+        backend.enqueue(jsonOk());                                  // access-log (fire-and-forget)
+
+        Map<String, Object> body = anthropicBody();
+        body.put("stream", true);
+
+        java.util.concurrent.atomic.AtomicReference<
+                org.springframework.http.ResponseEntity<Object>> entityRef =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        StepVerifier.create(controller.messages(null, "sk-ant-x", body, exchange()))
+                .assertNext(entity -> {
+                    assertThat(entity.getStatusCode().value()).isEqualTo(200);
+                    entityRef.set(entity);
+                })
+                .verifyComplete();
+
+        @SuppressWarnings("unchecked")
+        Flux<ServerSentEvent<String>> flux =
+                (Flux<ServerSentEvent<String>>) entityRef.get().getBody();
+        flux.filter(e -> e.data() != null && !e.data().isBlank())
+                .collectList()
+                .block(java.time.Duration.ofSeconds(10));
+
+        String[] bodies = settleAndAccessLogAfterDrain();
+        assertThat(bodies[0]).as("settle body").isNotNull();
+        assertThat(bodies[0]).contains("\"usageSource\":\"UPSTREAM\"");
+        assertThat(bodies[0]).contains("\"actualPromptTokens\":25");
+        assertThat(bodies[1]).as("access-log body").isNotNull();
+        assertThat(bodies[1]).contains("\"usageSource\":\"UPSTREAM\"");
     }
 
     /**
@@ -620,6 +724,26 @@ class MessagesControllerTest {
             }
         }
         return null;
+    }
+
+    /**
+     * 轮询后端请求同时取 settle + access-log 请求体 (issue #35 双侧断言用;
+     * [0] = settle body, [1] = access-log body, 未捕获为 null).
+     */
+    private String[] settleAndAccessLogAfterDrain() throws InterruptedException {
+        String[] bodies = new String[2];
+        for (int i = 0; i < 8 && (bodies[0] == null || bodies[1] == null); i++) {
+            RecordedRequest recorded = backend.takeRequest(3, java.util.concurrent.TimeUnit.SECONDS);
+            if (recorded == null) {
+                break;
+            }
+            if (recorded.getPath().contains("/billing/settle")) {
+                bodies[0] = recorded.getBody().readUtf8();
+            } else if (recorded.getPath().contains("/access-log/record")) {
+                bodies[1] = recorded.getBody().readUtf8();
+            }
+        }
+        return bodies;
     }
 
     /** fire-and-forget 健康上报异步完成, 轮询等待 (上限 5s). */

@@ -5,7 +5,7 @@
 | Document | Security contract for gateway ↔ capability-backend integration (authentication, credentials, transport security — authoritative definition) |
 | Status | **Authoritative** for security policy; design doc §5.2 and backend onboarding §3.4 are summary references of this document |
 | Companion | Capability-face contract `03_能力面接口契约.yaml` ([link](https://github.com/funcommons/token-gateway/blob/main/docs/开发文档/03_能力面接口契约.yaml)); [Backend Onboarding Manual](./backend-onboarding.md) |
-| Version | V1.1 (2026-09-18; added §9 Client IP Resolution); V1.0 (2026-08-31; decision: three auth modes — the static `token` mode removed) |
+| Version | V1.2 (2026-09-21; §9 extended with resolve-hop passthrough, issue #37); V1.1 (2026-09-18; added §9 Client IP Resolution); V1.0 (2026-08-31; decision: three auth modes — the static `token` mode removed) |
 
 ---
 
@@ -133,9 +133,9 @@ stringToSign = HTTP_METHOD + "\n" + PATH + "\n" + TIMESTAMP + "\n" + NONCE + "\n
 - Audit storage is append-only; physical deletion is forbidden; retention per compliance requirements.
 - Audit emission failures never block the main path (quiet + alert).
 
-## 9. Client IP Resolution (token-validate `clientIp`, issue #27)
+## 9. Client IP Resolution (`clientIp` on token-validate / route-resolve, issue #27/#37)
 
-The token-validate request body carries a `clientIp` field (`client_ip` in the capability-face contract yaml) so the backend can apply IP whitelists / risk control / audit attribution. The field is **resolved by the gateway and pushed downstream** — the backend must not parse the client IP from request headers itself.
+The token-validate request body carries a `clientIp` field (`client_ip` in the capability-face contract yaml) so the backend can apply IP whitelists / risk control / audit attribution. Since issue #37 the route-resolve (distribute) request body carries the same field — both hops deliver **the same single ClientIpResolver resolution result** (the validate hop landed with #27; the resolve hop was added by #37; both share the `gateway.client-ip.{enabled,trusted-proxies}` configuration). The field is **resolved by the gateway and pushed downstream** — the backend must not parse the client IP from request headers itself.
 
 **Spoofing risk (must understand)**: the first segment of `X-Forwarded-For` (XFF) is freely forgeable by the client — blindly trusting the first XFF entry means an IP whitelist can be bypassed with a single forged header. The gateway resolves by a "trusted proxy depth" policy and, by default, trusts no proxy header at all.
 
@@ -150,7 +150,7 @@ The token-validate request body carries a `clientIp` field (`client_ip` in the c
 
 **Deployment requirement**: `trusted-proxies` must **equal** the real number of trusted proxies in front of the gateway (direct connection = 0; one LB = 1; LB + Ingress = 2). Set it too high and untrusted segments are treated as trusted; too low and the proxy address is mistaken for the client IP.
 
-**Gateway-side semantics**: clientIp is pass-through only (`TokenValidateRequest.clientIp` → backend); the gateway itself performs no hard IP enforcement. The backend-returned `subAccountId` (optional) is likewise pass-through only (available via `PreparedRequest.token`), with no hard dependency on its presence.
+**Gateway-side semantics**: clientIp is pass-through only (`TokenValidateRequest.clientIp` / `DistributeRequest.clientIp` → backend); the gateway itself performs no hard IP enforcement. On the resolve hop, a null value keeps the legacy semantics — the capability face's existing fail-closed IP-whitelist behavior is unchanged (rejections return 10612, which the gateway's default passthrough whitelist maps to 403; see the user doc Conventions §4.1). The backend-returned `subAccountId` (optional) is likewise pass-through only (available via `PreparedRequest.token`), with no hard dependency on its presence.
 
 ## 10. Acceptance Checklist
 

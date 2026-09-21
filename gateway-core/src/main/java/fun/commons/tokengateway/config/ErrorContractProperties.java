@@ -29,6 +29,7 @@ import java.util.Map;
  *     10602: 404   # model not found (能力面口径)
  *     10603: 404
  *     10402: 409   # 状态冲突
+ *     10612: 403   # IP 白名单拒绝 (issue #37 起入默认, 与 4090 同类 = Key 级安全拒绝)
  * </pre>
  */
 @Getter
@@ -71,7 +72,10 @@ public class ErrorContractProperties {
         return errorPassthroughCodes.get(capabilityCode);
     }
 
-    /** issue #24 默认白名单 (4090→403, 10601→402, 10602→404, 10603→404, 10402→409). */
+    /**
+     * issue #24 默认白名单 (4090→403, 10601→402, 10602→404, 10603→404, 10402→409);
+     * 首次扩员: 10612→403 自 issue #37 起入默认 (IP 白名单拒绝, 与 4090 同类 = Key 级安全拒绝)。
+     */
     public static Map<Integer, Integer> defaultPassthroughCodes() {
         Map<Integer, Integer> defaults = new LinkedHashMap<>();
         defaults.put(4090, 403);
@@ -79,6 +83,7 @@ public class ErrorContractProperties {
         defaults.put(10602, 404);
         defaults.put(10603, 404);
         defaults.put(10402, 409);
+        defaults.put(10612, 403);
         return defaults;
     }
 }

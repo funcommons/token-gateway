@@ -28,11 +28,13 @@ class BillingPendingRecordTest {
     @DisplayName("settle 型工厂: attempts 空表归一 null; withRetries 只动计数, 结算参数原样")
     void settleFactoryAndWithRetries() {
         BillingPendingRecord record = BillingPendingRecord.forSettle(
-                "pc-1", "req-1", 7L, 100, 20, 30, 5, 8L, null, 1234, attempts());
+                "pc-1", "req-1", 7L, 100, 20, 30, 5, 8L, null, 1234, attempts(),
+                SettleRequest.USAGE_SOURCE_ESTIMATED);
         assertThat(record.type()).isEqualTo("settle");
         assertThat(record.isRefund()).isFalse();
         assertThat(record.attempts()).hasSize(1);
         assertThat(record.retries()).isZero();
+        assertThat(record.usageSource()).isEqualTo(SettleRequest.USAGE_SOURCE_ESTIMATED);
 
         BillingPendingRecord next = record.withRetries(3);
         assertThat(next.retries()).isEqualTo(3);
@@ -47,9 +49,11 @@ class BillingPendingRecordTest {
         assertThat(next.audioTokens()).isNull();
         assertThat(next.responseTimeMs()).isEqualTo(1234);
         assertThat(next.attempts()).isSameAs(record.attempts());
+        // issue #35: usageSource 随重排保真 (只动计数, 不动真相位)
+        assertThat(next.usageSource()).isEqualTo(SettleRequest.USAGE_SOURCE_ESTIMATED);
 
         assertThat(BillingPendingRecord.forSettle(
-                "pc-1", "req-1", null, 1, 2, 3, 4, null, null, 0, List.of())
+                "pc-1", "req-1", null, 1, 2, 3, 4, null, null, 0, List.of(), null)
                 .attempts()).isNull();
     }
 
@@ -63,13 +67,15 @@ class BillingPendingRecordTest {
         assertThat(record.actualPromptTokens()).isNull();
         assertThat(record.attempts()).isNull();
         assertThat(record.ownerPartyId()).isNull();
+        assertThat(record.usageSource()).isNull();
     }
 
     @Test
-    @DisplayName("还原 settle 请求体: 与原始入队参数逐字段一致 (幂等锚 preConsumeId 不变)")
+    @DisplayName("还原 settle 请求体: 与原始入队参数逐字段一致 (幂等锚 preConsumeId 不变, issue #35 扩 usageSource)")
     void toSettleRequestRebuildsOriginalParams() {
         BillingPendingRecord record = BillingPendingRecord.forSettle(
-                "pc-1", "req-1", 7L, 100, 20, 30, 5, 8L, 9L, 1234, attempts());
+                "pc-1", "req-1", 7L, 100, 20, 30, 5, 8L, 9L, 1234, attempts(),
+                SettleRequest.USAGE_SOURCE_UPSTREAM);
         SettleRequest request = record.toSettleRequest();
         assertThat(request.getPreConsumeId()).isEqualTo("pc-1");
         assertThat(request.getRequestId()).isEqualTo("req-1");
@@ -80,6 +86,7 @@ class BillingPendingRecordTest {
         assertThat(request.getCacheCreationTokens()).isEqualTo(5);
         assertThat(request.getReasoningTokens()).isEqualTo(8L);
         assertThat(request.getAudioTokens()).isEqualTo(9L);
+        assertThat(request.getUsageSource()).isEqualTo(SettleRequest.USAGE_SOURCE_UPSTREAM);
         assertThat(request.isSuccess()).isTrue();
         assertThat(request.getResponseTimeMs()).isEqualTo(1234);
         assertThat(request.getAttempts()).hasSize(1);
@@ -92,22 +99,25 @@ class BillingPendingRecordTest {
         assertThat(detail.getPromptTokens()).isEqualTo(10);
         assertThat(detail.getCompletionTokens()).isZero();
 
-        // attempts 为 null (无明细语义) → 请求体同样不携带明细
+        // attempts 为 null (无明细语义) → 请求体同样不携带明细; usageSource null 缺省透传
         SettleRequest noAttempts = BillingPendingRecord.forSettle(
-                "pc-1", "req-1", null, 1, 2, 3, 4, null, null, 0, null).toSettleRequest();
+                "pc-1", "req-1", null, 1, 2, 3, 4, null, null, 0, null, null).toSettleRequest();
         assertThat(noAttempts.getAttempts()).isNotNull().isEmpty();
+        assertThat(noAttempts.getUsageSource()).isNull();
     }
 
     @Test
-    @DisplayName("JSON round-trip: record 序列化为单行 member, 反解析字段无损")
+    @DisplayName("JSON round-trip: record 序列化为单行 member, 反解析字段无损 (含 usageSource)")
     void jsonRoundTrip() {
         BillingPendingRecord record = BillingPendingRecord.forSettle(
-                "pc-1", "req-1", 7L, 100, 20, 30, 5, 8L, null, 1234, attempts()).withRetries(2);
+                "pc-1", "req-1", 7L, 100, 20, 30, 5, 8L, null, 1234, attempts(),
+                SettleRequest.USAGE_SOURCE_ESTIMATED).withRetries(2);
         String json = JSON.toJSONString(record);
         assertThat(json).doesNotContain("\n").doesNotContain("\r");
         assertThat(json).contains("\"preConsumeId\":\"pc-1\"");
 
         BillingPendingRecord parsed = JSON.parseObject(json, BillingPendingRecord.class);
+        assertThat(parsed.usageSource()).isEqualTo(SettleRequest.USAGE_SOURCE_ESTIMATED);
         assertThat(parsed).isEqualTo(record);
     }
 }

@@ -108,6 +108,15 @@ paths:
                 request_id:
                   type: string
                   description: 请求级幂等/分桶键
+                client_ip:
+                  type: string
+                  description: |
+                    调用方客户端 IP（issue #37，可选）。与 token-validate 的 client_ip 同源——
+                    同一次 ClientIpResolver 解析结果（`gateway.client-ip.{enabled,trusted-proxies}`，
+                    见安全契约「客户端 IP 解析」节）在 validate 跳与 resolve 跳双跳透传；
+                    后端不得自行从请求头解析客户端 IP。null = 旧语义（能力面 ip 白名单既有
+                    fail-closed 行为不变）；能力面 ip 白名单拒绝回 code=10612（网关默认透传
+                    白名单 10612→403，见用户文档 通用约定 §4.1）。
       responses:
         '200':
           description: 候选列表（按 priority 降序 failover；无候选 code=10400）
@@ -651,7 +660,8 @@ components:
           type: string
         prompt_tokens:
           type: integer
-          description: 实际 usage（缺失时为估算值，网关侧标记 estimated）
+          description: >-
+            实际 usage（缺失时为估算值，issue #35 起经 usage_source=ESTIMATED 标记）
         completion_tokens:
           type: integer
         cached_tokens:
@@ -660,7 +670,8 @@ components:
             OpenAI prompt_tokens_details.cached_tokens）；含于 prompt_tokens（Anthropic 口径）
         cache_creation_tokens:
           type: integer
-          description: 缓存写入 tokens（Anthropic cache_creation_input_tokens，issue #26
+          description: >-
+            缓存写入 tokens（Anthropic cache_creation_input_tokens，issue #26
             起独立成维不再并入 cached_tokens；含于 prompt_tokens）。旧字段，历史上恒 0，
             消费方按「缺省 0 = 未上报」兼容
         reasoning_tokens:
@@ -675,6 +686,16 @@ components:
             留痕维，不参与计价；null = 上游未回报，不造数）
         latency_ms:
           type: integer
+        usage_source:
+          type: string
+          enum: [UPSTREAM, ESTIMATED]
+          nullable: true
+          description: |
+            usage 来源（issue #35，可选）：UPSTREAM = 上游实测 usage；ESTIMATED = 网关内容估算
+            （#33 chars/4 口径）。取值对齐能力面 schema `usage_call_log.usage_source
+            CHECK IN ('UPSTREAM','ESTIMATED')`；缺省 null = 旧语义（不上报来源）。
+            网关赋值口径：LLM 流式无 usage → ESTIMATED；流式有 usage 与非流式 → UPSTREAM；
+            任务面 → null。#23 重放保真携带（重放沿用首响原值）。
 
     AccessLogEntry:
       type: object
@@ -703,15 +724,18 @@ components:
         reasoning_tokens:
           type: integer
           nullable: true
-          description: 推理 tokens 留痕（issue #26；不参与计价；null = 无源数据）
+          description: >-
+            推理 tokens 留痕（issue #26；不参与计价；null = 无源数据）
         audio_tokens:
           type: integer
           nullable: true
-          description: 音频 tokens 留痕（issue #26，两侧求和口径；null = 无源数据）
+          description: >-
+            音频 tokens 留痕（issue #26，两侧求和口径；null = 无源数据）
         cache_creation_tokens:
           type: integer
           nullable: true
-          description: 缓存写入 tokens 留痕（issue #26，与 cached_tokens 分离；
+          description: >-
+            缓存写入 tokens 留痕（issue #26，与 cached_tokens 分离；
             null = 无源数据）
         credit:
           type: string
@@ -721,6 +745,14 @@ components:
         status:
           type: string
           description: SUCCESS / FAILED / BLOCKED 等
+        usage_source:
+          type: string
+          enum: [UPSTREAM, ESTIMATED]
+          nullable: true
+          description: |
+            usage 来源（issue #35，可选；枚举取值 / null 语义 / 网关赋值口径同
+            SettleRequest.usage_source，对齐 `usage_call_log.usage_source` CHECK 约束；
+            MQ 通道消息体与 AccessLogEntry 同构，同样携带）
 
     AuditEvent:
       type: object
@@ -751,7 +783,8 @@ components:
 
     RecordFailureRequest:
       type: object
-      description: 渠道失败上报请求体（Mmagix 形态，字段 camelCase 与网关 Java 契约一致）；
+      description: >-
+        渠道失败上报请求体（Mmagix 形态，字段 camelCase 与网关 Java 契约一致）；
         5 个基础字段为既有契约，upstreamStatus/latencyMs 为 issue #25 可选新增（向后兼容）
       required: [errorCode]
       properties:

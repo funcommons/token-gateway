@@ -127,10 +127,13 @@ public class MessagesController {
                                 int latency = elapsedMs(startNs);
                                 settled.set(true);
                                 // issue #26: settle/access-log 携带 reasoning/audio/cacheCreation 细分留痕
-                                orchestrator.settle(current, u, latency, lossAttempts)
+                                // issue #35: 非流式 usage 取自上游响应体 (extractor 实测) → UPSTREAM
+                                orchestrator.settle(current, u, latency, lossAttempts,
+                                                SettleRequest.USAGE_SOURCE_UPSTREAM)
                                         .flatMap(credit -> accessLogReporter.reportSuccess(
                                                 current, model, REQUEST_PATH, u,
-                                                credit, latency, traceId))
+                                                credit, latency, traceId,
+                                                SettleRequest.USAGE_SOURCE_UPSTREAM))
                                         .subscribe(
                                                 v -> {},
                                                 e -> log.warn("[Saga/settle+AccessLog] preConsumeId={}, err={}",
@@ -383,13 +386,16 @@ public class MessagesController {
                     int latency = elapsedMs(startNs);
                     RelayOrchestrator.PreparedRequest current = active.get();
                     fun.commons.tokengateway.relay.StreamUsageAccumulator usageAcc = activeAcc.get();
+                    // issue #35 真相位: 分支点即真相 — 有 usage 帧 = 上游实测, 无 = #33 估算兜底
+                    String usageSource = usageAcc.hasUsage()
+                            ? SettleRequest.USAGE_SOURCE_UPSTREAM : SettleRequest.USAGE_SOURCE_ESTIMATED;
                     fun.commons.tokengateway.relay.TokenUsage u = usageAcc.hasUsage()
                             ? usageAcc.result()
                             : estimateFallback(body, usageAcc.emittedChars());
                     // issue #26: settle/access-log 携带 reasoning/audio/cacheCreation 细分留痕
-                    orchestrator.settle(current, u, latency, lossAttempts)
+                    orchestrator.settle(current, u, latency, lossAttempts, usageSource)
                             .flatMap(credit -> accessLogReporter.reportSuccess(current, model, REQUEST_PATH,
-                                    u, credit, latency, traceId))
+                                    u, credit, latency, traceId, usageSource))
                             .subscribe(
                                     v -> {},
                                     e -> log.warn("[Saga/settle+AccessLog] preConsumeId={}, err={}",

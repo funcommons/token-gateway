@@ -5,7 +5,7 @@
 | Document | OpenAI-protocol task face caller guide (async image generation background mode / async video sora job mode) |
 | Prerequisites | [Product Overview](./overview.md) · [Quickstart](./quickstart.md) · [Conventions](./conventions.md) (auth / error codes / rate limit / idempotency) |
 | Companion | Gateway-native protocol over the same engine: [OneToken Task Face Guide](./task-guide.md); LLM face: [LLM Face Guide](./llm-guide.md) |
-| Version | V1.0 (2026-09-14, issue #19) |
+| Version | V1.1 (2026-09-21, sora `seconds`→`duration` pricing alias and known limitations, issue #36); V1.0 (2026-09-14, issue #19) |
 
 ---
 
@@ -54,11 +54,18 @@ curl -sL http://localhost:9401/v1/videos/T20260914.../content -H "Authorization:
 | Parameter | Type | Required | Notes |
 |---|---|---|---|
 | `model` / `prompt` | string | yes | Model name (route pricing key) / prompt |
-| `seconds` | string | no | Duration (passed through, e.g. `"4"`, `"8"`) |
+| `seconds` | string | no | Duration (passed through, e.g. `"4"`, `"8"`; pricing-dimension mapping below) |
 | `size` | string | no | Resolution (e.g. `"1280x720"`) |
 | `notify_url` | string | no | Gateway extension: terminal callback (same signed-notify semantics as the OneToken protocol) |
 
 Status mapping: `queued` (PENDING) → `in_progress` (RUNNING) → `completed` / `failed` (FAILED and EXPIRED collapse into failed with `error`; EXPIRED has been fully refunded).
+
+**Pricing dimensions (sora shape, issue #36)**:
+
+- `seconds` is alias-mapped into the pricing dimension `params.duration` for route pricing; an explicit `duration` takes precedence (`seconds` only fills in when `duration` is absent), and the `seconds` key itself never enters the pricing channel. The execution payload is unchanged — the Worker still receives `seconds` verbatim.
+- Known limitation: `size` (e.g. `1280x720`) is **not mapped** — it never enters composite `ratio|resolution` tiers; sora-shape pricing only applies to the duration dimension or wildcard / flat-rate configurations.
+- With no duration at all (neither `seconds` nor an explicit `duration`), a PER_SECOND configuration is rejected explicitly: capability-face 10608 → HTTP 500 `pricing_unavailable`.
+- The token-route branch (`adapter=tokengo/openapi`) does not push dims pricing parameters yet.
 
 ## 4. Async Image Generation (background mode)
 

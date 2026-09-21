@@ -34,4 +34,12 @@ public class DistributeRequest {
      * chat 路径不传, 行为不变.
      */
     private java.util.Map<String, Object> params;
+
+    /**
+     * 调用方客户端 IP (issue #37, 可选): 与 token-validate 的 clientIp 同构 (#27),
+     * 由 controller 层经 ClientIpResolver 解析后沿 prepare/create 透传, 供能力面
+     * 分发侧 IP 白名单/风控 (拒绝时回 10612, 网关默认白名单透传为 403).
+     * null = 旧语义 (字段缺席), 能力面 fail-closed 行为不变.
+     */
+    private String clientIp;
 }

@@ -107,6 +107,7 @@ When LLM-face routing (distribute) or pre-deduction (preConsume) fails, if the c
 | 10602 | 404 | Model not found (capability-face semantics) |
 | 10603 | 404 | — |
 | 10402 | 409 | State conflict |
+| 10612 | 403 | IP whitelist rejection (capability-face semantics; clientIp check on the resolve hop) |
 
 - **Whitelist first**: a hit short-circuits and returns immediately; the legacy mapping is skipped.
 - **No hit** falls through to the legacy mapping: 10400·20103→404 / 10617→402 / everything else 502+10004.

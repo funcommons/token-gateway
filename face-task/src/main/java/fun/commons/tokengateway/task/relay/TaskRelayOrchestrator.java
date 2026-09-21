@@ -127,7 +127,7 @@ public class TaskRelayOrchestrator {
                         return Mono.error(new RelayException(401, "invalid token"));
                     }
                     TokenValidateVO token = tokenResp.getData();
-                    return resolveRoute(token, model, idemKey, body)
+                    return resolveRoute(token, model, idemKey, body, clientIp)
                             .flatMap(channel -> submitWithSaga(modality, token, channel,
                                     model, body,
                                     idemKey != null && idemKey.matches("\\d+") ? idemKey : requestId,
@@ -139,9 +139,11 @@ public class TaskRelayOrchestrator {
      * 控制层 route resolve: 模型不同价不同, 先定价再预扣; 10400/20103 语义透传 (同 LLM 面).
      * <p>G5: adapter=tokengo|openapi 时走 token-route resolve (data_json 契约字段映射),
      * 路由快照随 submit 载荷下发 Worker 的链路不变.
+     * <p>口径备注 (issue #36/#37): adapter=tokengo/openapi 分支暂不下发 dims 计价参数
+     * 与 clientIp (token-route resolve 契约无对应槽位); 仅 Mmagix distribute 分支携带.
      */
     private Mono<DistributeVO> resolveRoute(TokenValidateVO token, String model, String idempotencyKey,
-                                            Map<String, Object> body) {
+                                            Map<String, Object> body, String clientIp) {
         Map<String, Object> priceParams = extractPriceParams(body);
         if (adapterSelector.routeViaTokenRoute()) {
             return tokenRouteClient.resolve(model, null, 0, 0, null);
@@ -153,6 +155,7 @@ public class TaskRelayOrchestrator {
                         .groupId(token.getGroupId())
                         .model(model)
                         .params(priceParams)
+                        .clientIp(clientIp)
                         .idempotencyKey(idempotencyKey).build())
                 .flatMap(distResp -> {
                     if (distResp == null || !distResp.isSuccess() || distResp.getData() == null) {
@@ -177,6 +180,11 @@ public class TaskRelayOrchestrator {
      * <p>缺陷修复 (2026-09-17 计费合规): 原先只读顶层, OneToken 请求 dims 全丢 →
      * 协议面 readModelPriceQuote 静默兜底 1:1|1K 底档, 复合档模型 (IMAGE_BY_SIZE)
      * 一律按最低档少收 (2K -47% / 4K -87%)。
+     * <p>seconds→duration 计价别名 (issue #36): out 无显式 duration 且 (body 顶层或
+     * body.params 内) 有非 null seconds 时, duration 取 seconds 原值 (String "5" 原样
+     * 透传, 不做类型归一, 由能力面解析); 显式 duration 优先, seconds 键本身不进 out
+     * (计价通道只认 PRICE_DIM_KEYS 四键)。sora 形状 (createVideoJob) 的 seconds 经
+     * 此别名落入 duration 计价维。
      */
     static Map<String, Object> extractPriceParams(Map<String, Object> body) {
         Map<String, Object> out = new LinkedHashMap<>();
@@ -196,6 +204,16 @@ public class TaskRelayOrchestrator {
             Object v = body.get(k);
             if (v != null) {
                 out.put(k, v);
+            }
+        }
+        // issue #36: seconds→duration 别名 (显式 duration 优先; seconds 键不进 out)
+        if (!out.containsKey("duration")) {
+            Object seconds = body.get("seconds");
+            if (seconds == null && params instanceof Map<?, ?> p) {
+                seconds = p.get("seconds");
+            }
+            if (seconds != null) {
+                out.put("duration", seconds);
             }
         }
         return out;

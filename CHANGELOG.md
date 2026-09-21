@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **resolve 跳 clientIp 补位（issue #37，#27 同构）**：`DistributeRequest` 增可选 `clientIp`——validate 跳（#27）与 resolve 跳透传同一次 ClientIpResolver 解析结果，能力面 ip 白名单 Key 不再因 resolve 跳 clientIp=null 被 fail-closed 恒拒（10612）。三处接线：prepare 直达 / failover 重分发经 PreparedRequest 第 9 分量驻留 / 任务面 create→resolveRoute；null=旧语义零影响。**默认 error-passthrough 白名单首次扩员**：`10612→403`（ip 白名单拒绝，与 4090 同类 Key 级安全拒绝；此前恒拒映射 502+10004 会被误当可重试故障）——本版本唯一默认行为变化
+- **settle/access-log usageSource 真相位（issue #35，#33 收尾）**：`SettleRequest`/`AccessLogRequest` 增可选 `usageSource`（`UPSTREAM`=上游实测 / `ESTIMATED`=网关内容估算，取值对齐能力面 schema `usage_call_log.usage_source` CHECK 约束；缺省 null=旧语义）——估算 settle 与实测 settle 在能力面账上从此可区分，风控日批可筛除启发式数字。LLM 流式分支点赋值（hasUsage?UPSTREAM:ESTIMATED 双侧）、非流式 UPSTREAM、任务面 null（amount 直传无估算概念）；#23 重放保真扩展一位（BillingPendingRecord 携带）。Embeddings/Images 两端点暂走旧签名=null（合法，后续按需接新重载）
+
+### 修复
+
+- **sora 形状计价 dims 断层（issue #36，资损口）**：`POST /v1/videos` 的 `seconds` 此前不入计价维白名单 → PER_SECOND 构型显式拒绝不可用、带 duration 复合档静默底档少收。`extractPriceParams` 增 `seconds→duration` 别名（显式 duration 优先，顶层/params 内嵌均识别，值原样透传，seconds 键不进计价通道，执行载荷不变）；OneToken 四键通道零变化回归。已知限制（文档明示）：sora `size` 不映射 ratio|resolution 复合档（sora 计价仅适用 duration 维或全通配/平价构型）；token-route 分支暂不下发 dims
+- **契约 yaml 隐性截断**：03_能力面接口契约.yaml 多条 plain-scalar 描述含 ` #2x` 被 YAML 当注释截断（cache_creation_tokens 条甚至破坏多行标量），转块标量修复，PyYAML 实测可解析
+
 ## [0.14.0] - 2026-09-21
 
 ### 修复

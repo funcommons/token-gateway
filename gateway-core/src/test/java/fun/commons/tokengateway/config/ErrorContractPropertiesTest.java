@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ErrorContractPropertiesTest {
 
     @Test
-    @DisplayName("默认: envelope 形状 (现契约, 默认关是硬约束) + 默认白名单五条")
+    @DisplayName("默认: envelope 形状 (现契约, 默认关是硬约束) + 默认白名单六条 (10612 自 issue #37 起入默认)")
     void defaults() {
         var props = new ErrorContractProperties();
         assertThat(props.getErrorShape()).isEqualTo(ErrorShape.ENVELOPE);
@@ -27,7 +27,8 @@ class ErrorContractPropertiesTest {
                 .containsEntry(10602, 404)
                 .containsEntry(10603, 404)
                 .containsEntry(10402, 409)
-                .hasSize(5);
+                .containsEntry(10612, 403)
+                .hasSize(6);
     }
 
     @Test
@@ -47,6 +48,7 @@ class ErrorContractPropertiesTest {
         assertThat(props.passthroughStatusOf(10602)).isEqualTo(404);
         assertThat(props.passthroughStatusOf(10603)).isEqualTo(404);
         assertThat(props.passthroughStatusOf(10402)).isEqualTo(409);
+        assertThat(props.passthroughStatusOf(10612)).isEqualTo(403);
         assertThat(props.passthroughStatusOf(9999)).isNull();
         assertThat(props.passthroughStatusOf(20199)).isNull();
         assertThat(props.passthroughStatusOf(null)).isNull();
@@ -84,6 +86,7 @@ class ErrorContractPropertiesTest {
         assertThat(props.passthroughStatusOf(10602)).isEqualTo(404);
         assertThat(props.passthroughStatusOf(10603)).isEqualTo(404);
         assertThat(props.passthroughStatusOf(10402)).isEqualTo(409);
-        assertThat(props.getErrorPassthroughCodes()).hasSize(6);
+        assertThat(props.passthroughStatusOf(10612)).isEqualTo(403);
+        assertThat(props.getErrorPassthroughCodes()).hasSize(7);
     }
 }

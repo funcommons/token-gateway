@@ -474,6 +474,136 @@ class TaskRelayOrchestratorTest {
                 TaskRelayOrchestrator.extractPriceParams(null)).isEmpty();
     }
 
+    // ---------- issue #36: sora 形状 seconds→duration 计价别名 ----------
+
+    @Test
+    @DisplayName("issue #36: 顶层 seconds=\"5\" → duration=\"5\" 别名 (原样透传), seconds 键不进 out")
+    void extractPriceParamsTopLevelSecondsAliasesDuration() {
+        Map<String, Object> out = TaskRelayOrchestrator.extractPriceParams(
+                Map.of("model", "sora-2", "seconds", "5", "size", "1280x720"));
+        org.assertj.core.api.Assertions.assertThat(out)
+                .containsEntry("duration", "5")
+                .containsEntry("size", "1280x720")
+                .doesNotContainKey("seconds")
+                .hasSize(2);
+    }
+
+    @Test
+    @DisplayName("issue #36: params 内嵌 seconds (OneToken/sora-job 形状) → duration 别名同效")
+    void extractPriceParamsNestedSecondsAliasesDuration() {
+        Map<String, Object> out = TaskRelayOrchestrator.extractPriceParams(
+                Map.of("model", "sora-2",
+                        "params", Map.of("prompt", "猫滑滑板", "seconds", "8", "size", "1280x720")));
+        org.assertj.core.api.Assertions.assertThat(out)
+                .containsEntry("duration", "8")
+                .containsEntry("size", "1280x720")
+                .doesNotContainKey("seconds")
+                .hasSize(2);
+    }
+
+    @Test
+    @DisplayName("issue #36: 显式 duration + seconds 并存 → duration 赢 (别名不覆盖显式值)")
+    void extractPriceParamsExplicitDurationWinsOverSeconds() {
+        Map<String, Object> topLevel = TaskRelayOrchestrator.extractPriceParams(
+                Map.of("duration", "10", "seconds", "5"));
+        org.assertj.core.api.Assertions.assertThat(topLevel)
+                .containsEntry("duration", "10")
+                .doesNotContainKey("seconds")
+                .hasSize(1);
+        Map<String, Object> nested = TaskRelayOrchestrator.extractPriceParams(
+                Map.of("params", Map.of("duration", 12, "seconds", 5)));
+        org.assertj.core.api.Assertions.assertThat(nested)
+                .containsEntry("duration", 12)
+                .doesNotContainKey("seconds")
+                .hasSize(1);
+    }
+
+    @Test
+    @DisplayName("issue #36 回归: OneToken params 四键逐字节不变 (无 seconds 时别名单纯空转)")
+    void extractPriceParamsOneTokenFourKeysUnchanged() {
+        Map<String, Object> out = TaskRelayOrchestrator.extractPriceParams(
+                Map.of("params", Map.of("size", "1024x1024", "ratio", "1:1",
+                        "resolution", "4k", "duration", 5,
+                        "referenceImageUrls", java.util.List.of("https://r/1.png"))));
+        org.assertj.core.api.Assertions.assertThat(out)
+                .containsExactlyInAnyOrderEntriesOf(Map.of(
+                        "size", "1024x1024", "ratio", "1:1", "resolution", "4k", "duration", 5));
+    }
+
+    @Test
+    @DisplayName("issue #36 端到端: sora createVideoJob seconds=\"5\" → distribute 请求体 params.duration=\"5\"")
+    void createVideoJobSecondsFlowsToDistributeDuration() throws InterruptedException {
+        enqueueHappyControlPlane(backend);
+        when(lotaskClient.submit(eq("video"), anyString(), any(), anyString()))
+                .thenReturn(Mono.just("vJob36"));
+        when(mappingStore.put(anyString(), eq("vJob36"), any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(orchestrator.createVideoJob("sk-caller",
+                        Map.of("model", "sora-2", "prompt", "猫滑滑板", "seconds", "5",
+                                "size", "1280x720"), "trace-36", null, null))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        backend.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS); // validate
+        okhttp3.mockwebserver.RecordedRequest dist =
+                backend.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS);
+        org.assertj.core.api.Assertions.assertThat(dist).isNotNull();
+        com.alibaba.fastjson2.JSONObject body =
+                com.alibaba.fastjson2.JSON.parseObject(dist.getBody().readUtf8());
+        com.alibaba.fastjson2.JSONObject params = body.getJSONObject("params");
+        org.assertj.core.api.Assertions.assertThat(params).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(params.getString("duration")).isEqualTo("5");
+        org.assertj.core.api.Assertions.assertThat(params.getString("size")).isEqualTo("1280x720");
+        org.assertj.core.api.Assertions.assertThat(params.containsKey("seconds")).isFalse();
+    }
+
+    // ---------- issue #37: distribute 携带 clientIp ----------
+
+    @Test
+    @DisplayName("clientIp 透传 (issue #37): create → distribute 请求体携带 clientIp")
+    void createPassesClientIpToDistribute() throws InterruptedException {
+        enqueueHappyControlPlane(backend);
+        when(lotaskClient.submit(eq("video"), anyString(), any(), anyString()))
+                .thenReturn(Mono.just("YeirYkxHuQ"));
+        when(mappingStore.put(anyString(), eq("YeirYkxHuQ"), any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(orchestrator.create("video", "sk-caller",
+                        Map.of("model", "kling-v1", "params", Map.of("seconds", 5)), "trace-1",
+                        null, "9.9.9.9"))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        backend.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS); // validate
+        okhttp3.mockwebserver.RecordedRequest dist =
+                backend.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS);
+        org.assertj.core.api.Assertions.assertThat(dist).isNotNull();
+        com.alibaba.fastjson2.JSONObject body =
+                com.alibaba.fastjson2.JSON.parseObject(dist.getBody().readUtf8());
+        org.assertj.core.api.Assertions.assertThat(body.getString("clientIp")).isEqualTo("9.9.9.9");
+    }
+
+    @Test
+    @DisplayName("clientIp 缺省 (issue #37): create 不带 clientIp → distribute 请求体 clientIp 为 null/缺席, 序列化不炸")
+    void createWithoutClientIpDistributeBodySafe() throws InterruptedException {
+        enqueueHappyControlPlane(backend);
+        when(lotaskClient.submit(eq("video"), anyString(), any(), anyString()))
+                .thenReturn(Mono.just("YeirYkxHuQ"));
+        when(mappingStore.put(anyString(), eq("YeirYkxHuQ"), any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(orchestrator.create("video", "sk-caller",
+                        Map.of("model", "kling-v1"), "trace-1"))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        backend.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS); // validate
+        okhttp3.mockwebserver.RecordedRequest dist =
+                backend.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS);
+        org.assertj.core.api.Assertions.assertThat(dist).isNotNull();
+        com.alibaba.fastjson2.JSONObject body =
+                com.alibaba.fastjson2.JSON.parseObject(dist.getBody().readUtf8());
+        org.assertj.core.api.Assertions.assertThat(body.get("clientIp")).isNull();
+    }
+
     @Test
     @DisplayName("余额不足 → 402 + 10617, 不产生任务 (lotask submit 不调用)")
     void createInsufficientBalance() {        backend.enqueue(json("{\"code\":0,\"data\":{\"valid\":true,\"tokenId\":\"t1\","

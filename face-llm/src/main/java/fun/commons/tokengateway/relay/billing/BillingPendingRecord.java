@@ -30,6 +30,8 @@ public record BillingPendingRecord(
         Integer cacheCreationTokens,
         Long reasoningTokens,
         Long audioTokens,
+        /** usage 真相位 (settle 型, issue #35; null = 旧版本语义; refund 型恒 null). */
+        String usageSource,
         /** 端到端时延 ms (settle 语义, 原样重放). */
         Integer responseTimeMs,
         /** 失败尝试明细 (settle, G4 路由损耗留痕; 空/null = 无明细语义). */
@@ -42,18 +44,20 @@ public record BillingPendingRecord(
     public static final String TYPE_SETTLE = "settle";
     public static final String TYPE_REFUND = "refund";
 
-    /** settle 型快照 (attempts 空表归一为 null, 与 settleFull 的「空不携带」语义一致). */
+    /** settle 型快照 (attempts 空表归一为 null, 与 settleFull 的「空不携带」语义一致;
+     *  usageSource 原样快照, 重放请求体逐字段一致红线扩展一位 — issue #35). */
     public static BillingPendingRecord forSettle(String preConsumeId, String requestId,
                                                  Long ownerPartyId,
                                                  int actualPromptTokens, int actualCompletionTokens,
                                                  int cacheReadTokens, int cacheCreationTokens,
                                                  Long reasoningTokens, Long audioTokens,
                                                  int responseTimeMs,
-                                                 List<SettleRequest.AttemptDetail> attempts) {
+                                                 List<SettleRequest.AttemptDetail> attempts,
+                                                 String usageSource) {
         boolean hasAttempts = attempts != null && !attempts.isEmpty();
         return new BillingPendingRecord(TYPE_SETTLE, preConsumeId, requestId, ownerPartyId,
                 actualPromptTokens, actualCompletionTokens, cacheReadTokens, cacheCreationTokens,
-                reasoningTokens, audioTokens, responseTimeMs,
+                reasoningTokens, audioTokens, usageSource, responseTimeMs,
                 hasAttempts ? attempts : null, null, 0);
     }
 
@@ -61,7 +65,7 @@ public record BillingPendingRecord(
     public static BillingPendingRecord forRefund(String preConsumeId, String requestId,
                                                  String reason) {
         return new BillingPendingRecord(TYPE_REFUND, preConsumeId, requestId, null,
-                null, null, null, null, null, null, null, null, reason, 0);
+                null, null, null, null, null, null, null, null, null, reason, 0);
     }
 
     public boolean isRefund() {
@@ -72,7 +76,8 @@ public record BillingPendingRecord(
     public BillingPendingRecord withRetries(int nextRetries) {
         return new BillingPendingRecord(type, preConsumeId, requestId, ownerPartyId,
                 actualPromptTokens, actualCompletionTokens, cacheReadTokens, cacheCreationTokens,
-                reasoningTokens, audioTokens, responseTimeMs, attempts, refundReason, nextRetries);
+                reasoningTokens, audioTokens, usageSource, responseTimeMs, attempts, refundReason,
+                nextRetries);
     }
 
     /** 还原 settle 请求体 (与入队前的原始 SettleRequest 逐字段一致; attempts 空不携带). */
@@ -85,6 +90,7 @@ public record BillingPendingRecord(
                 .cacheCreationTokens(cacheCreationTokens == null ? 0 : cacheCreationTokens)
                 .reasoningTokens(reasoningTokens)
                 .audioTokens(audioTokens)
+                .usageSource(usageSource)
                 .success(true)
                 .requestId(requestId)
                 .ownerPartyId(ownerPartyId)

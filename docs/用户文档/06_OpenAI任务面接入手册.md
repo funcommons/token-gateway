@@ -5,7 +5,7 @@
 | 文档 | OpenAI 协议任务面调用方手册（异步生图 background 模式 / 异步生视频 sora job 模式） |
 | 前置阅读 | [产品简介](./01_产品简介.md) · [快速开始](./02_快速开始.md) · [通用约定](./03_通用约定.md)（认证/错误码/限流/幂等） |
 | 配套 | 同引擎的网关原生协议见 [OneToken 任务面接入手册](./05_任务面接入手册.md)；LLM 面见[LLM 面接入手册](./04_LLM面接入手册.md) |
-| 版本 | V1.0（2026-09-14，issue #19） |
+| 版本 | V1.1（2026-09-21，sora `seconds`→`duration` 计价别名与已知限制，issue #36）；V1.0（2026-09-14，issue #19） |
 
 ---
 
@@ -54,11 +54,18 @@ curl -sL http://localhost:9401/v1/videos/T20260914.../content -H "Authorization:
 | 请求参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `model` / `prompt` | string | 是 | 模型名（路由定价依据）/ 提示词 |
-| `seconds` | string | 否 | 时长（透传上游，如 `"4"` `"8"`） |
+| `seconds` | string | 否 | 时长（透传上游，如 `"4"` `"8"`；计价维映射见下） |
 | `size` | string | 否 | 分辨率（如 `"1280x720"`） |
 | `notify_url` | string | 否 | 网关扩展：终态回调（OneToken 协议同款验签退避语义） |
 
 状态映射：`queued`（PENDING）→ `in_progress`（RUNNING）→ `completed` / `failed`（FAILED 与 EXPIRED 并入，`error` 携带上游/超时信息；EXPIRED 已自动全额退款）。
+
+**计价维度（sora 形状，issue #36）**：
+
+- `seconds` 经别名映射进计价维 `params.duration` 参与路由定价；显式 `duration` 优先（`seconds` 仅在缺 `duration` 时补位），`seconds` 键本身不进计价通道。执行载荷不变——Worker 收到的仍是原样 `seconds`。
+- 已知限制：`size`（如 `1280x720`）**不做映射**——不进入复合档 `ratio|resolution` 段；sora 形状计价仅适用 duration 维或全通配/平价构型。
+- 缺 duration（`seconds` 与显式 `duration` 均缺）时 PER_SECOND 构型显式拒绝：能力面 10608 → HTTP 500 `pricing_unavailable`。
+- token-route 分支（`adapter=tokengo/openapi`）暂不下发 dims 计价参数。
 
 ## 4. 异步生图（background 模式）
 

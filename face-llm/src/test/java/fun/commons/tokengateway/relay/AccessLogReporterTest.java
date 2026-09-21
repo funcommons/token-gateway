@@ -135,6 +135,27 @@ class AccessLogReporterTest {
         assertThat(body).contains("\"reasoningTokens\":null");
         assertThat(body).contains("\"audioTokens\":null");
         assertThat(body).contains("\"cacheCreationTokens\":null");
+        // issue #35: 旧签名 usageSource 缺省 null (与既有可选字段同款 null 序列化, 不造语义)
+        assertThat(body).contains("\"usageSource\":null");
+    }
+
+    @Test
+    @DisplayName("issue #35: reportSuccess(TokenUsage, usageSource) 请求体携带真相位")
+    void reportSuccessCarriesUsageSource() throws Exception {
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":null}"));
+
+        StepVerifier.create(reporter.reportSuccess(prepared, "gpt-4o",
+                        "/v1/chat/completions",
+                        new TokenUsage(36, 16, 5, 9L, 8L, 64L),
+                        java.math.BigDecimal.valueOf(7.5), 250, "trace-35",
+                        fun.commons.tokengateway.contract.SettleRequest.USAGE_SOURCE_ESTIMATED))
+                .verifyComplete();
+
+        String body = backend.takeRequest().getBody().readUtf8();
+        assertThat(body).contains("\"usageSource\":\"ESTIMATED\"");
+        assertThat(body).contains("\"promptTokens\":36");
     }
 
     @Test

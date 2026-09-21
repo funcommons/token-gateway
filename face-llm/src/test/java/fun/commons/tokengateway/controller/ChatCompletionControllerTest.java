@@ -431,13 +431,16 @@ class ChatCompletionControllerTest {
         assertThat(upstreamReq).contains("\"include_usage\":true");
 
         String settleBody = null;
-        for (int i = 0; i < 6 && settleBody == null; i++) {
+        String accessLogBody = null;
+        for (int i = 0; i < 6 && (settleBody == null || accessLogBody == null); i++) {
             var recorded = backendServer.takeRequest(3, java.util.concurrent.TimeUnit.SECONDS);
             if (recorded == null) {
                 break;
             }
             if (recorded.getPath().contains("/billing/settle")) {
                 settleBody = recorded.getBody().readUtf8();
+            } else if (recorded.getPath().contains("/access-log/record")) {
+                accessLogBody = recorded.getBody().readUtf8();
             }
         }
         assertThat(settleBody).isNotNull();
@@ -449,6 +452,10 @@ class ChatCompletionControllerTest {
         assertThat(settleBody).contains("\"cacheReadTokens\":4");
         assertThat(settleBody).contains("\"reasoningTokens\":3");
         assertThat(settleBody).contains("\"audioTokens\":8");
+        // issue #35: 流式有 usage 帧 = 上游实测, settle 与 access-log 双侧 UPSTREAM
+        assertThat(settleBody).contains("\"usageSource\":\"UPSTREAM\"");
+        assertThat(accessLogBody).as("access-log body").isNotNull();
+        assertThat(accessLogBody).contains("\"usageSource\":\"UPSTREAM\"");
     }
 
     @Test
@@ -501,13 +508,16 @@ class ChatCompletionControllerTest {
         assertThat(events).isNotNull();
 
         String settleBody = null;
-        for (int i = 0; i < 6 && settleBody == null; i++) {
+        String accessLogBody = null;
+        for (int i = 0; i < 6 && (settleBody == null || accessLogBody == null); i++) {
             var recorded = backendServer.takeRequest(3, java.util.concurrent.TimeUnit.SECONDS);
             if (recorded == null) {
                 break;
             }
             if (recorded.getPath().contains("/billing/settle")) {
                 settleBody = recorded.getBody().readUtf8();
+            } else if (recorded.getPath().contains("/access-log/record")) {
+                accessLogBody = recorded.getBody().readUtf8();
             }
         }
         assertThat(settleBody).isNotNull();
@@ -515,6 +525,10 @@ class ChatCompletionControllerTest {
         assertThat(settleBody).contains("\"actualPromptTokens\":1");
         assertThat(settleBody).contains("\"actualCompletionTokens\":3");
         assertThat(settleBody).doesNotContain("\"actualCompletionTokens\":256");
+        // issue #35: 流式无 usage 帧 = #33 估算兜底, settle 与 access-log 双侧 ESTIMATED
+        assertThat(settleBody).contains("\"usageSource\":\"ESTIMATED\"");
+        assertThat(accessLogBody).as("access-log body").isNotNull();
+        assertThat(accessLogBody).contains("\"usageSource\":\"ESTIMATED\"");
     }
 
     @Test

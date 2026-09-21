@@ -82,7 +82,7 @@ On verification failure return HTTP 401 + envelope (code=10300); the gateway tre
 
 ### 4.2 route — `POST /gw/v1/route/resolve`
 
-- In: `{model, tenant_id, request_id}`.
+- In: `{model, tenant_id, request_id, client_ip?}` (`client_ip` is the same value as on token-validate — a single ClientIpResolver resolution passed through on both the validate and resolve hops, issue #37; never parse it from headers on your side, see the security contract §9. IP-whitelist rejections return 10612, which the gateway passes through as 403 by default).
 - Out: `data: {candidates: [...]}`; each candidate `{base_url, credential, credential_type, protocol, model_mapping, priority}`; the gateway fails over by priority.
 - **Return the upstream outbound credential desensitized** (if plaintext pass-through is acceptable, mark `credential_type: plain` and let the gateway decide whether to mask it in logs); empty `model_mapping` = pass the same model name straight through.
 - No available channel → envelope 10400.
@@ -110,6 +110,7 @@ Gateway-side fallback (issue #23): settle/refund **infrastructure failures** (RP
 - **rpc**: `POST /gw/v1/access-log/record`; the gateway pushes asynchronously in batches (does not block the main path; failures are quiet + alerted).
 - **mq**: see §5; you act as the consumer.
 - Core fields of a log entry: `trace_id, tenant_id, user_id, model, path, prompt_tokens, completion_tokens, cached_tokens, credit, latency_ms, status, ts`.
+- Usage source (issue #35, optional addition): `usage_source` ∈ `UPSTREAM` (measured by the upstream) / `ESTIMATED` (gateway content estimate, chars/4 semantics); absent = `null`, the legacy semantics. Values align with the `usage_call_log.usage_source` CHECK constraint, and MQ-channel messages carry it structurally. The settle request has a same-named, same-semantics field.
 - Breakdown retention dimensions (issue #26, optional additions; not priced; `null` = no source data; legacy consumers can simply ignore unknown fields): `reasoning_tokens` (OpenAI reasoning subset), `audio_tokens` (sum of prompt/completion-side audio), `cache_creation_tokens` (Anthropic cache-write, separated from `cached_tokens`; column addition tracked via issue #26 handoff).
 
 ### 4.6 audit — `POST /gw/v1/audit/record`

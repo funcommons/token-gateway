@@ -45,6 +45,14 @@ public class AccessLogRequest {
     /** 细分留痕维 (issue #26): Anthropic cache_creation_input_tokens 口径定版独立成维. */
     private Integer cacheCreationTokens;
 
+    /**
+     * usage 真相位 (issue #35, 与 settle 同源同值): 取值见
+     * {@link SettleRequest#USAGE_SOURCE_UPSTREAM} / {@link SettleRequest#USAGE_SOURCE_ESTIMATED}
+     * (能力面 schema {@code usage_call_log.usage_source CHECK IN ('UPSTREAM','ESTIMATED')});
+     * null = 旧版本语义/错误路径无用量概念, 不造数.
+     */
+    private String usageSource;
+
     private BigDecimal creditConsumed;
     private String billingMode;
     private Integer latencyMs;

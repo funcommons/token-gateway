@@ -36,6 +36,24 @@ public class SettleRequest {
      */
     private Long audioTokens;
 
+    /**
+     * usage 真相位 (issue #35, #33 估算兜底收尾): {@link #USAGE_SOURCE_UPSTREAM} = 用量取自
+     * 上游响应体/流式末帧 (实测); {@link #USAGE_SOURCE_ESTIMATED} = 上游未回报, 网关按
+     * 内容估算法兜底 (chars/4). 缺省 null = 旧版本语义 (#26 兼容规约: 可选字段,
+     * 旧计费后端忽略未知字段; 任务面 amount 直传无估算概念, 恒 null 不造语义).
+     */
+    private String usageSource;
+
+    /**
+     * usageSource 取值: 上游实测. 取值集合以能力面 schema 为准 —
+     * {@code usage_call_log.usage_source CHECK IN ('UPSTREAM','ESTIMATED')},
+     * 网关侧常量仅此一定义点, 调用方引用常量不写字面量.
+     */
+    public static final String USAGE_SOURCE_UPSTREAM = "UPSTREAM";
+
+    /** usageSource 取值: 网关估算兜底 (上游未回报 usage, issue #33 内容估算法). */
+    public static final String USAGE_SOURCE_ESTIMATED = "ESTIMATED";
+
     private boolean success;
     private String requestId;
     private String upstreamRequestId;

@@ -104,10 +104,11 @@ class BillingReconcileJobTest {
     }
 
     @Test
-    @DisplayName("到期 settle 重放成功: 请求体与原始入队参数逐字段一致 (幂等锚 preConsumeId 不变) → zrem")
+    @DisplayName("到期 settle 重放成功: 请求体与原始入队参数逐字段一致 (幂等锚 preConsumeId 不变, issue #35 扩 usageSource) → zrem")
     void replaySuccessRemovesPendingAndReplaysExactParams() throws Exception {
         BillingPendingRecord record = BillingPendingRecord.forSettle(
-                "pc-1", "req-1", 7L, 100, 20, 30, 5, 8L, 9L, 1234, attempts());
+                "pc-1", "req-1", 7L, 100, 20, 30, 5, 8L, 9L, 1234, attempts(),
+                SettleRequest.USAGE_SOURCE_ESTIMATED);
         when(pendingStore.duePending(anyInt()))
                 .thenReturn(Flux.just(entry(record)));
         backend.enqueue(new MockResponse()
@@ -134,6 +135,8 @@ class BillingReconcileJobTest {
         assertThat(body.getLong("audioTokens")).isEqualTo(9L);
         assertThat(body.getIntValue("responseTimeMs")).isEqualTo(1234);
         assertThat(body.getBooleanValue("success")).isTrue();
+        // issue #35: 估算兜底笔重放保真 — usageSource=ESTIMATED 随请求体原样重放
+        assertThat(body.getString("usageSource")).isEqualTo(SettleRequest.USAGE_SOURCE_ESTIMATED);
         JSONArray replayedAttempts = body.getJSONArray("attempts");
         assertThat(replayedAttempts).hasSize(1);
         JSONObject detail = replayedAttempts.getJSONObject(0);
@@ -150,7 +153,7 @@ class BillingReconcileJobTest {
     @DisplayName("重放基础设施失败: retries+1 退避重排 (score = now + base*2^(n-1)), 不出队")
     void replayFailureReschedulesWithBackoff() {
         BillingPendingRecord record = BillingPendingRecord.forSettle(
-                "pc-2", "req-2", null, 10, 2, 0, 0, null, null, 100, null).withRetries(1);
+                "pc-2", "req-2", null, 10, 2, 0, 0, null, null, 100, null, null).withRetries(1);
         when(pendingStore.duePending(anyInt()))
                 .thenReturn(Flux.just(entry(record)));
         backend.enqueue(new MockResponse().setResponseCode(500));
@@ -175,7 +178,7 @@ class BillingReconcileJobTest {
     @DisplayName("重放超 max-attempts: 出队 + 死信单行 JSON 快照含全部结算参数")
     void exhaustedReplayGoesToDeadLetterWithFullSnapshot() {
         BillingPendingRecord record = BillingPendingRecord.forSettle(
-                "pc-3", "req-3", 7L, 100, 20, 30, 5, 8L, null, 1234, null).withRetries(4);
+                "pc-3", "req-3", 7L, 100, 20, 30, 5, 8L, null, 1234, null, null).withRetries(4);
         when(pendingStore.duePending(anyInt()))
                 .thenReturn(Flux.just(entry(record)));
         backend.enqueue(new MockResponse().setResponseCode(500));
@@ -267,7 +270,7 @@ class BillingReconcileJobTest {
             var isolatedStore = mock(BillingPendingStore.class);
             when(isolatedStore.remove(any())).thenReturn(Mono.just(1L));
             BillingPendingRecord record = BillingPendingRecord.forSettle(
-                    "pc-31", "req-31", null, 10, 2, 0, 0, null, null, 100, null);
+                    "pc-31", "req-31", null, 10, 2, 0, 0, null, null, 100, null, null);
             when(isolatedStore.duePending(anyInt())).thenReturn(Flux.just(entry(record)));
             var isolatedJob = new BillingReconcileJob(isolatedStore, genericApi,
                     new BillingReconcileProperties());
