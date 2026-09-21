@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-21
+
 ### 新增
 
 - **resolve 跳 clientIp 补位（issue #37，#27 同构）**：`DistributeRequest` 增可选 `clientIp`——validate 跳（#27）与 resolve 跳透传同一次 ClientIpResolver 解析结果，能力面 ip 白名单 Key 不再因 resolve 跳 clientIp=null 被 fail-closed 恒拒（10612）。三处接线：prepare 直达 / failover 重分发经 PreparedRequest 第 9 分量驻留 / 任务面 create→resolveRoute；null=旧语义零影响。**默认 error-passthrough 白名单首次扩员**：`10612→403`（ip 白名单拒绝，与 4090 同类 Key 级安全拒绝；此前恒拒映射 502+10004 会被误当可重试故障）——本版本唯一默认行为变化
