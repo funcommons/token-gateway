@@ -156,4 +156,40 @@ class CapabilityValidatorTest {
         assertThat(props.getTask().getNotifyRetry()).hasSize(3);
         assertThat(props.getAccessLog().getTransport()).isEqualTo(LogTransport.RPC);
     }
+
+    @Test
+    @DisplayName("issue #38: moderation.url 已配置但 enabled=false → 启动 WARN (抓靠 bug 扫描的误配宿主)")
+    void moderationUrlConfiguredButDisabledWarns() {
+        TokenGatewayProperties props = new TokenGatewayProperties();
+        props.setFace(Face.LLM);   // 隔离任务面校验
+        props.getModeration().setUrl("http://moderation-svc:9420");
+        // enabled 缺省 false
+        List<String> warnings = CapabilityValidator.validate(props, FULL);
+        assertThat(warnings).anyMatch(w -> w.contains("moderation.url 已配置但 enabled=false")
+                && w.contains("enabled: true"));
+    }
+
+    @Test
+    @DisplayName("issue #38: enabled=true + url 配置 → 不告警; url 未配置 + enabled=false → 不告警")
+    void moderationWarnOnlyOnUrlConfiguredAndDisabled() {
+        TokenGatewayProperties on = new TokenGatewayProperties();
+        on.setFace(Face.LLM);
+        on.getModeration().setEnabled(true);
+        on.getModeration().setUrl("http://moderation-svc:9420");
+        assertThat(CapabilityValidator.validate(on, FULL))
+                .noneMatch(w -> w.contains("enabled=false"));
+
+        TokenGatewayProperties noUrl = new TokenGatewayProperties();
+        noUrl.setFace(Face.LLM);
+        // enabled=false 且 url 未配置 (纯缺省形态) → 不告警
+        assertThat(CapabilityValidator.validate(noUrl, FULL))
+                .noneMatch(w -> w.contains("moderation.url 已配置但 enabled=false"));
+
+        // 空白 url 等同未配置 → 不告警
+        TokenGatewayProperties blankUrl = new TokenGatewayProperties();
+        blankUrl.setFace(Face.LLM);
+        blankUrl.getModeration().setUrl("   ");
+        assertThat(CapabilityValidator.validate(blankUrl, FULL))
+                .noneMatch(w -> w.contains("moderation.url 已配置但 enabled=false"));
+    }
 }

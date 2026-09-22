@@ -323,7 +323,7 @@ Credentials must always be injected via environment variables and never committe
 
 | Configuration | Behavior |
 |---|---|
-| `moderation.enabled` | Whether to run content-moderation scanning; `fail-open` controls pass-through when the moderation dependency fails (aligned with the fail-open doc's wording) |
+| `moderation.enabled` | Whether to run content-moderation scanning (default false = the pipeline skips all moderation RPCs; set `true` explicitly if you need moderation — effective since issue #38); `fail-open` controls pass-through when the moderation dependency fails (aligned with the fail-open doc's wording, only meaningful when enabled=true) |
 | `access-log.enabled` | Whether logs are persisted (off = in-memory counting only); `transport` selects rpc synchronous / mq asynchronous (Kafka\|RocketMQ, at-least-once) |
 | `billing` | `direct` = gateway saga billing (goes through the billing service) / `passthrough` = backend self-billing (THMP sk- closed loop) / `off` = no billing (intranet/BYOK) |
 | `health-report` | Channel health signal reporting (record-success/failure); when off, compensate on the monitoring side |

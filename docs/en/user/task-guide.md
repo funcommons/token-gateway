@@ -82,7 +82,7 @@ curl -sL "<proxy URL>" -o out.mp4
 | Polling | After a terminal state, returns the stored result idempotently (`POLL_HITS=0`, upstream not touched); upstream query errors leave the status unchanged — just retry with backoff |
 | notify | If `notify_url` is provided at creation, a terminal-state callback is sent; `X-THMP-Signature` (HMAC) can be used to verify it; failures are re-sent by the gateway with backoff (1m/10m/1h tiers) — callers need no fallback |
 | Resource proxy | **Upstream raw URLs are never passed through**; proxy URLs expire after 24h (exp+sig) — after expiry, re-fetching the task can re-sign; expired/tampered signature → 10100, task not SUCCEEDED → 10402 |
-| Moderation switch | The task face shares the `moderation.enabled` configuration with the LLM face |
+| Moderation switch | The task face shares the `moderation.enabled` configuration with the LLM face (default false = the pipeline skips all moderation RPCs; moderation requires an explicit `enabled: true`, effective since issue #38) |
 | Idempotency | The create endpoint supports `Idempotency-Key` ([Conventions §7](./conventions.md) replay semantics): on timeout, **resend the same request with the same key** — the gateway replays the successful first response (`Idempotency-Replayed: true`), never double-creating or double-pre-deducting; failures (non-2xx) hold no key, so retry immediately; streaming does not apply (task-face create responses are JSON — safe to rely on in normal scenarios). The key value never enters any downstream parameter slot — the billing requestId accepts digits only; for non-numeric keys the gateway generates a numeric request ID (#30) |
 
 ## 5. Gateway-Side Task Configuration (effective when face=task/all)

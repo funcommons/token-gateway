@@ -37,6 +37,9 @@ class HttpModerationApiTest {
         props.setInternalToken("test-internal-token");
         props.setTimeout(Duration.ofSeconds(2));
         spi = new fun.commons.tokengateway.spi.config.TokenGatewayProperties();
+        // issue #38: enabled 缺省 false 起双闸短路 (不发 RPC), 本类用例验证 RPC 行为,
+        // 夹具显式开启; 开关短路语义由 dedicated 用例覆盖
+        spi.getModeration().setEnabled(true);
         api = new HttpModerationApi(WebClient.builder(),
                 new CapabilityEndpoints(spi, props), new RpcInternalAuth(props), spi);
     }
@@ -248,5 +251,77 @@ class HttpModerationApiTest {
             assertThat(dedicated.getRequestCount()).isEqualTo(1);
             assertThat(server.getRequestCount()).isZero();
         }
+    }
+
+    // ---- issue #38: enabled 双闸 (缺省 false = 管线跳过全部审核 RPC) ----
+
+    private HttpModerationApi disabledApi() {
+        var offSpi = new fun.commons.tokengateway.spi.config.TokenGatewayProperties();
+        // 故意配 url 复刻「靠 bug 扫描」误配形态: enabled=false 时 url 不得被触达
+        offSpi.getModeration().setUrl(server.url("/").toString().replaceAll("/$", ""));
+        return new HttpModerationApi(WebClient.builder(),
+                new CapabilityEndpoints(offSpi, props), new RpcInternalAuth(props), offSpi);
+    }
+
+    @Test
+    @DisplayName("issue #38 enabled=false: scan 短路 PASS_THROUGH 回显原文, 零 RPC")
+    void disabledScanShortCircuits() {
+        HttpModerationApi off = disabledApi();
+
+        StepVerifier.create(off.scan(buildReq()))
+                .assertNext(outcome -> {
+                    assertThat(outcome.action()).isEqualTo(ModerationOutcome.Action.PASS_THROUGH);
+                    assertThat(outcome.isBlocked()).isFalse();
+                    assertThat(outcome.sanitizedContent()).isEqualTo("帮我做题");
+                })
+                .verifyComplete();
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("issue #38 enabled=false: scan(request=null) 不炸, 仍短路放行")
+    void disabledScanNullRequestSafe() {
+        HttpModerationApi off = disabledApi();
+
+        StepVerifier.create(off.scan(null))
+                .assertNext(outcome -> {
+                    assertThat(outcome.action()).isEqualTo(ModerationOutcome.Action.PASS_THROUGH);
+                    assertThat(outcome.sanitizedContent()).isNull();
+                })
+                .verifyComplete();
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("issue #38 enabled=false: audit 短路返回 Mono.empty (成功放行语义), 零 RPC")
+    void disabledAuditShortCircuits() {
+        HttpModerationApi off = disabledApi();
+
+        StepVerifier.create(off.audit(fun.commons.tokengateway.contract.ModerationAuditRequest
+                        .builder().content("输出内容").tenantId("100").requestId("r-1").build()))
+                .verifyComplete();
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("issue #38 enabled=true 回归: scan/audit RPC 照发 (开关不吞既有行为)")
+    void enabledRpcStillFires() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"passed\":true,\"actionTaken\":\"LOG\","
+                        + "\"sanitizedContent\":\"原文\"}}"));
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"passed\":true,\"actionTaken\":\"LOG\",\"source\":\"NONE\"}}"));
+
+        StepVerifier.create(api.scan(buildReq()))
+                .assertNext(outcome -> assertThat(outcome.action())
+                        .isEqualTo(ModerationOutcome.Action.PASS_THROUGH))
+                .verifyComplete();
+        StepVerifier.create(api.audit(fun.commons.tokengateway.contract.ModerationAuditRequest
+                        .builder().content("输出内容").tenantId("100").requestId("r-1").build()))
+                .assertNext(ar -> assertThat(ar.isSuccess()).isTrue())
+                .verifyComplete();
+        assertThat(server.getRequestCount()).isEqualTo(2);
     }
 }

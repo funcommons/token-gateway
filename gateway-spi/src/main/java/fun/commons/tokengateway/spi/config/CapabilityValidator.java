@@ -44,6 +44,15 @@ public final class CapabilityValidator {
         if (!props.isHealthReport()) {
             warnings.add("health-report=off: 渠道健康信号缺失, 需在监控侧补偿 (设计方案 §5.3)");
         }
+        // issue #38: 抓「一直在靠 bug 扫描」的误配宿主 —— 此前版本 enabled 开关未被
+        // 管线消费 (配了 url 即逐请求无条件发 RPC + fail-open 兜底), #38 起 enabled=false
+        // 双闸短路 (scan/audit 均不发 RPC), 此类部署升级后审核将静默停止
+        if (!props.getModeration().isEnabled()
+                && props.getModeration().getUrl() != null
+                && !props.getModeration().getUrl().isBlank()) {
+            warnings.add("moderation.url 已配置但 enabled=false, 管线将跳过全部审核 RPC;"
+                    + " 如需审核请显式 enabled: true (issue #38 起开关生效)");
+        }
         if (props.getFace() != Face.LLM) {
             validateTaskFace(props, warnings);
         }

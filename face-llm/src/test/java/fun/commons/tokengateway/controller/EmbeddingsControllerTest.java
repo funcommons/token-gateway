@@ -57,7 +57,7 @@ class EmbeddingsControllerTest {
                 tokenApi, channelApi,
                 new fun.commons.tokengateway.rpc.HttpBillingApi(builder, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props)),
                         new fun.commons.tokengateway.moderation.ModerationGate(
-                        new fun.commons.tokengateway.rpc.HttpModerationApi(builder, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props), new fun.commons.tokengateway.spi.config.TokenGatewayProperties())),
+                        new fun.commons.tokengateway.rpc.HttpModerationApi(builder, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new fun.commons.tokengateway.rpc.RpcInternalAuth(props), moderationOnSpi())),
                 new fun.commons.tokengateway.thmp.ThmpShadow.Noop(),
                 new fun.commons.tokengateway.thmp.ThmpCutover.Noop());
         controller = new EmbeddingsController(
@@ -74,6 +74,16 @@ class EmbeddingsControllerTest {
     void tearDown() throws Exception {
         backendServer.shutdown();
         upstreamServer.shutdown();
+    }
+
+    /**
+     * issue #38: moderation.enabled 缺省 false 起 HttpModerationApi 双闸短路 (不发 RPC),
+     * 本夹具 mockDistribute 期待 scan RPC 真实下发, 显式开启.
+     */
+    private static fun.commons.tokengateway.spi.config.TokenGatewayProperties moderationOnSpi() {
+        var spi = new fun.commons.tokengateway.spi.config.TokenGatewayProperties();
+        spi.getModeration().setEnabled(true);
+        return spi;
     }
 
     private void mockTokenOk() {

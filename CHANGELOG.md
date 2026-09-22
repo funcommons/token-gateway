@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **moderation.enabled 开关落地（issue #38）**：`token-gateway.moderation.enabled`（默认 false）javadoc 承诺「off 时管线跳过审核步骤」却从未被运行管线消费——此前**所有部署**逐请求无条件发审核 RPC（scan + audit 双路），宿主无审核端点时 fail-open 兜底业务无感但逐请求刷 ERROR。修复：`HttpModerationApi` 双闸（scan → 短路 PASS 回显原文 / audit → `Mono.empty()` 放行），enabled=true 路径逐字节不变；`CapabilityValidator` 新增启动告警（`moderation.url` 已显式配置但 enabled=false → WARN 提示审核将被跳过，专抓靠 bug 扫描的误配）。⚠️ **升级注意**：开关自此生效——配了 `moderation.url` 但从未显式 `enabled: true` 的部署（此前一直在靠 bug 扫描）升级后审核将停止，需要审核请显式开启。已知缺口（另立 issue 候选）：`CapabilityValidator.validate` 在仓内零生产调用方，告警仅在宿主自行调用时可见
+
 ## [0.15.0] - 2026-09-21
 
 ### 新增

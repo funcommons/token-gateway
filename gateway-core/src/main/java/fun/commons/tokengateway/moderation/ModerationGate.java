@@ -10,6 +10,11 @@ import reactor.core.publisher.Mono;
  * Moderation 网关层 Gate (webflux 版).
  *
  * <p>薄包装: 调 {@link HttpModerationApi} 走 RPC, 失败 fail-open 放行.
+ *
+ * <p>issue #38: {@code token-gateway.moderation.enabled=false} (缺省) 时由
+ * {@link HttpModerationApi} 层短路, 不发任何审核 RPC, scan 直接 PASS_THROUGH 放行
+ * (闸放 HttpModerationApi 而非本类: controller 的 auditOutput 链路绕过本 Gate
+ * 直调 HttpModerationApi.audit, 双路径同闸才不漏).
  */
 @Slf4j
 @Component

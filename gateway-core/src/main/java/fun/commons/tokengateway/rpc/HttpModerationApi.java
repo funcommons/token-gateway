@@ -18,6 +18,13 @@ import reactor.core.publisher.Mono;
  *
  * <p>gateway-webflux 不直接依赖 moderation jar (避免 servlet 类加载冲突),
  * 走 WebClient + RpcInternalAuth HMAC 头. 返回 {@link ModerationOutcome} 三态封装.
+ *
+ * <p><b>enabled 双闸 (issue #38)</b>: {@code token-gateway.moderation.enabled=false}
+ * (缺省) 时 {@link #scan} 与 {@link #audit} 均在本层短路, 不发任何 RPC ——
+ * scan 直接 PASS_THROUGH 放行 (sanitizedContent 回显原文), audit 返回 {@code Mono.empty()}
+ * (下游见到成功放行语义). 闸放在本类而非 {@code ModerationGate}: controller 的
+ * auditOutput 链路绕过 Gate 直调本类, 只闸 Gate 会漏一半. enabled=true 时两条路径
+ * 逐字节维持原行为 (fail-open/degrade 逻辑不动).
  */
 @Slf4j
 @Component
@@ -42,14 +49,21 @@ public class HttpModerationApi {
      * 调审核面 /v1/internal/moderation/scan, 解析为 ModerationOutcome.
      *
      * <p>G6: fail-open/closed 由 {@code token-gateway.moderation.fail-open} 配置
-     * (缺省 true = 现网口径):
+     * (缺省 true = 现网口径; 仅 enabled=true 时有意义):
      * <ul>
      *   <li>fail-open: RPC 失败/业务 fail → PASS_THROUGH 放行 (可用性优先)</li>
      *   <li>fail-closed: 同类失败 → BLOCK (合规优先, 拦截不误放; 走既有 BLOCK 路径
      *       返回 10106, 不触发渠道轮换)</li>
      * </ul>
+     *
+     * <p>issue #38: {@code moderation.enabled=false} (缺省) 时短路, 不发 RPC,
+     * 直接 PASS_THROUGH (sanitizedContent 回显原文, 与 fail-open 降级同形,
+     * 上游 {@code maskedContentOf} 只认 MASK 动作, body 不会被改写).
      */
     public Mono<ModerationOutcome> scan(ScanRequest request) {
+        if (!spi.getModeration().isEnabled()) {
+            return Mono.just(ModerationOutcome.pass(request == null ? null : request.getContent()));
+        }
         WebClient.RequestHeadersSpec<?> req = webClientBuilder.build().post()
                 .uri(endpoints.moderation().getUrl() + "/v1/internal/moderation/scan")
                 .bodyValue(request);
@@ -95,8 +109,15 @@ public class HttpModerationApi {
     /**
      * 输出审查 (调主应用 /v1/internal/moderation/audit).
      * <p>RPC 失败返回 fail 包络, 不抛异常 (调用方决定 fail-open).
+     *
+     * <p>issue #38: {@code moderation.enabled=false} (缺省) 时短路, 不发 RPC,
+     * 返回 {@code Mono.empty()} —— 调用方 (controller auditOutput) 的 flatMap 不触发,
+     * Mono<Void> 空完成即「成功放行」语义, 与内容为空/RPC 失败 fail-open 同口径.
      */
     public Mono<ApiResponse<ModerationAuditVO>> audit(ModerationAuditRequest request) {
+        if (!spi.getModeration().isEnabled()) {
+            return Mono.empty();
+        }
         WebClient.RequestHeadersSpec<?> req = webClientBuilder.build().post()
                 .uri(endpoints.moderation().getUrl() + "/v1/internal/moderation/audit")
                 .bodyValue(request);

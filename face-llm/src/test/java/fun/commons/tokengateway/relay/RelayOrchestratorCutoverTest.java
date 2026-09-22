@@ -55,13 +55,23 @@ class RelayOrchestratorCutoverTest {
         var channelApi = new fun.commons.tokengateway.rpc.HttpChannelApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), gwProps), new fun.commons.tokengateway.rpc.RpcInternalAuth(gwProps));
         var billingApi = new fun.commons.tokengateway.rpc.HttpBillingApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), gwProps), new fun.commons.tokengateway.rpc.RpcInternalAuth(gwProps));
         var moderationGate = new fun.commons.tokengateway.moderation.ModerationGate(
-                new fun.commons.tokengateway.rpc.HttpModerationApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), gwProps), new fun.commons.tokengateway.rpc.RpcInternalAuth(gwProps), new fun.commons.tokengateway.spi.config.TokenGatewayProperties()));
+                new fun.commons.tokengateway.rpc.HttpModerationApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), gwProps), new fun.commons.tokengateway.rpc.RpcInternalAuth(gwProps), moderationOnSpi()));
         ThmpContractClient client = new ThmpContractClient(b, props);
         ThmpCandidateCache cache = new ThmpCandidateCache(client, Duration.ofSeconds(30));
         ThmpCutoverRouter cutover = new ThmpCutoverRouter(props, cache,
                 new ThmpKeyCipher(java.util.Map.of(), PASS));
         return new RelayOrchestrator(tokenApi, channelApi, billingApi, moderationGate,
                 new fun.commons.tokengateway.thmp.ThmpShadow.Noop(), cutover);
+    }
+
+    /**
+     * issue #38: moderation.enabled 缺省 false 起 HttpModerationApi 双闸短路 (不发 RPC),
+     * 本类 enqueueModerationAndPreConsume + getRequestCount==3 期待 scan RPC 真实下发, 夹具显式开启.
+     */
+    private static fun.commons.tokengateway.spi.config.TokenGatewayProperties moderationOnSpi() {
+        var spi = new fun.commons.tokengateway.spi.config.TokenGatewayProperties();
+        spi.getModeration().setEnabled(true);
+        return spi;
     }
 
     private ThmpContractProperties thmpProps() {

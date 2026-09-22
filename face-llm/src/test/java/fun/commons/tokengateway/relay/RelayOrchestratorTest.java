@@ -45,7 +45,7 @@ class RelayOrchestratorTest {
                 new HttpTokenApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props)),
                 new HttpChannelApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props)),
                 new fun.commons.tokengateway.rpc.HttpBillingApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props)),
-                new ModerationGate(new fun.commons.tokengateway.rpc.HttpModerationApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props), new fun.commons.tokengateway.spi.config.TokenGatewayProperties())),
+                new ModerationGate(new fun.commons.tokengateway.rpc.HttpModerationApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(new fun.commons.tokengateway.spi.config.TokenGatewayProperties(), props), new RpcInternalAuth(props), moderationOnSpi())),
                 new fun.commons.tokengateway.thmp.ThmpShadow.Noop(),
                 new fun.commons.tokengateway.thmp.ThmpCutover.Noop());
     }
@@ -288,5 +288,64 @@ class RelayOrchestratorTest {
                         && ((RelayException) e).getHttpStatus() == 402
                         && ((RelayException) e).getCode() == 10617
                         && e.getMessage().contains("用户算力余额不足"));
+    }
+
+    /**
+     * issue #38: moderation.enabled 缺省 false 起 HttpModerationApi 双闸短路 (不发 RPC),
+     * 本类用例 enqueue 了 scan 响应期待 RPC 真实下发, 夹具显式开启.
+     */
+    private static fun.commons.tokengateway.spi.config.TokenGatewayProperties moderationOnSpi() {
+        var spi = new fun.commons.tokengateway.spi.config.TokenGatewayProperties();
+        spi.getModeration().setEnabled(true);
+        return spi;
+    }
+
+    @Test
+    @DisplayName("issue #38 enabled=false: prepare 级 scan 短路零 RPC, 管线正常通过 (validate→distribute→preConsume)")
+    void disabledModerationSkipsScanRpcAtPrepareLevel() throws Exception {
+        // 独立装配 enabled=false (缺省形态) 的 orchestrator; 不 enqueue 任何 scan 响应 —
+        // 若闸失效, scan RPC 会消费到 preConsume 的响应导致链错位/失败
+        backend.shutdown();
+        backend = new MockWebServer();
+        backend.start();
+        var props = new fun.commons.tokengateway.config.GatewayProperties();
+        props.setUrl(backend.url("/").toString().replaceAll("/$", ""));
+        WebClient.Builder b = WebClient.builder();
+        var offSpi = new fun.commons.tokengateway.spi.config.TokenGatewayProperties();
+        // 故意配 url 复刻「靠 bug 扫描」误配形态: enabled=false 时 url 不得被触达
+        offSpi.getModeration().setUrl(props.getUrl());
+        RelayOrchestrator off = new RelayOrchestrator(
+                new HttpTokenApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(offSpi, props), new RpcInternalAuth(props)),
+                new HttpChannelApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(offSpi, props), new RpcInternalAuth(props)),
+                new fun.commons.tokengateway.rpc.HttpBillingApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(offSpi, props), new RpcInternalAuth(props)),
+                new ModerationGate(new fun.commons.tokengateway.rpc.HttpModerationApi(b, new fun.commons.tokengateway.rpc.CapabilityEndpoints(offSpi, props), new RpcInternalAuth(props), offSpi)),
+                new fun.commons.tokengateway.thmp.ThmpShadow.Noop(),
+                new fun.commons.tokengateway.thmp.ThmpCutover.Noop());
+
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"valid\":true,\"tokenId\":\"1\","
+                        + "\"userId\":\"2\",\"tenantId\":\"3\"}}"));
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"channelId\":\"c1\","
+                        + "\"baseUrl\":\"http://u\",\"apiKey\":\"sk\",\"protocol\":\"openai\",\"ownerType\":\"TENANT\"}}"));
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"preConsumeId\":\"pre-off\",\"estimatedQuota\":0,\"success\":true}}"));
+
+        StepVerifier.create(off.prepare("sk-test", "gpt-4o", 0, 0, "你好", null, null))
+                .assertNext(p -> {
+                    assertThat(p.preConsumeId()).isEqualTo("pre-off");
+                    assertThat(p.moderationSanitized()).isNull();
+                })
+                .verifyComplete();
+
+        // 恰好 3 次 RPC (validate/distribute/preConsume), 无任何 /moderation/scan
+        assertThat(backend.getRequestCount()).isEqualTo(3);
+        for (int i = 0; i < 3; i++) {
+            var recorded = backend.takeRequest();
+            assertThat(recorded.getPath()).doesNotContain("/moderation/");
+        }
     }
 }

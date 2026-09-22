@@ -51,9 +51,19 @@ class RelayOrchestratorDistributeClientIpTest {
                 new HttpTokenApi(b, new CapabilityEndpoints(new TokenGatewayProperties(), props), new RpcInternalAuth(props)),
                 new HttpChannelApi(b, new CapabilityEndpoints(new TokenGatewayProperties(), props), new RpcInternalAuth(props)),
                 new HttpBillingApi(b, new CapabilityEndpoints(new TokenGatewayProperties(), props), new RpcInternalAuth(props)),
-                new ModerationGate(new HttpModerationApi(b, new CapabilityEndpoints(new TokenGatewayProperties(), props), new RpcInternalAuth(props), new TokenGatewayProperties())),
+                new ModerationGate(new HttpModerationApi(b, new CapabilityEndpoints(new TokenGatewayProperties(), props), new RpcInternalAuth(props), moderationOnSpi())),
                 new ThmpShadow.Noop(),
                 new ThmpCutover.Noop());
+    }
+
+    /**
+     * issue #38: moderation.enabled 缺省 false 起 HttpModerationApi 双闸短路 (不发 RPC),
+     * 本类 enqueueModerationPass 期待 scan RPC 真实下发 (takeRequest 按序断言), 夹具显式开启.
+     */
+    private static TokenGatewayProperties moderationOnSpi() {
+        var spi = new TokenGatewayProperties();
+        spi.getModeration().setEnabled(true);
+        return spi;
     }
 
     @AfterEach

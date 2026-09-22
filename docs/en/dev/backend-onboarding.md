@@ -102,7 +102,9 @@ Gateway-side fallback (issue #23): settle/refund **infrastructure failures** (RP
 ### 4.4 moderation — `POST /gw/v1/moderation/scan`
 
 - In: `{content, content_type}`; out: `data: {action: PASS|BLOCK|SANITIZE, sanitized_content, reason}`.
-- If your service times out / returns 5xx → the gateway decides whether to allow or block per its `fail-open` config — **it will not retry and slow down the main path**.
+- Gateway-side switch (effective since issue #38): `token-gateway.moderation.enabled` defaults to **false = the pipeline skips all moderation RPCs** (both input scan and output audit are short-circuited to allow). Deployments that need moderation must set `enabled: true` explicitly, otherwise your moderation endpoint will never be called.
+- If your service times out / returns 5xx → the gateway decides whether to allow or block per its `fail-open` config — **it will not retry and slow down the main path** (`fail-open` is only meaningful when enabled=true).
+- **Upgrade warning**: before #38 the switch was not consumed by the pipeline (a configured url meant an unconditional RPC per request). Existing deployments with `moderation.url` configured but no explicit enable will stop moderating after upgrade — set `enabled: true` explicitly.
 - Samples of BLOCK/SANITIZE decisions are recommended to be sent back to the audit face for traceability.
 
 ### 4.5 access-log — either RPC or MQ

@@ -282,6 +282,8 @@ token-gateway:
 | `audit` | Security/admin events logged locally only, not exported | Moderation audit reporting is disabled together with moderation |
 | `health-report` | record-success/failure not reported back | Missing channel health signals must be compensated on the monitoring side |
 
+> **Implementation note (issue #38)**: the `moderation.enabled` semantics are honored as of #38 — in earlier versions the switch was not consumed by the pipeline, so a configured `moderation.url` meant an unconditional moderation RPC per request (masked by fail-open). Since #38, `enabled=false` (the default) short-circuits both gates at the HttpModerationApi layer (neither scan nor audit RPCs are sent); existing deployments with a configured url but no explicit `enabled: true` will stop moderating after upgrade (a startup WARN from CapabilityValidator flags this).
+
 ---
 
 ## 6. Built-in Adapters
