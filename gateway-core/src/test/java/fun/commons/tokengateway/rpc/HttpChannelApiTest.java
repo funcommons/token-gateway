@@ -63,6 +63,50 @@ class HttpChannelApiTest {
     }
 
     @Test
+    void distributeWorkTargetsWorkChannelsEndpoint() throws Exception {
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"channelId\":\"work-ch\",\"type\":1,"
+                        + "\"baseUrl\":\"http://up\",\"apiKey\":\"sk-ch\",\"protocol\":\"http\"}}"));
+        ApiResponse<DistributeVO> resp = api.distributeWork(DistributeRequest.builder()
+                        .tenantId("t").userId("u").apiKeyId("k").model("sora-2").build())
+                .block(Duration.ofSeconds(3));
+        assertThat(resp).isNotNull();
+        assertThat(resp.isSuccess()).isTrue();
+        assertThat(resp.getData().getChannelId()).isEqualTo("work-ch");
+        RecordedRequest req = backend.takeRequest(3, TimeUnit.SECONDS);
+        assertThat(req.getPath()).isEqualTo("/api/v1/internal/work-channels/distribute");
+    }
+
+    @Test
+    void distributePathsSplitPerFaceHonorsOverride() throws Exception {
+        // BL11 P1-5 契约: LLM 面 (route, chat 端点) 与任务面 (work 端点) 分离, 各自可指
+        var spiProps = new TokenGatewayProperties();
+        spiProps.getRoute().setDistributePath("/custom/chat-distribute");
+        spiProps.getTask().setDistributePath("/custom/work-distribute");
+        var legacy = new GatewayProperties();
+        legacy.setUrl(backend.url("/").toString().replaceAll("/$", ""));
+        legacy.setTimeout(Duration.ofSeconds(2));
+        HttpChannelApi overrideApi = new HttpChannelApi(WebClient.builder(),
+                new CapabilityEndpoints(spiProps, legacy), new RpcInternalAuth(legacy));
+
+        backend.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"channelId\":\"c1\"}}"));
+        backend.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"channelId\":\"c2\"}}"));
+
+        assertThat(overrideApi.distribute(DistributeRequest.builder().model("gpt-4o").build())
+                .block(Duration.ofSeconds(3))).isNotNull();
+        assertThat(overrideApi.distributeWork(DistributeRequest.builder().model("sora-2").build())
+                .block(Duration.ofSeconds(3))).isNotNull();
+
+        assertThat(backend.takeRequest(3, TimeUnit.SECONDS).getPath())
+                .isEqualTo("/custom/chat-distribute");
+        assertThat(backend.takeRequest(3, TimeUnit.SECONDS).getPath())
+                .isEqualTo("/custom/work-distribute");
+    }
+
+    @Test
     void recordSuccessAndFailureReturnVoidEnvelope() {
         backend.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
                 .setBody("{\"code\":0,\"data\":null}"));

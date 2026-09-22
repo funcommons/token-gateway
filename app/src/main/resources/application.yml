@@ -17,7 +17,11 @@ token-gateway:
   # ---- MMagiX task 面接入 (#12): 三控制面同指 bootstrap, 预铸 JWT env 注入 (#R1: jwt 态
   # ---- X-Internal-Token=jwt-secret 字段值原样, 故此处配完整 JWT 而非 HS256 secret)
   route:
-    distribute-path: ${TOKEN_GATEWAY_ROUTE_DISTRIBUTE_PATH:/api/v1/internal/work-channels/distribute}
+    # LLM 面 chat 渠道分发端点 (与 gateway-spi RouteFaceConfig 默认值同源; 回归
+    # 2026-09-21-04 BL11 P1-5: 此默认曾指向 work-channels 端点, LLM face=all 部署的
+    # 本地渠道路由误打宿主 work 端点 → Long.parseLong(null) → 502/10004).
+    # 任务面 work 域分发端点独立可指: token-gateway.task.distribute-path.
+    distribute-path: ${TOKEN_GATEWAY_ROUTE_DISTRIBUTE_PATH:/api/v1/internal/channels/distribute}
     auth: ${TOKEN_GATEWAY_ROUTE_AUTH:jwt}
     jwt-secret: ${TOKEN_GATEWAY_ROUTE_JWT_SECRET:}
   token-validate:
@@ -44,6 +48,9 @@ token-gateway:
   #   key: ${GW_MODERATION_KEY:}
   # 任务面 (face=task/all 生效; 《05》零改造接入, 平台前提 lotask4j V4+; 凭证环境变量注入禁入仓)
   task:
+    # work 域渠道分发端点 (#12; 默认即 work-channels 端点). 回归 2026-09-21-04 BL11
+    # P1-5 起与 LLM 面 chat 端点 (token-gateway.route.distribute-path) 分离配置.
+    distribute-path: ${TOKEN_GATEWAY_TASK_DISTRIBUTE_PATH:/api/v1/internal/work-channels/distribute}
     lotask:
       url: ${LOTASK_URL:http://localhost:8080}
       auth: jwt

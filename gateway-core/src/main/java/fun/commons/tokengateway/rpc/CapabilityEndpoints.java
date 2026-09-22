@@ -25,11 +25,25 @@ public class CapabilityEndpoints {
     private final TokenGatewayProperties spi;
     private final GatewayProperties legacy;
 
-    /** 路由/分发面 (distribute). */
+    /** 路由/分发面 (distribute, LLM 面 chat 渠道端点). */
     public EndpointConfig route() {
         EndpointConfig endpoint = resolve(spi.getRoute().getUrl(), spi.getRoute().getTimeout(),
                 spi.getRoute().getAuth(), keyOf(spi.getRoute()));
         endpoint.setPath(spi.getRoute().getDistributePath());
+        return endpoint;
+    }
+
+    /**
+     * 任务面路由/分发端点 (#12 work 域): url/auth/timeout 复用 route 面,
+     * path 取 {@code token-gateway.task.distribute-path} (默认 work-channels 端点).
+     *
+     * <p>回归 2026-09-21-04 BL11 P1-5: 两 face 分发端点必须分离 — 单键共用曾使
+     * LLM face=all 部署的本地渠道路由误打 work-channels 端点, 宿主按 workId 解析
+     * LLM 形状请求 (无 workId) 抛 {@code Long.parseLong(null)} → 502/10004.
+     */
+    public EndpointConfig taskRoute() {
+        EndpointConfig endpoint = route();
+        endpoint.setPath(spi.getTask().getDistributePath());
         return endpoint;
     }
 

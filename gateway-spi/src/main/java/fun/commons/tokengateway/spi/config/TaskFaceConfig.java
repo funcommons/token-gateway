@@ -15,6 +15,16 @@ public class TaskFaceConfig {
     /** 任务过期窗口 (超时 EXPIRED + 全额退款; 超时钟默认 deadline, 可按 task_type 覆盖). */
     private Duration expireScan = Duration.ofHours(24);
 
+    /**
+     * 任务面渠道路由端点 (work 域分发, #12): face=task/all 的 distribute 走此路径.
+     *
+     * <p>与 LLM 面的 chat 端点 {@code token-gateway.route.distribute-path} 分离 —
+     * 回归 2026-09-21-04 BL11 P1-5: 单键共用曾使 LLM face=all 部署的本地渠道路由
+     * 误打 work-channels 端点 (宿主按 workId 解析, LLM 形状请求无 workId →
+     * {@code Long.parseLong(null)} → 502/10004).
+     */
+    private String distributePath = "/api/v1/internal/work-channels/distribute";
+
     /** 资源代理缓存目录 (face=task 实例挂盘; 默认相对工作目录, 部署时挂持久卷并显式配置). */
     private String resourceCacheDir = "./data/tgw-cache";
 
@@ -65,5 +75,15 @@ public class TaskFaceConfig {
             return model;
         }
         return modality;
+    }
+
+    /** work 域分发端点 (yml 显式置空时回退默认, 与 {@link RouteFaceConfig#getDistributePath} 同口径). */
+    public String getDistributePath() {
+        return distributePath == null || distributePath.isBlank()
+                ? "/api/v1/internal/work-channels/distribute" : distributePath;
+    }
+
+    public void setDistributePath(String distributePath) {
+        this.distributePath = distributePath;
     }
 }

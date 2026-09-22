@@ -4,6 +4,7 @@ import fun.commons.tokengateway.contract.DistributeRequest;
 import fun.commons.tokengateway.contract.DistributeVO;
 import fun.commons.tokengateway.contract.RecordFailureRequest;
 import fun.commons.tokengateway.framework.ApiResponse;
+import fun.commons.tokengateway.spi.config.EndpointConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.ParameterizedTypeReference;
@@ -29,14 +30,34 @@ public class HttpChannelApi {
     private final CapabilityEndpoints endpoints;
     private final RpcInternalAuth internalAuth;
 
+    /**
+     * LLM 面渠道路由: 打 route 面 chat 分发端点
+     * ({@code token-gateway.route.distribute-path}, 默认 /api/v1/internal/channels/distribute).
+     */
     public Mono<ApiResponse<DistributeVO>> distribute(DistributeRequest request) {
+        return distribute(request, endpoints.route());
+    }
+
+    /**
+     * 任务面渠道路由 (#12 work 域): 打 {@code token-gateway.task.distribute-path}
+     * (默认 /api/v1/internal/work-channels/distribute).
+     *
+     * <p>回归 2026-09-21-04 BL11 P1-5: 与 LLM 面 {@link #distribute} 分离 — 两 face
+     * 共用一个分发端点键曾使 LLM 本地渠道路由误打 work-channels 端点, 宿主按 workId
+     * 解析 LLM 形状请求 (无 workId) 抛 {@code Long.parseLong(null)} → 502/10004.
+     */
+    public Mono<ApiResponse<DistributeVO>> distributeWork(DistributeRequest request) {
+        return distribute(request, endpoints.taskRoute());
+    }
+
+    private Mono<ApiResponse<DistributeVO>> distribute(DistributeRequest request, EndpointConfig endpoint) {
         WebClient.RequestHeadersSpec<?> req = webClientBuilder.build().post()
-                .uri(endpoints.route().getUrl() + endpoints.route().getPath())
+                .uri(endpoint.getUrl() + endpoint.getPath())
                 .bodyValue(request);
-        internalAuth.attachTo(req, endpoints.route());
+        internalAuth.attachTo(req, endpoint);
         return req.retrieve()
                 .bodyToMono(DISTRIBUTE_TYPE)
-                .timeout(endpoints.route().getTimeout())
+                .timeout(endpoint.getTimeout())
                 .doOnError(e -> log.error("[HttpChannelApi] distribute RPC 失败: model={}, err={}",
                         request != null ? request.getModel() : null, e.getMessage()))
                 .onErrorResume(e -> Mono.just(ApiResponse.fail(

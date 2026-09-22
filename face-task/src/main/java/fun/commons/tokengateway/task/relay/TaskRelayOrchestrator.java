@@ -141,6 +141,8 @@ public class TaskRelayOrchestrator {
      * 路由快照随 submit 载荷下发 Worker 的链路不变.
      * <p>口径备注 (issue #36/#37): adapter=tokengo/openapi 分支暂不下发 dims 计价参数
      * 与 clientIp (token-route resolve 契约无对应槽位); 仅 Mmagix distribute 分支携带.
+     * <p>回归 2026-09-21-04 BL11 P1-5: 任务面走 {@link HttpChannelApi#distributeWork}
+     * (work 域端点, token-gateway.task.distribute-path), 与 LLM 面 chat 端点分离.
      */
     private Mono<DistributeVO> resolveRoute(TokenValidateVO token, String model, String idempotencyKey,
                                             Map<String, Object> body, String clientIp) {
@@ -148,7 +150,7 @@ public class TaskRelayOrchestrator {
         if (adapterSelector.routeViaTokenRoute()) {
             return tokenRouteClient.resolve(model, null, 0, 0, null);
         }
-        return channelApi.distribute(DistributeRequest.builder()
+        return channelApi.distributeWork(DistributeRequest.builder()
                         .tenantId(token.getTenantId())
                         .userId(token.getUserId())
                         .apiKeyId(token.getTokenId())

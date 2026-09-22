@@ -15,8 +15,9 @@ import java.util.List;
 public class RouteFaceConfig extends EndpointConfig {
 
     /**
-     * 渠道分发端点路径 (#12: face=task 可指向接入方 work 域分发端点;
-     * 默认 chat 端点, 行为不变).
+     * LLM 面 chat 渠道分发端点路径 (与 gateway-spi 默认值同源; #12 时曾被指向接入方
+     * work 域分发端点, 回归 2026-09-21-04 BL11 P1-5 起两 face 分离 — 任务面 work 域
+     * 端点改由 {@code token-gateway.task.distribute-path} 承载, 本键恒指 chat 端点).
      */
     private String distributePath = "/api/v1/internal/channels/distribute";
 

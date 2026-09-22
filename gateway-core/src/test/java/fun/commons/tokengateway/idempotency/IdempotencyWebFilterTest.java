@@ -247,6 +247,85 @@ class IdempotencyWebFilterTest {
         verify(store, never()).tryAcquire(anyString(), any());
     }
 
+    // ---------- multipart 透传契约 (回归 2026-09-21-04 BL03 P1-1) ----------
+
+    /** multipart 上传请求替身 (带 Idempotency-Key, 即 AigcImagePicker 固定携带的形状). */
+    private MockServerWebExchange multipartExchange(String path, String idemKey, String body) {
+        MockServerHttpRequest.BodyBuilder req = MockServerHttpRequest.post(path)
+                .header("Authorization", "Bearer sk-x")
+                .contentType(MediaType.MULTIPART_FORM_DATA);
+        if (idemKey != null) {
+            req = req.header(IdempotencyWebFilter.IDEMPOTENCY_KEY_HEADER, idemKey);
+        }
+        return MockServerWebExchange.from(req.body(body));
+    }
+
+    @Test
+    @DisplayName("multipart × 带键: 透传放行进 chain, 零幂等裁决 (不占位不回放不 422/409)")
+    void multipartWithKeyPassesThrough() {
+        MockServerWebExchange exchange = multipartExchange("/v1/upload/image", "k-mp-1",
+                "--boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.png\"\r\n"
+                        + "\r\nPNG\r\n--boundary--\r\n");
+
+        StepVerifier.create(filter.filter(exchange, chain))
+                .verifyComplete();
+
+        assertThat(chainCalled).isTrue();
+        verify(store, never()).tryAcquire(anyString(), any(Duration.class), any());
+        verify(store, never()).findResponse(anyString(), any());
+        verify(store, never()).saveResponse(anyString(), anyInt(), any(), any(), any());
+        verify(store, never()).release(anyString());
+        assertThat(exchange.getResponse().getStatusCode()).isNull();
+        assertThat(exchange.getResponse().getHeaders().getFirst(IdempotencyWebFilter.REPLAYED_HEADER))
+                .isNull();
+    }
+
+    @Test
+    @DisplayName("multipart 请求体原样送达下游 (filter 不读体不重包, 边界字节完整)")
+    void multipartBodyDeliveredIntactToDownstream() {
+        String multipartBody = "--boundary\r\nContent-Disposition: form-data; name=\"file\"; "
+                + "filename=\"a.png\"\r\n\r\nPNGBYTES\r\n--boundary--\r\n";
+        MockServerWebExchange exchange = multipartExchange("/v1/upload/image", "k-mp-2", multipartBody);
+        StringBuilder downstreamBody = new StringBuilder();
+
+        WebFilterChain passthroughChain = downstream -> downstream.getRequest().getBody()
+                .map(buffer -> {
+                    byte[] bytes = new byte[buffer.readableByteCount()];
+                    buffer.read(bytes);
+                    org.springframework.core.io.buffer.DataBufferUtils.release(buffer);
+                    downstreamBody.append(new String(bytes, StandardCharsets.UTF_8));
+                    return buffer;
+                })
+                .then();
+
+        StepVerifier.create(filter.filter(exchange, passthroughChain))
+                .verifyComplete();
+
+        assertThat(downstreamBody.toString()).isEqualTo(multipartBody);
+    }
+
+    @Test
+    @DisplayName("multipart × 带键 × 同 key 重复提交: 恒按新请求放行 (无回放无 409)")
+    void multipartSameKeyTwiceNeverReplays() {
+        InMemoryStore mem = new InMemoryStore();
+        filter = new IdempotencyWebFilter(mem, props);
+
+        for (int i = 0; i < 2; i++) {
+            MockServerWebExchange exchange = multipartExchange("/v1/upload/image", "k-mp-3", "payload");
+            AtomicBoolean entered = new AtomicBoolean(false);
+            StepVerifier.create(filter.filter(exchange, ex -> {
+                        entered.set(true);
+                        return writeBody(ex.getResponse(), HttpStatus.OK,
+                                MediaType.APPLICATION_JSON, "{\"ok\":true}");
+                    }))
+                    .verifyComplete();
+            assertThat(entered).as("第 %d 次提交应按新请求放行", i + 1).isTrue();
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.OK);
+        }
+        assertThat(mem.placeholders).isEmpty();
+        assertThat(mem.responses).isEmpty();
+    }
+
     // ---------- 回放语义 (内存存储流程, issue #28) ----------
 
     @Test

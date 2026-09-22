@@ -39,6 +39,8 @@ import java.time.Duration;
  *       {@code Idempotency-Replayed: true} 响应头); 占位无响应 → 409 + 10501 (请求处理中);
  *       无键 (TTL 过期或已释放, SETNX 失败与释放的竞态) → 再占位按新请求</li>
  *   <li>未带头: 不干预 (幂等是客户端可选能力)</li>
+ *   <li>multipart 请求: 透传放行, 不做任何裁决 — <b>幂等语义仅覆盖 JSON 请求体,
+ *       multipart 上传不在幂等保护范围</b> (回归 2026-09-21-04 BL03 P1-1)</li>
  * </ul>
  * <p>key 作用域 = apiKey + Idempotency-Key (apiKey 天然隔离租户/用户).
  * <p>order 在限流 (+10) 之后.
@@ -68,6 +70,13 @@ public class IdempotencyWebFilter implements WebFilter {
         if (!props.isEnabled()
                 || !"POST".equalsIgnoreCase(exchange.getRequest().getMethod().name())
                 || !exchange.getRequest().getPath().value().startsWith("/v1/")) {
+            return chain.filter(exchange);
+        }
+        // multipart 透传放行 (回归 2026-09-21-04 BL03 P1-1): 幂等语义仅覆盖 JSON 请求体,
+        // multipart 上传不在幂等保护范围 — 不做 body 缓存/哈希/占位/回放裁决, 原样放行到下游.
+        // (join 全量读体既破坏 multipart 边界流式解析, 也让上传接口被幂等裁决误伤 500;
+        //  上传按内容寻址天然幂等, 无需键去重)
+        if (isMultipart(exchange.getRequest().getHeaders().getFirst("Content-Type"))) {
             return chain.filter(exchange);
         }
         String idemKey = exchange.getRequest().getHeaders().getFirst(IDEMPOTENCY_KEY_HEADER);
@@ -229,6 +238,14 @@ public class IdempotencyWebFilter implements WebFilter {
                 .getBytes(StandardCharsets.UTF_8);
         DataBuffer buffer = response.bufferFactory().wrap(bytes);
         return response.writeWith(Mono.just(buffer));
+    }
+
+    /**
+     * multipart 识别 (契约: 前缀匹配 multipart/* 族, 与宿主侧 MultipartSafeIdempotencyConfig
+     * 同口径; 畸形/缺失 Content-Type 视为非 multipart).
+     */
+    private static boolean isMultipart(String contentType) {
+        return contentType != null && contentType.toLowerCase().startsWith("multipart/");
     }
 
     /** 请求体 MD5 摘要 (hex). */
