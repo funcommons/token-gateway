@@ -17,3 +17,6 @@ docs/.vitepress/dist/
 docs/.vitepress/cache/
 data/
 .jqwik-database
+
+# claude 会话运行时产物
+.claude/scheduled_tasks.lock
