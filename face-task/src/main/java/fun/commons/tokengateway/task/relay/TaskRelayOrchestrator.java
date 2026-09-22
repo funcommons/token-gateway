@@ -154,6 +154,8 @@ public class TaskRelayOrchestrator {
                     resp.getMessage() == null ? "invalid token" : resp.getMessage());
             case 402 -> new RelayException(402, ApiCode.INSUFFICIENT_BALANCE.getCode(),
                     resp.getMessage() == null ? "余额不足" : resp.getMessage());
+            case 403 -> new RelayException(403, ApiCode.FORBIDDEN.getCode(),
+                    resp.getMessage() == null ? "forbidden" : resp.getMessage());
             default -> new RelayException(504, "token 校验服务不可用, 请重试");
         };
     }
