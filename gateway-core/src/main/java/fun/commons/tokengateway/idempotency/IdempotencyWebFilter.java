@@ -42,7 +42,9 @@ import java.time.Duration;
  *   <li>multipart 请求: 透传放行, 不做任何裁决 — <b>幂等语义仅覆盖 JSON 请求体,
  *       multipart 上传不在幂等保护范围</b> (回归 2026-09-21-04 BL03 P1-1)</li>
  * </ul>
- * <p>key 作用域 = apiKey + Idempotency-Key (apiKey 天然隔离租户/用户).
+ * <p>key 作用域 = 凭证 + Idempotency-Key + 请求 path (04-F1, 组合后哈希; Stripe 口径:
+ * key 作用域 = 首请求 path) — 同 key 跨 path 各自独立互不互斥, 同 key 同 path 异 body
+ * 仍由 body hash 规约 422 拒绝; 凭证天然隔离租户/用户.
  * <p>order 在限流 (+10) 之后.
  */
 @Slf4j
@@ -83,10 +85,11 @@ public class IdempotencyWebFilter implements WebFilter {
         if (idemKey == null || idemKey.isBlank()) {
             return chain.filter(exchange);
         }
-        String redisKey = props.getKeyPrefix() + resolveApiKey(exchange) + ":" + idemKey.trim();
+        String redisKey = scopeKeyOf(props.getKeyPrefix(), resolveApiKey(exchange),
+                idemKey.trim(), exchange.getRequest().getPath().value());
         Duration ttl = Duration.ofHours(props.getTtlHours());
         // body hash 规约 (回归 2026-09-21-01 BL11 P2): 读请求体算 MD5 → 装饰重放给下游 →
-        // 占位/回放/缓存全链携带 hash, 同 key 异 body 422 拒绝 (不再回放错误首响)
+        // 占位/回放/缓存全链携带 hash, 同 key 同 path 异 body 422 拒绝 (不再回放错误首响)
         return DataBufferUtils.join(exchange.getRequest().getBody())
                 .map(buffer -> {
                     byte[] bytes = new byte[buffer.readableByteCount()];
@@ -262,6 +265,19 @@ public class IdempotencyWebFilter implements WebFilter {
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new IllegalStateException("MD5 不可用", e);
         }
+    }
+
+    /**
+     * 幂等缓存键构造 (04-F1 key+path 作用域正式化): 作用域 = 凭证 + Idempotency-Key +
+     * 请求 path, 组合后 MD5 — 同 key 不同 path 各自独立 (均按首请求放行, 互不互斥;
+     * Stripe 口径: key 作用域 = 首请求 path); 同 key 同 path 异 body 仍由 body hash
+     * 规约 422 拒绝. 组合后哈希: 定长 key 防超长凭证/path 撑爆 Redis 键, 且凭证原文
+     * 不再残留在存储层 (旧格式 {@code idem:<凭证>:<key>} 的存量条目随 48h TTL 自然淘汰).
+     * 包内可见供契约测试锚定同一构造.
+     */
+    static String scopeKeyOf(String keyPrefix, String credential, String idemKey, String requestPath) {
+        return keyPrefix + md5Hex((credential + ":" + idemKey + ":" + requestPath)
+                .getBytes(StandardCharsets.UTF_8));
     }
 
     private static String resolveApiKey(ServerWebExchange exchange) {

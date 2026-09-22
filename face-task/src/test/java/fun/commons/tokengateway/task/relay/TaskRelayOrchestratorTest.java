@@ -702,6 +702,68 @@ class TaskRelayOrchestratorTest {
         verify(mappingStore, never()).get(anyString());
     }
 
+    // ---------- B-14: validate fail 信封映射矩阵 (fail 401/402 终态, 其余 504 可重试) ----------
+
+    @Test
+    @DisplayName("B-14: validate fail(401) key 禁用 → 终态 401 + 10202 + 信封 message, 不产生任务")
+    void createValidateFail401Terminal() {
+        backend.enqueue(json("{\"code\":401,\"message\":\"API Key 已禁用或过期\"}"));
+
+        StepVerifier.create(orchestrator.create("image", "sk-bad", Map.of("model", "sd-xl"), null))
+                .expectErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 401
+                        && re.getCode() == ApiCode.TOKEN_INVALID.getCode()
+                        && "API Key 已禁用或过期".equals(re.getMessage()))
+                .verify();
+        verify(lotaskClient, never()).submit(anyString(), anyString(), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("B-14: validate fail(402) 配额耗尽 → 终态 402 + 10617 + 信封 message, 不产生任务")
+    void createValidateFail402Terminal() {
+        backend.enqueue(json("{\"code\":402,\"message\":\"API Key 配额已耗尽\"}"));
+
+        StepVerifier.create(orchestrator.create("image", "sk-poor", Map.of("model", "sd-xl"), null))
+                .expectErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 402
+                        && re.getCode() == ApiCode.INSUFFICIENT_BALANCE.getCode()
+                        && "API Key 配额已耗尽".equals(re.getMessage()))
+                .verify();
+        verify(lotaskClient, never()).submit(anyString(), anyString(), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("B-14: validate fail(10001) 非永久码 → 维持 504 可重试 (真基础设施错误语义不回退)")
+    void createValidateFailOtherCodeStill504() {
+        backend.enqueue(json("{\"code\":10001,\"message\":\"系统繁忙，请稍后再试\"}"));
+
+        StepVerifier.create(orchestrator.create("image", "sk-x", Map.of("model", "sd-xl"), null))
+                .expectErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 504
+                        && re.getCode() == ApiCode.SERVICE_TIMEOUT.getCode())
+                .verify();
+        verify(lotaskClient, never()).submit(anyString(), anyString(), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("B-14: poll 时 validate fail(401/402) 同样终态 401/402")
+    void pollValidateFail401And402Terminal() {
+        backend.enqueue(json("{\"code\":401,\"message\":\"API Key 已禁用或过期\"}"));
+        StepVerifier.create(orchestrator.poll("video", "T-x", "sk-bad", null))
+                .expectErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 401
+                        && re.getCode() == ApiCode.TOKEN_INVALID.getCode())
+                .verify();
+
+        backend.enqueue(json("{\"code\":402,\"message\":\"API Key 配额已耗尽\"}"));
+        StepVerifier.create(orchestrator.poll("video", "T-x", "sk-poor", null))
+                .expectErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 402
+                        && re.getCode() == ApiCode.INSUFFICIENT_BALANCE.getCode())
+                .verify();
+        verify(mappingStore, never()).get(anyString());
+    }
+
     @Test
     @DisplayName("poll: 映射缺失 → 404 + 10400")
     void pollMappingMissing() {

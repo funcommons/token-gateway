@@ -7,6 +7,7 @@ import fun.commons.tokengateway.contract.TokenValidateRequest;
 import fun.commons.tokengateway.contract.TokenValidateVO;
 import fun.commons.tokengateway.exception.RelayException;
 import fun.commons.tokengateway.framework.ApiCode;
+import fun.commons.tokengateway.framework.ApiResponse;
 import fun.commons.tokengateway.rpc.HttpChannelApi;
 import fun.commons.tokengateway.rpc.HttpTokenApi;
 import fun.commons.tokengateway.spi.config.TokenGatewayProperties;
@@ -119,9 +120,10 @@ public class TaskRelayOrchestrator {
                 .apiKey(apiKey).clientIp(clientIp).model(model).build())
                 .flatMap(tokenResp -> {
                     if (tokenResp == null || !tokenResp.isSuccess()) {
-                        // token 校验 RPC 失败/超时 (fail 包络 10003) → 504 可重试基础设施错误,
-                        // 区别于 key 真失效的 401 (issue #22)
-                        return Mono.error(new RelayException(504, "token 校验服务不可用, 请重试"));
+                        // fail 信封分类 (B-14): 401 (key 缺失/禁用/过期) / 402 (配额耗尽) 为永久性
+                        // 拒绝 → 终态 401/402, 不得按基础设施错误重试; 其余 fail 码 (10003 RPC
+                        // 降级/超时等) 维持 504 可重试 (issue #22 语义不回退)
+                        return Mono.error(validateRejectOf(tokenResp));
                     }
                     if (tokenResp.getData() == null || !tokenResp.getData().isValid()) {
                         return Mono.error(new RelayException(401, "invalid token"));
@@ -133,6 +135,27 @@ public class TaskRelayOrchestrator {
                                     idemKey != null && idemKey.matches("\\d+") ? idemKey : requestId,
                                     channel.getPriceQuote()));
                 });
+    }
+
+    /**
+     * validate fail 信封分类 (B-14): 宿主 validate 的 fail(401) (key 缺失/禁用/过期) 与
+     * fail(402) (配额耗尽) 是<b>永久性拒绝</b>, 原样按 504 可重试会引发客户端重试风暴;
+     * 映射为终态 401/402 (信封 message 透传, 业务码按网关既有口径 10202/10617).
+     * 其余 fail 码 (10003 RPC 降级/超时等真基础设施错误) 维持 504 可重试 (issue #22 不回退).
+     * success 信封 valid=false 的无效 key 终态 401 在调用点处理, 不经过此处.
+     * create/poll 两处 validate 消费点共用.
+     */
+    private static RelayException validateRejectOf(ApiResponse<TokenValidateVO> resp) {
+        if (resp == null) {
+            return new RelayException(504, "token 校验服务不可用, 请重试");
+        }
+        return switch (resp.getCode()) {
+            case 401 -> new RelayException(401, ApiCode.TOKEN_INVALID.getCode(),
+                    resp.getMessage() == null ? "invalid token" : resp.getMessage());
+            case 402 -> new RelayException(402, ApiCode.INSUFFICIENT_BALANCE.getCode(),
+                    resp.getMessage() == null ? "余额不足" : resp.getMessage());
+            default -> new RelayException(504, "token 校验服务不可用, 请重试");
+        };
     }
 
     /**
@@ -301,9 +324,10 @@ public class TaskRelayOrchestrator {
         return tokenApi.validate(TokenValidateRequest.builder().apiKey(apiKey).clientIp(clientIp).build())
                 .flatMap(tokenResp -> {
                     if (tokenResp == null || !tokenResp.isSuccess()) {
-                        // token 校验 RPC 失败/超时 (fail 包络 10003) → 504 可重试基础设施错误,
-                        // 区别于 key 真失效的 401 (issue #22)
-                        return Mono.error(new RelayException(504, "token 校验服务不可用, 请重试"));
+                        // fail 信封分类 (B-14): 401 (key 缺失/禁用/过期) / 402 (配额耗尽) 为永久性
+                        // 拒绝 → 终态 401/402, 不得按基础设施错误重试; 其余 fail 码 (10003 RPC
+                        // 降级/超时等) 维持 504 可重试 (issue #22 语义不回退)
+                        return Mono.error(validateRejectOf(tokenResp));
                     }
                     if (tokenResp.getData() == null || !tokenResp.getData().isValid()) {
                         return Mono.error(new RelayException(401, "invalid token"));

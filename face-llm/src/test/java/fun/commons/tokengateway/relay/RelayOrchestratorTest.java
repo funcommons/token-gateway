@@ -114,6 +114,62 @@ class RelayOrchestratorTest {
                         && re.getCode() == 10003);
     }
 
+    // ---------- B-14: validate fail 信封映射矩阵 (fail 401/402 终态, 其余 504 可重试) ----------
+
+    @Test
+    @DisplayName("B-14: validate fail(401) key 禁用 → 终态 401 + 10202 + 信封 message (不映射 504)")
+    void prepareValidateFail401Terminal() {
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":401,\"message\":\"API Key 已禁用或过期\"}"));
+
+        StepVerifier.create(orchestrator.prepare("sk-bad", "gpt-4o", 0, 0, null, null, null))
+                .verifyErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 401
+                        && re.getCode() == 10202
+                        && "API Key 已禁用或过期".equals(re.getMessage()));
+    }
+
+    @Test
+    @DisplayName("B-14: validate fail(402) 配额耗尽 → 终态 402 + 10617 + 信封 message (不映射 504)")
+    void prepareValidateFail402Terminal() {
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":402,\"message\":\"API Key 配额已耗尽\"}"));
+
+        StepVerifier.create(orchestrator.prepare("sk-poor", "gpt-4o", 0, 0, null, null, null))
+                .verifyErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 402
+                        && re.getCode() == 10617
+                        && "API Key 配额已耗尽".equals(re.getMessage()));
+    }
+
+    @Test
+    @DisplayName("B-14: validate fail(10001) 非永久码 → 维持 504 + 10003 可重试 (语义不回退)")
+    void prepareValidateFailOtherCodeStill504() {
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":10001,\"message\":\"系统繁忙，请稍后再试\"}"));
+
+        StepVerifier.create(orchestrator.prepare("sk-test", "gpt-4o", 0, 0, null, null, null))
+                .verifyErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 504
+                        && re.getCode() == 10003);
+    }
+
+    @Test
+    @DisplayName("B-14 回归: success + valid=false → 401 + 10202 (B-12 异常用户路径语义不变)")
+    void prepareSuccessEnvelopeInvalidTokenStill401() {
+        backend.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"data\":{\"valid\":false}}"));
+
+        StepVerifier.create(orchestrator.prepare("sk-bad", "gpt-4o", 0, 0, null, null, null))
+                .verifyErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 401
+                        && re.getCode() == 10202);
+    }
+
     @Test
     @DisplayName("channel distribute 业务码 10400 → 404 + 信封 10400 (模型不存在/无可用渠道)")
     void distributeFailed() {

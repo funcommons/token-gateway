@@ -59,9 +59,10 @@ public class ModelsController {
                 .apiKey(apiKey).clientIp(clientIpResolver.resolve(exchange)).model(null).build())
                 .flatMap(tokenResp -> {
                     if (tokenResp == null || !tokenResp.isSuccess()) {
-                        // token 校验 RPC 失败/超时 (fail 包络 10003) → 504 可重试基础设施错误,
-                        // 区别于 key 真失效的 401 (issue #22)
-                        return Mono.error(new RelayException(504, "token 校验服务不可用, 请重试"));
+                        // B-14 同矩阵: fail 401/402 → 终态拒绝 (配额耗尽/禁用不得按基础设施
+                        // 错误重试); 其余 fail 码 (10003 RPC 降级/超时等) 维持 504 可重试
+                        return Mono.error(fun.commons.tokengateway.relay.RelayOrchestrator
+                                .validateRejectOf(tokenResp));
                     }
                     if (tokenResp.getData() == null || !tokenResp.getData().isValid()) {
                         return Mono.error(new RelayException(401, "invalid token"));

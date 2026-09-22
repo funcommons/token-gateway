@@ -86,14 +86,25 @@ class IdempotencyWebFilterTest {
         return response.writeWith(Mono.just(buffer));
     }
 
-    /** 内存三态存储 (占位 + 首响), 供回放流程级断言. */
+    /**
+     * 内存三态存储 (占位 + 首响), 供回放流程级断言.
+     * 镜像 RedisIdempotencyStore 的 hash 形态语义 (04-F1 后同端点异 body 422 流程可在
+     * 单测内走通): 占位值 "h:&lt;hash&gt;", 首响条目附 hash, findResponse 不一致抛 BodyMismatch.
+     */
     private static final class InMemoryStore implements IdempotencyStore {
         final Map<String, String> placeholders = new ConcurrentHashMap<>();
         final Map<String, IdempotentResponse> responses = new ConcurrentHashMap<>();
+        final Map<String, String> responseHashes = new ConcurrentHashMap<>();
 
         @Override
         public Mono<Boolean> tryAcquire(String key, Duration ttl) {
             return Mono.just(placeholders.putIfAbsent(key, "1") == null);
+        }
+
+        @Override
+        public Mono<Boolean> tryAcquire(String key, Duration ttl, String bodyHash) {
+            return Mono.just(placeholders
+                    .putIfAbsent(key, "h:" + (bodyHash == null ? "" : bodyHash)) == null);
         }
 
         @Override
@@ -104,7 +115,16 @@ class IdempotencyWebFilterTest {
 
         @Override
         public Mono<Void> saveResponse(String key, int status, String contentType, String body) {
+            return saveResponse(key, status, contentType, body, null);
+        }
+
+        @Override
+        public Mono<Void> saveResponse(String key, int status, String contentType, String body,
+                                       String bodyHash) {
             responses.put(key, new IdempotentResponse(status, contentType, body));
+            if (bodyHash != null) {
+                responseHashes.put(key, bodyHash);
+            }
             return Mono.empty();
         }
 
@@ -112,10 +132,25 @@ class IdempotencyWebFilterTest {
         public Mono<IdempotentResponse> findResponse(String key) {
             return Mono.justOrEmpty(responses.get(key));
         }
+
+        @Override
+        public Mono<IdempotentResponse> findResponse(String key, String bodyHash) {
+            IdempotentResponse cached = responses.get(key);
+            if (cached == null) {
+                return Mono.empty();
+            }
+            String cachedHash = responseHashes.get(key);
+            if (bodyHash != null && !bodyHash.isEmpty()
+                    && cachedHash != null && !bodyHash.equals(cachedHash)) {
+                return Mono.error(new IdempotencyStore.BodyMismatchException(key));
+            }
+            return Mono.just(cached);
+        }
     }
 
-    private static String redisKeyOf(String idemKey) {
-        return "idem:Bearer sk-x:" + idemKey;
+    /** 缓存键锚定 (与 filter 同一构造, 04-F1: 作用域 = 凭证 + key + path). */
+    private static String redisKeyOf(String path, String idemKey) {
+        return IdempotencyWebFilter.scopeKeyOf("idem:", "Bearer sk-x", idemKey, path);
     }
 
     // ---------- 占位/释放 (mock 存储语义) ----------
@@ -129,7 +164,8 @@ class IdempotencyWebFilterTest {
                 .verifyComplete();
 
         assertThat(chainCalled).isTrue();
-        verify(store).tryAcquire(eq("idem:Bearer sk-x:k-1"), eq(Duration.ofHours(48)), any());
+        verify(store).tryAcquire(eq(redisKeyOf("/v1/chat/completions", "k-1")),
+                eq(Duration.ofHours(48)), any());
     }
 
     @Test
@@ -152,9 +188,11 @@ class IdempotencyWebFilterTest {
     @Test
     @DisplayName("无键竞态 (已释放/过期): findResponse 空 + 再占位成功 → 放行按新请求")
     void releasedKeyRacesIntoNewRequest() {
-        when(store.tryAcquire(eq("idem:Bearer sk-x:k-1"), eq(Duration.ofHours(48)), any()))
+        when(store.tryAcquire(eq(redisKeyOf("/v1/chat/completions", "k-1")),
+                eq(Duration.ofHours(48)), any()))
                 .thenReturn(Mono.just(false), Mono.just(true));
-        when(store.findResponse(eq("idem:Bearer sk-x:k-1"), any())).thenReturn(Mono.empty());
+        when(store.findResponse(eq(redisKeyOf("/v1/chat/completions", "k-1")), any()))
+                .thenReturn(Mono.empty());
 
         StepVerifier.create(filter.filter(exchangeFor("/v1/chat/completions", "k-1"), chain))
                 .verifyComplete();
@@ -175,7 +213,7 @@ class IdempotencyWebFilterTest {
         StepVerifier.create(filter.filter(exchangeFor("/v1/chat/completions", "k-2"), failChain))
                 .verifyComplete();
 
-        verify(store).release("idem:Bearer sk-x:k-2");
+        verify(store).release(redisKeyOf("/v1/chat/completions", "k-2"));
     }
 
     @Test
@@ -188,7 +226,8 @@ class IdempotencyWebFilterTest {
                 .verifyComplete();
 
         verify(store, never()).release(anyString());
-        verify(store).saveResponse(eq("idem:Bearer sk-x:k-3"), eq(200), any(), any(), any());
+        verify(store).saveResponse(eq(redisKeyOf("/v1/chat/completions", "k-3")),
+                eq(200), any(), any(), any());
     }
 
     @Test
@@ -201,15 +240,16 @@ class IdempotencyWebFilterTest {
         StepVerifier.create(filter.filter(exchangeFor("/v1/chat/completions", "k-4"), boomChain))
                 .verifyErrorMatches(e -> "boom".equals(e.getMessage()));
 
-        verify(store).release("idem:Bearer sk-x:k-4");
+        verify(store).release(redisKeyOf("/v1/chat/completions", "k-4"));
     }
 
     @Test
-    @DisplayName("body 冲突 (hash 规约): 同 key 异 body → 422, 不回放不进 chain")
+    @DisplayName("body 冲突 (hash 规约): 同 key 同 path 异 body → 422, 不回放不进 chain")
     void bodyMismatchRejected422() {
         when(store.tryAcquire(anyString(), any(Duration.class), any())).thenReturn(Mono.just(false));
         when(store.findResponse(anyString(), any()))
-                .thenReturn(Mono.error(new IdempotencyStore.BodyMismatchException("idem:Bearer sk-x:k-m")));
+                .thenReturn(Mono.error(new IdempotencyStore.BodyMismatchException(
+                        redisKeyOf("/v1/chat/completions", "k-m"))));
 
         MockServerWebExchange mismatchExchange = MockServerWebExchange.from(
                 MockServerHttpRequest.post("/v1/chat/completions")
@@ -338,7 +378,7 @@ class IdempotencyWebFilterTest {
         StepVerifier.create(filter.filter(first, jsonChain("{\"task_no\":\"T1\"}")))
                 .verifyComplete();
         assertThat(first.getResponse().getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(mem.responses).containsKey(redisKeyOf("k-r1"));
+        assertThat(mem.responses).containsKey(redisKeyOf("/v1/onetoken/images", "k-r1"));
 
         MockServerWebExchange second = exchangeFor("/v1/onetoken/images", "k-r1");
         AtomicBoolean secondChainCalled = new AtomicBoolean(false);
@@ -362,7 +402,7 @@ class IdempotencyWebFilterTest {
     @DisplayName("处理中并发: 占位无响应 → 二次 409 + 10501, 不进 chain")
     void concurrentInProgressRejects() {
         InMemoryStore mem = new InMemoryStore();
-        mem.placeholders.put(redisKeyOf("k-r2"), "1");
+        mem.placeholders.put(redisKeyOf("/v1/onetoken/images", "k-r2"), "1");
         filter = new IdempotencyWebFilter(mem, props);
 
         MockServerWebExchange second = exchangeFor("/v1/onetoken/images", "k-r2");
@@ -388,7 +428,7 @@ class IdempotencyWebFilterTest {
         StepVerifier.create(filter.filter(first, notFoundChain))
                 .verifyComplete();
         assertThat(first.getResponse().getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-        assertThat(mem.placeholders).doesNotContainKey(redisKeyOf("k-r4"));
+        assertThat(mem.placeholders).doesNotContainKey(redisKeyOf("/v1/onetoken/images", "k-r4"));
         assertThat(mem.responses).isEmpty();
 
         // 同 key 重试 → 按新请求执行 (chain 再次进入)
@@ -420,8 +460,8 @@ class IdempotencyWebFilterTest {
         StepVerifier.create(filter.filter(first, sseChain))
                 .verifyComplete();
         assertThat(first.getResponse().getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(mem.responses).doesNotContainKey(redisKeyOf("k-r5"));
-        assertThat(mem.placeholders).containsKey(redisKeyOf("k-r5"));
+        assertThat(mem.responses).doesNotContainKey(redisKeyOf("/v1/chat/completions", "k-r5"));
+        assertThat(mem.placeholders).containsKey(redisKeyOf("/v1/chat/completions", "k-r5"));
 
         MockServerWebExchange second = exchangeFor("/v1/chat/completions", "k-r5");
         StepVerifier.create(filter.filter(second, chain))
@@ -442,13 +482,96 @@ class IdempotencyWebFilterTest {
         MockServerWebExchange first = exchangeFor("/v1/chat/completions", "k-r6");
         StepVerifier.create(filter.filter(first, jsonChain(bigBody)))
                 .verifyComplete();
-        assertThat(mem.responses).doesNotContainKey(redisKeyOf("k-r6"));
-        assertThat(mem.placeholders).containsKey(redisKeyOf("k-r6"));
+        assertThat(mem.responses).doesNotContainKey(redisKeyOf("/v1/chat/completions", "k-r6"));
+        assertThat(mem.placeholders).containsKey(redisKeyOf("/v1/chat/completions", "k-r6"));
 
         MockServerWebExchange second = exchangeFor("/v1/chat/completions", "k-r6");
         StepVerifier.create(filter.filter(second, chain))
                 .verifyComplete();
         assertThat(chainCalled).isFalse();
         assertThat(second.getResponse().getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    // ---------- key+path 作用域 (04-F1 正式化, Stripe 口径: key 作用域 = 首请求 path) ----------
+
+    @Test
+    @DisplayName("04-F1 跨端点同 key 异 body: 各自独立 → 双 200, 无回放无 422")
+    void crossEndpointSameKeyDistinctBodiesBothPass() {
+        InMemoryStore mem = new InMemoryStore();
+        filter = new IdempotencyWebFilter(mem, props);
+        String bodyA = "{\"model\":\"task-a\"}";
+        String bodyB = "{\"model\":\"chat-b\",\"messages\":[]}";
+
+        // 首请求: /v1/onetoken/images + key k-f1 + body A → 200 缓存 (作用域 A)
+        MockServerWebExchange first = jsonExchange("/v1/onetoken/images", "k-f1", bodyA);
+        StepVerifier.create(filter.filter(first, jsonChain("{\"task_no\":\"T1\"}")))
+                .verifyComplete();
+        assertThat(first.getResponse().getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // 跨端点复用同 key + 异 body: /v1/chat/completions → 独立作用域, 按新请求放行 200
+        MockServerWebExchange second = jsonExchange("/v1/chat/completions", "k-f1", bodyB);
+        AtomicBoolean secondChainCalled = new AtomicBoolean(false);
+        StepVerifier.create(filter.filter(second, ex -> {
+                    secondChainCalled.set(true);
+                    return writeBody(ex.getResponse(), HttpStatus.OK,
+                            MediaType.APPLICATION_JSON, "{\"chat\":true}");
+                }))
+                .verifyComplete();
+
+        assertThat(secondChainCalled).isTrue();
+        assertThat(second.getResponse().getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(second.getResponse().getHeaders().getFirst(IdempotencyWebFilter.REPLAYED_HEADER))
+                .isNull();
+        // 作用域隔离锚定: 两端点命中不同缓存键, 互不占位互不回放
+        assertThat(mem.responses).containsOnlyKeys(
+                redisKeyOf("/v1/onetoken/images", "k-f1"),
+                redisKeyOf("/v1/chat/completions", "k-f1"));
+    }
+
+    @Test
+    @DisplayName("04-F1 回归: 同端点同 key 异 body → 仍 422 (path 不放宽 body 冲突裁决)")
+    void sameEndpointSameKeyDifferentBodyStill422() {
+        InMemoryStore mem = new InMemoryStore();
+        filter = new IdempotencyWebFilter(mem, props);
+        String bodyA = "{\"model\":\"task-a\",\"params\":{\"size\":\"1:1\"}}";
+        String bodyB = "{\"model\":\"task-a\",\"params\":{\"size\":\"16:9\"}}";
+
+        MockServerWebExchange first = jsonExchange("/v1/onetoken/images", "k-f2", bodyA);
+        StepVerifier.create(filter.filter(first, jsonChain("{\"task_no\":\"T2\"}")))
+                .verifyComplete();
+        assertThat(first.getResponse().getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        MockServerWebExchange second = jsonExchange("/v1/onetoken/images", "k-f2", bodyB);
+        StepVerifier.create(filter.filter(second, chain))
+                .verifyComplete();
+
+        assertThat(chainCalled).isFalse();
+        assertThat(second.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(second.getResponse().getBodyAsString().block()).contains("10100");
+        assertThat(second.getResponse().getHeaders().getFirst(IdempotencyWebFilter.REPLAYED_HEADER))
+                .isNull();
+    }
+
+    @Test
+    @DisplayName("04-F1 作用域构造: 同 key 异 path 哈希键不同 / 同 key 同 path 哈希键一致")
+    void scopeKeyChangesWithPath() {
+        String keyA = IdempotencyWebFilter.scopeKeyOf("idem:", "Bearer sk-x", "k-f3",
+                "/v1/onetoken/images");
+        String keyB = IdempotencyWebFilter.scopeKeyOf("idem:", "Bearer sk-x", "k-f3",
+                "/v1/chat/completions");
+        String keyARest = IdempotencyWebFilter.scopeKeyOf("idem:", "Bearer sk-x", "k-f3",
+                "/v1/onetoken/images");
+        assertThat(keyA).isNotEqualTo(keyB);
+        assertThat(keyA).isEqualTo(keyARest);
+        assertThat(keyA).startsWith("idem:").hasSize("idem:".length() + 32);
+    }
+
+    /** 带 JSON 请求体的 POST 替身 (04-F1 异 body 流程用). */
+    private MockServerWebExchange jsonExchange(String path, String idemKey, String body) {
+        return MockServerWebExchange.from(MockServerHttpRequest.post(path)
+                .header("Authorization", "Bearer sk-x")
+                .header(IdempotencyWebFilter.IDEMPOTENCY_KEY_HEADER, idemKey)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body));
     }
 }
