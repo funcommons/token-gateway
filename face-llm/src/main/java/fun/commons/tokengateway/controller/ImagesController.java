@@ -29,6 +29,12 @@ import java.util.Map;
  * <p>Body: { "model": "dall-e-3", "prompt": "...", "n": 1, "size": "1024x1024" }
  * <p>鉴权: Authorization: Bearer 或 x-api-key 双头.
  * <p>无流式; 上游响应原样透传; 图像生成无 usage, 结算按 0 completion 处理.
+ *
+ * <p>background 异步 job 形态不支持 (issue #39): 本端点是 LLM 面同步形态; face=all 下
+ * 任务面 job controller (OpenAiImagesTaskController) 为避免同路径映射冲突不装配。
+ * 请求体带 {@code background:true} 时显式 400 拒绝并指引替代入口——不静默当同步转发
+ * (客户端预期 202+job 却同步挂死比显式错误更坏)。异步生图走 face=task 部署形态的
+ * {@code /v1/images/generations + background:true} 或任意形态的 {@code /v1/onetoken/images}。
  */
 @Slf4j
 @RestController
@@ -65,6 +71,14 @@ public class ImagesController {
     private Mono<ResponseEntity<Object>> doGenerate(
             String authorization, String xApiKey, Map<String, Object> body, String traceId,
             String clientIp, HttpHeaders clientHeaders) {
+        // issue #39: background:true 显式拒绝 (本端点仅同步形态), 不静默当同步转发;
+        // face=all 下任务面 job controller 不装配 (同路径冲突规避, #19), 此守卫是唯一防线
+        if (isBackgroundJob(body)) {
+            return Mono.error(new fun.commons.tokengateway.exception.RelayException(400,
+                    fun.commons.tokengateway.framework.ApiCode.PARAM_ERROR.getCode(),
+                    "background 异步 job 形态在同步端点不可用: 请用 face=task 部署形态的 "
+                            + "/v1/images/generations + background:true, 或任意形态的 /v1/onetoken/images"));
+        }
         String apiKey = extractApiKey(authorization, xApiKey);
         String model = resolveModel(body);
         int estPromptTokens = estimateFromPrompt(body);
@@ -132,6 +146,21 @@ public class ImagesController {
             return Math.max(1, s.length() / 4);
         }
         return 1;
+    }
+
+    /**
+     * 是否 background 异步 job 请求 (issue #39): true 布尔或字符串 "true" 均认
+     * (与 isStream 同款宽松判定); null/false/其它值 → false.
+     */
+    private static boolean isBackgroundJob(Map<String, Object> body) {
+        if (body == null) {
+            return false;
+        }
+        Object b = body.get("background");
+        if (b instanceof Boolean bool) {
+            return bool;
+        }
+        return b instanceof String s && "true".equalsIgnoreCase(s);
     }
 
     private static int elapsedMs(long startNs) {

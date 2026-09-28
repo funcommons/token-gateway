@@ -31,6 +31,12 @@
 | 5 | `/v1/images/generations`（缺省 background） | POST | 同步生图封装（60s 超时降级 PROCESSING，见 §5） | **仅 task** |
 | 6 | `/v1/images/generations/{id}` | GET | 轮询生图 job | **仅 task** |
 
+> **为何 #4-#6「仅 task」而非 task/all（issue #39）**：LLM 面（face-llm）有一个同路径的
+> 同步 ImagesController（`/v1/images/generations` 同步透传）。face=all 下同路径双映射
+> 会直接启动失败，因此任务面 job controller 只在 face=task 时装配。face=all 形态下
+> 该路径由 LLM 面同步端点占用：`background:true` 请求会被**显式 400 拒绝**（报文指引
+> 替代入口），不会被静默当同步转发；异步生图请改用 `/v1/onetoken/images`（任意形态可用）。
+
 鉴权双头（`Authorization: Bearer` 优先 / `x-api-key`），创建类端点支持 `Idempotency-Key`——同[通用约定](./03_通用约定.md)。
 
 ## 3. 异步生视频（sora job 形状）

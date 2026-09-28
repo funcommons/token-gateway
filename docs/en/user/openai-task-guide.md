@@ -31,6 +31,14 @@ Both protocols create the same task: the OpenAI `id` **is** the OneToken `task_n
 | 5 | `/v1/images/generations` (background omitted) | POST | Synchronous wrapper (60s window, degrades to PROCESSING, see §5) | **task only** |
 | 6 | `/v1/images/generations/{id}` | GET | Poll the image job | **task only** |
 
+> **Why #4-#6 are "task only" and not task/all (issue #39)**: the LLM face has a synchronous
+> ImagesController on the same path (`/v1/images/generations` sync passthrough). Under face=all
+> the double mapping would fail startup, so the task-face job controller only assembles when
+> face=task. Under face=all the path is owned by the LLM sync endpoint: requests with
+> `background:true` are **explicitly rejected with 400** (message points to the alternative
+> entry) instead of being silently relayed as sync. For async images under face=all, use
+> `/v1/onetoken/images` (available in any face).
+
 Dual auth headers (`Authorization: Bearer` preferred / `x-api-key`); create endpoints accept `Idempotency-Key` — same as [Conventions](./conventions.md).
 
 ## 3. Async Video Generation (sora job shape)

@@ -225,6 +225,34 @@ class ImagesControllerTest {
                         && ((RelayException) e).getHttpStatus() == 401);
     }
 
+    @Test
+    @DisplayName("background:true → 400 显式拒绝并指引替代入口, 不静默当同步转发 (issue #39)")
+    void backgroundTrueRejectedExplicitly() {
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", "gpt-image-1");
+        body.put("prompt", "a cat");
+        body.put("background", true);
+        StepVerifier.create((Mono<?>) controller.generate("Bearer sk-x", null, body, exchange()))
+                .verifyErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 400
+                        && re.getMessage().contains("background")
+                        && re.getMessage().contains("/v1/onetoken/images"));
+        // 拒绝在任何 RPC 之前: 后端零调用
+        org.assertj.core.api.Assertions.assertThat(backendServer.getRequestCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("background 字符串 \"true\" 同认拒绝; false/缺省不影响同步路径 (issue #39)")
+    void backgroundStringFormAlsoRejected() {
+        Map<String, Object> body = new HashMap<>();
+        body.put("prompt", "x");
+        body.put("background", "true");
+        StepVerifier.create((Mono<?>) controller.generate("Bearer sk-x", null, body, exchange()))
+                .verifyErrorMatches(e -> e instanceof RelayException re
+                        && re.getHttpStatus() == 400);
+        org.assertj.core.api.Assertions.assertThat(backendServer.getRequestCount()).isZero();
+    }
+
     /** 直调注入 exchange (clientIp 解析入口; 缺省无 XFF → 取 mock 对端地址). */
     private static ServerWebExchange exchange() {
         return MockServerWebExchange.from(MockServerHttpRequest.post("/v1/test"));
