@@ -260,7 +260,8 @@ public class TaskRelayOrchestrator {
                     // timeouts/TaskMeta 同键解析, 网关 API 面 (poll_url 等) 维持模态
                     String submitTaskType = props.getTask().submitTaskTypeOf(modality, model);
                     String taskNo = generateTaskNo();
-                    Map<String, Object> payload = buildPayload(model, body, channel);
+                    Map<String, Object> payload = buildPayload(model, body, channel,
+                            token.getTenantId(), requestId);
                     String callbackUrl = props.getTask().getLotask().getWebhookCallbackUrl();
                     return lotaskClient.submit(submitTaskType, taskNo, payload, callbackUrl)
                             .flatMap(lotaskId -> {
@@ -275,7 +276,7 @@ public class TaskRelayOrchestrator {
                                                         submitTaskType,
                                                         notifyUrl == null ? null : notifyUrl.toString(),
                                                         deadline, channel.getApiKey()), ttl))
-                                        .thenReturn(createdView(modality, taskNo));
+                                        .thenReturn(createdView(modality, taskNo, deadline));
                             })
                             .onErrorResume(e -> {
                                 // submit 失败 → 全额退款, 不产生"扣了钱没任务" (《05》§11)
@@ -292,9 +293,19 @@ public class TaskRelayOrchestrator {
                 });
     }
 
-    /** 载荷: 业务参数 + notify_url + 加密路由快照 (R7 网关侧补偿, 平台只见密文). */
+    /**
+     * 载荷: 业务参数 + notify_url + 加密路由快照 (R7 网关侧补偿, 平台只见密文).
+     *
+     * <p>双锚 (issue #41): {@code tenantId} 与 {@code billingRequestId} 明文随载荷落
+     * lotask 平台 asts_task.payload —— 该 payload 即台账: 控制台三账 (任务/预扣/退款)
+     * join 锚点, 兼作 #29 受理上报丢失时的兜底真源 (可按 tenantId+requestId 反查预扣)。
+     * 键名 camelCase 随现有键风格; routeSnapshot 加密不变, 双锚明文仅落部署方内部
+     * 平台库, 无泄露面。billingRequestId = 本次计费链 requestId 原值 (数字幂等键优先,
+     * 否则网关生成的纯数字串, 见 create 入口 #30 口径)。
+     */
     private Map<String, Object> buildPayload(String model, Map<String, Object> body,
-                                             DistributeVO channel) {
+                                             DistributeVO channel, String tenantId,
+                                             String billingRequestId) {
         Map<String, Object> routeSnapshot = new LinkedHashMap<>();
         routeSnapshot.put("baseUrl", channel.getBaseUrl());
         routeSnapshot.put("apiKey", channel.getApiKey());
@@ -307,12 +318,16 @@ public class TaskRelayOrchestrator {
         payload.put("input", body.get("input"));
         payload.put("notifyUrl", body.get("notify_url"));
         payload.put("routeSnapshot", encrypted);
+        payload.put("tenantId", tenantId);
+        payload.put("billingRequestId", billingRequestId);
         return payload;
     }
 
     /**
      * 轮询 (终态幂等: 优先读终态条目——SUCCEEDED 返回 sig 代理 URL, EXPIRED 返回超时钟判定;
      * 非终态走 lotask 查询; lotask 不可达 → 502, 调用方退避重试, 状态不变不触计费).
+     * <p>非终态视图携带 expires_at (issue #42, 网关超时钟 deadline, ISO-8601; meta 缺失不补);
+     * 终态条目视图维持原字段集 (终态后 deadline 已无意义, 且保持存储结果原样回放)。
      *
      * @param clientIp 调用方客户端 IP (issue #27, controller 层经 ClientIpResolver 解析,
      *                 透传 token-validate 供能力面 IP 白名单/风控)
@@ -340,7 +355,8 @@ public class TaskRelayOrchestrator {
                             .flatMap(lotaskId -> metaStore.getTerminalResult(taskNo)
                                     .map(entry -> terminalPollView(taskNo, entry))
                                     .switchIfEmpty(Mono.defer(() -> lotaskClient.get(lotaskId)
-                                            .map(view -> pollView(taskNo, view)))));
+                                            .flatMap(view -> withExpiresAt(taskNo,
+                                                    pollView(taskNo, view))))));
                 });
     }
 
@@ -358,6 +374,24 @@ public class TaskRelayOrchestrator {
             out.put("error", entry.get("error"));
         }
         return out;
+    }
+
+    /**
+     * 非终态 poll 视图补 expires_at (issue #42): 读 TaskMeta 取网关超时钟 deadline
+     * (create 时写入的同一值, 选型理由见 createdView javadoc), ISO-8601 UTC 透出。
+     *
+     * <p>降级语义: meta 缺失 (TTL 已过期/历史任务) → 不放 expires_at 键 (不造数);
+     * Redis 读取失败由 {@link TaskMetaStore#getMeta} 既有 onErrorResume 降级为空,
+     * 同走 defaultIfEmpty —— expires_at 失败不得让 poll 主链路失败。
+     */
+    private Mono<Map<String, Object>> withExpiresAt(String taskNo, Map<String, Object> view) {
+        return metaStore.getMeta(taskNo)
+                .map(meta -> {
+                    view.put("expires_at",
+                            java.time.Instant.ofEpochMilli(meta.deadlineEpochMs()).toString());
+                    return view;
+                })
+                .defaultIfEmpty(view);
     }
 
     /**
@@ -403,7 +437,7 @@ public class TaskRelayOrchestrator {
                         return Mono.error(new RelayException(502, ApiCode.THIRD_PARTY_ERROR.getCode(), msg));
                     }
                     if (java.time.Instant.now().isAfter(deadline)) {
-                        return Mono.just(processingFallbackBody(taskNo));
+                        return Mono.just(processingFallbackBody(taskNo, view.get("expires_at")));
                     }
                     return Mono.delay(interval)
                             .then(pollUntilTerminal(modality, taskNo, apiKey, clientIp, deadline, interval));
@@ -425,11 +459,19 @@ public class TaskRelayOrchestrator {
         return out;
     }
 
-    private Map<String, Object> processingFallbackBody(String taskNo) {
+    /**
+     * 同步封装降级视图 (同步窗超时 → 异步继续轮询). expires_at (issue #42) 透传自
+     * 最后一次 poll 视图 (网关超时钟 deadline, ISO-8601); 该 poll 的 meta 缺失时
+     * 不带此键 (不造数)——注意作用域内的 deadline 是 60s 同步窗, 非任务超时钟, 不可用。
+     */
+    private Map<String, Object> processingFallbackBody(String taskNo, Object expiresAt) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("status", "PROCESSING");
         out.put("task_no", taskNo);
         out.put("poll_url", "/v1/onetoken/images/" + taskNo);
+        if (expiresAt != null) {
+            out.put("expires_at", expiresAt);
+        }
         return out;
     }
 
@@ -524,13 +566,21 @@ public class TaskRelayOrchestrator {
                 });
     }
 
-    /** OpenAI job 创建视图: {id=task_no, object, status=queued, created_at}. */
+    /**
+     * OpenAI job 创建视图: {id=task_no, object, status=queued, created_at}.
+     * <p>expires_at (issue #42): OneToken createdView 的 ISO-8601 转 <b>epoch 秒 Long</b>
+     * (OpenAI Batch/video job 惯例, 与 OneToken 视图的 ISO-8601 刻意区分, 勿混用)。
+     */
     private static Map<String, Object> openAiJobCreated(Map<String, Object> created, String object) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", created.get("task_no"));
         out.put("object", object);
         out.put("status", "queued");
         out.put("created_at", java.time.Instant.now().getEpochSecond());
+        Long expiresAt = expiresAtEpochSeconds(created.get("expires_at"));
+        if (expiresAt != null) {
+            out.put("expires_at", expiresAt);
+        }
         return out;
     }
 
@@ -569,12 +619,33 @@ public class TaskRelayOrchestrator {
         return out;
     }
 
+    /**
+     * OpenAI job 轮询基底视图. expires_at (issue #42) 同源转换: poll 视图携带
+     * ISO-8601 时转 epoch 秒 Long (OpenAI Batch 惯例); poll 视图无此键
+     * (meta 缺失/终态条目路径) → 不补 (不造数)。
+     */
     private static Map<String, Object> openAiJobBase(Map<String, Object> pollView, String object) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", pollView.get("task_no"));
         out.put("object", object);
         out.put("status", openAiJobStatus(String.valueOf(pollView.get("status"))));
+        Long expiresAt = expiresAtEpochSeconds(pollView.get("expires_at"));
+        if (expiresAt != null) {
+            out.put("expires_at", expiresAt);
+        }
         return out;
+    }
+
+    /** OneToken 视图 ISO-8601 expires_at → OpenAI job epoch 秒; 非字符串/解析失败 → null (不补键). */
+    private static Long expiresAtEpochSeconds(Object expiresAt) {
+        if (expiresAt == null) {
+            return null;
+        }
+        try {
+            return java.time.Instant.parse(String.valueOf(expiresAt)).getEpochSecond();
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /** 网关五态 → OpenAI job 状态 (EXPIRED 并入 failed). */
@@ -624,11 +695,22 @@ public class TaskRelayOrchestrator {
         return out;
     }
 
-    private static Map<String, Object> createdView(String modality, String taskNo) {
+    /**
+     * 创建响应视图 (issue #42: 补 expires_at).
+     *
+     * <p>expires_at 数据源选型: 取<b>网关自己的超时钟 deadline</b> (submitWithSaga 已算好
+     * 并写入 TaskMeta.deadlineEpochMs 的同一值), 而非平台侧 expired_at —— LotaskTaskView
+     * 无此槽位 (取平台值需跨仓改 lotask4j), 且网关 TimeoutClockJob 才是 EXPIRED+全额退款
+     * 的驱动钟, 透出平台值会误导客户端的退款预期。格式 ISO-8601 UTC
+     * ({@code Instant.ofEpochMilli(...).toString()}, 形如 2026-09-29T13:00:00Z)。
+     */
+    private static Map<String, Object> createdView(String modality, String taskNo,
+                                                   long deadlineEpochMs) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("task_no", taskNo);
         out.put("status", TaskStatus.PENDING.name());
         out.put("poll_url", "/v1/onetoken/" + pollPathSeg(modality) + "/" + taskNo);
+        out.put("expires_at", java.time.Instant.ofEpochMilli(deadlineEpochMs).toString());
         return out;
     }
 

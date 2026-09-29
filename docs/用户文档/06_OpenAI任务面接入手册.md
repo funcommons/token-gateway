@@ -46,11 +46,11 @@
 curl -s http://localhost:9401/v1/videos \
   -H "Authorization: Bearer <凭证>" -H "Content-Type: application/json" \
   -d '{"model":"sora-2","prompt":"一只猫在城市夜景滑滑板","seconds":"8","size":"1280x720"}'
-# → {"id":"T20260914...","object":"video_generation","status":"queued","created_at":1760000000}
+# → {"id":"T20260914...","object":"video_generation","status":"queued","created_at":1760000000,"expires_at":1760007200}
 
 # ② 轮询（3~5s 驱动；终态幂等）
 curl -s http://localhost:9401/v1/videos/T20260914... -H "Authorization: Bearer <凭证>"
-# → {"id":"...","object":"video_generation","status":"in_progress"}
+# → {"id":"...","object":"video_generation","status":"in_progress","expires_at":1760007200}
 # 终态: status=completed / failed(含 error{code,message})
 
 # ③ 取视频（完成后 307 重定向至签名代理 URL，24h 有效；跟随重定向即得视频流）
@@ -66,6 +66,8 @@ curl -sL http://localhost:9401/v1/videos/T20260914.../content -H "Authorization:
 
 状态映射：`queued`（PENDING）→ `in_progress`（RUNNING）→ `completed` / `failed`（FAILED 与 EXPIRED 并入，`error` 携带上游/超时信息；EXPIRED 已自动全额退款）。
 
+`expires_at`（epoch 秒，OpenAI Batch 惯例；与 OneToken 协议的 ISO-8601 格式刻意区分）：任务超时判定线，取**网关超时钟 deadline**（EXPIRED + 全额退款的驱动钟）；创建与非终态轮询携带，终态或任务元数据已过期时缺席。
+
 **计价维度（sora 形状，issue #36）**：
 
 - `seconds` 经别名映射进计价维 `params.duration` 参与路由定价；显式 `duration` 优先（`seconds` 仅在缺 `duration` 时补位），`seconds` 键本身不进计价通道。执行载荷不变——Worker 收到的仍是原样 `seconds`。
@@ -80,7 +82,7 @@ curl -sL http://localhost:9401/v1/videos/T20260914.../content -H "Authorization:
 curl -s http://localhost:9401/v1/images/generations \
   -H "Authorization: Bearer <凭证>" -H "Content-Type: application/json" \
   -d '{"model":"gpt-image-2","prompt":"一只戴墨镜的猫","size":"1024x1024","background":true}'
-# → {"id":"T20260914...","object":"image_generation","status":"queued","created_at":1760000000}
+# → {"id":"T20260914...","object":"image_generation","status":"queued","created_at":1760000000,"expires_at":1760007200}
 
 # ② 轮询至 completed
 curl -s http://localhost:9401/v1/images/generations/T20260914... -H "Authorization: Bearer <凭证>"
@@ -103,7 +105,7 @@ completed 响应（OpenAI images background 形状，`url` 为网关签名代理
 
 ## 5. 同步生图（缺省 background）
 
-`POST /v1/images/generations` 不带 `background`（或 `false`）时走**同步封装**：内部创建任务并轮询至终态一次返回，语义与 [OneToken 手册 §3.5 `/v1/onetoken/images/sync`](./05_任务面接入手册.md) 完全一致（成功 `{created, data:[{url}]}`；失败 502 已退款；60s 超时降级 `{status:"PROCESSING", task_no, poll_url}` 继续异步）。
+`POST /v1/images/generations` 不带 `background`（或 `false`）时走**同步封装**：内部创建任务并轮询至终态一次返回，语义与 [OneToken 手册 §3.5 `/v1/onetoken/images/sync`](./05_任务面接入手册.md) 完全一致（成功 `{created, data:[{url}]}`；失败 502 已退款；60s 超时降级 `{status:"PROCESSING", task_no, poll_url, expires_at?}` 继续异步）。
 
 ## 6. 语义要点（与 OneToken 协议同源）
 

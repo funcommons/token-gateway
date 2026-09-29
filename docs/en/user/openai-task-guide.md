@@ -48,11 +48,11 @@ Dual auth headers (`Authorization: Bearer` preferred / `x-api-key`); create endp
 curl -s http://localhost:9401/v1/videos \
   -H "Authorization: Bearer <credential>" -H "Content-Type: application/json" \
   -d '{"model":"sora-2","prompt":"a cat skateboarding through a neon city","seconds":"8","size":"1280x720"}'
-# → {"id":"T20260914...","object":"video_generation","status":"queued","created_at":1760000000}
+# → {"id":"T20260914...","object":"video_generation","status":"queued","created_at":1760000000,"expires_at":1760007200}
 
 # ② Poll (3~5s cadence; terminal polls are idempotent)
 curl -s http://localhost:9401/v1/videos/T20260914... -H "Authorization: Bearer <credential>"
-# → {"id":"...","object":"video_generation","status":"in_progress"}
+# → {"id":"...","object":"video_generation","status":"in_progress","expires_at":1760007200}
 # terminal: status=completed / failed (with error{code,message})
 
 # ③ Fetch the video (307 redirect to the signed proxy URL after completion, 24h validity; follow redirects)
@@ -68,6 +68,8 @@ curl -sL http://localhost:9401/v1/videos/T20260914.../content -H "Authorization:
 
 Status mapping: `queued` (PENDING) → `in_progress` (RUNNING) → `completed` / `failed` (FAILED and EXPIRED collapse into failed with `error`; EXPIRED has been fully refunded).
 
+`expires_at` (epoch seconds, following the OpenAI Batch convention — deliberately distinct from the OneToken protocol's ISO-8601 format): the task's timeout deadline, taken from **the gateway's own timeout clock** (the driver of EXPIRED + full refund); present on create and non-terminal polls, absent for terminal states or when task metadata has expired.
+
 **Pricing dimensions (sora shape, issue #36)**:
 
 - `seconds` is alias-mapped into the pricing dimension `params.duration` for route pricing; an explicit `duration` takes precedence (`seconds` only fills in when `duration` is absent), and the `seconds` key itself never enters the pricing channel. The execution payload is unchanged — the Worker still receives `seconds` verbatim.
@@ -82,7 +84,7 @@ Status mapping: `queued` (PENDING) → `in_progress` (RUNNING) → `completed` /
 curl -s http://localhost:9401/v1/images/generations \
   -H "Authorization: Bearer <credential>" -H "Content-Type: application/json" \
   -d '{"model":"gpt-image-2","prompt":"a cat wearing sunglasses","size":"1024x1024","background":true}'
-# → {"id":"T20260914...","object":"image_generation","status":"queued","created_at":1760000000}
+# → {"id":"T20260914...","object":"image_generation","status":"queued","created_at":1760000000,"expires_at":1760007200}
 
 # ② Poll until completed
 curl -s http://localhost:9401/v1/images/generations/T20260914... -H "Authorization: Bearer <credential>"
@@ -105,7 +107,7 @@ Parameters match the synchronous wrapper (`model`/`prompt` required, `size`/`rat
 
 ## 5. Synchronous Image Generation (background omitted)
 
-`POST /v1/images/generations` without `background` (or `false`) takes the **synchronous wrapper**: it creates a task internally, polls to a terminal state and returns once — semantics identical to `/v1/onetoken/images/sync` (success `{created, data:[{url}]}`; failure 502 already refunded; 60s window elapsing degrades to `{status:"PROCESSING", task_no, poll_url}` for continued async polling). See [OneToken Task Guide §2.1](./task-guide.md).
+`POST /v1/images/generations` without `background` (or `false`) takes the **synchronous wrapper**: it creates a task internally, polls to a terminal state and returns once — semantics identical to `/v1/onetoken/images/sync` (success `{created, data:[{url}]}`; failure 502 already refunded; 60s window elapsing degrades to `{status:"PROCESSING", task_no, poll_url, expires_at?}` for continued async polling). See [OneToken Task Guide §2.1](./task-guide.md).
 
 ## 6. Semantics (Shared with the OneToken Protocol)
 

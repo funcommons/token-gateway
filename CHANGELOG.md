@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **任务面 poll/create 响应透出 expires_at（issue #42）**：超时判定线（EXPIRED+全额退款的驱动钟）从「已写定不可见」变为 API 面可读——OneToken createdView/pollView 带 ISO-8601 UTC `expires_at`（数据源=网关自身 deadlineEpochMs，非平台 asts expired_at：网关钟才是退款语义驱动者）；PROCESSING 降级视图透传末次 poll 同值（零额外读取）；OpenAI job 视图按 Batch 惯例带 epoch 秒（与 OneToken ISO-8601 刻意区分）；meta 已过期/缺失时不放键不造数，poll 主链路有降级兜底
+- **任务面 payload 双锚（issue #41）**：`buildPayload` 增 `tenantId`（validate 出参客户租户）+ `billingRequestId`（preConsume 资金锚，#30 口径原值）——`asts_task.payload` 即台账，控制台三账（任务→FREEZE/CONSUME/REFUND）join 免对账兜底，#29 受理上报丢失时 payload 成真源；增量键 worker 脚本无感，routeSnapshot 加密不变
+
+### 修复
+
+- **09_任务面API契约.yaml 存量语法修复**：字面块内未缩进行截断 + plain scalar 内含未加引号 `Idempotency-Replayed: true`（冒号空格被当映射语法）——两处修复后 PyYAML 全量解析通过（先于本次存在，03 契约同类问题的前科复现）
+
 ## [0.17.0] - 2026-09-29
 
 ### 修复

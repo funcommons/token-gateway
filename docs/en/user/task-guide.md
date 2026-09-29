@@ -48,7 +48,7 @@ Three outcomes:
 |---|---|---|
 | Terminal success within the sync window (default 60s) | 200 | `{created, data:[{url}]}` — OpenAI images shape; `url` is a gateway-signed proxy URL (24h) |
 | Upstream failure / EXPIRED | 502 | Error envelope (10004 semantics) with the upstream message; fully refunded |
-| Sync window elapsed without a terminal state | 200 | `{status:"PROCESSING", task_no, poll_url}` — degrades to async: keep polling `poll_url` |
+| Sync window elapsed without a terminal state | 200 | `{status:"PROCESSING", task_no, poll_url, expires_at?}` — degrades to async: keep polling `poll_url`; `expires_at` is carried over from the last poll result |
 
 Billing/idempotency follow the standard task semantics (full pre-deduction on create, refund on failure/expiry). OpenAI's official `background:true` async mode is not yet pass-through-pollable (see issue #19).
 
@@ -60,11 +60,13 @@ Billing/idempotency follow the standard task semantics (full pre-deduction on cr
 curl -s http://localhost:9401/v1/onetoken/videos \
   -H "Authorization: Bearer <credential>" -H "Content-Type: application/json" \
   -d '{"model":"vid-1.5","params":{"duration":5,"resolution":"720p"},"notify_url":"https://you/callback"}'
-# → {"task_no":"T20260831...","status":"PENDING","poll_url":"/v1/onetoken/videos/T20260831..."}
+# → {"task_no":"T20260831...","status":"PENDING","poll_url":"/v1/onetoken/videos/T20260831...",
+#    "expires_at":"2026-08-31T13:00:00Z"}
 
 # ② Poll (driven by the caller every 3–5s; terminal states are idempotent — repeated polling neither touches upstream nor triggers duplicate refunds)
 curl -s http://localhost:9401/v1/onetoken/videos/T20260831... -H "Authorization: Bearer <credential>"
-# → {"status":"SUCCEEDED","result":{"resources":["<proxy URL>"],"usage":{...}}}
+# → Non-terminal: {"task_no":"T20260831...","status":"RUNNING","expires_at":"2026-08-31T13:00:00Z"}
+# → Terminal:     {"status":"SUCCEEDED","result":{"resources":["<proxy URL>"],"usage":{...}}}
 #    A 504+10003 on create/poll = credential-validation service transiently unavailable
 #    (retryable infrastructure error) — back off and retry; don't kill the task as a bad
 #    key (only 401+10202 means that).
@@ -79,6 +81,7 @@ curl -sL "<proxy URL>" -o out.mp4
 |---|---|
 | Billing | Route-first pricing (priced per the resolved model), full amount **pre-deducted at creation**; FAILED / EXPIRED automatically receive a **full refund**; SUCCEEDED is not refunded (pre-deduction is the payment) — there is no usage settlement step |
 | State machine | `PENDING → RUNNING → SUCCEEDED / FAILED / EXPIRED`; no terminal state after 24h → EXPIRED + full refund |
+| expires_at | Create and non-terminal poll responses carry `expires_at` (ISO-8601 UTC, e.g. `2026-08-31T13:00:00Z`): the task's timeout deadline — **the gateway's own timeout clock** (the driver that flips the task to EXPIRED + full refund), not an upstream platform value; terminal responses and historical tasks (metadata already expired) omit the key |
 | Polling | After a terminal state, returns the stored result idempotently (`POLL_HITS=0`, upstream not touched); upstream query errors leave the status unchanged — just retry with backoff |
 | notify | If `notify_url` is provided at creation, a terminal-state callback is sent; `X-THMP-Signature` (HMAC) can be used to verify it; failures are re-sent by the gateway with backoff (1m/10m/1h tiers) — callers need no fallback |
 | Resource proxy | **Upstream raw URLs are never passed through**; proxy URLs expire after 24h (exp+sig) — after expiry, re-fetching the task can re-sign; expired/tampered signature → 10100, task not SUCCEEDED → 10402 |

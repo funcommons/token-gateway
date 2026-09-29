@@ -92,6 +92,8 @@ class TaskRelayOrchestratorTest {
         TaskMetaStore metaStore = mock(TaskMetaStore.class);
         when(metaStore.onCreated(anyString(), any(), any())).thenReturn(Mono.empty());
         when(metaStore.getTerminalResult(anyString())).thenReturn(Mono.empty());
+        // issue #42: 非终态 poll 补 expires_at 的 meta 读取, 缺省空 (meta 缺失 → 不补键)
+        when(metaStore.getMeta(anyString())).thenReturn(Mono.empty());
 
         TokenGatewayProperties props = new TokenGatewayProperties();
         props.getTask().getLotask().setWebhookCallbackUrl("http://gw/internal/lotask/webhook");
@@ -854,5 +856,209 @@ class TaskRelayOrchestratorTest {
                 })
                 .verifyComplete();
         verify(lotaskClient, never()).get(anyString());
+    }
+
+    // ---------- issue #41: buildPayload 双锚 (tenantId / billingRequestId) ----------
+
+    @Test
+    @DisplayName("issue #41+#42: create e2e — payload 双锚与 validate/preConsume 链一致; createdView expires_at=超时钟 deadline (ISO-8601)")
+    void createPayloadAnchorsAndExpiresAt() throws InterruptedException {
+        props.getTask().setTimeouts(Map.of("video", Duration.ofHours(2)));
+        enqueueHappyControlPlane(backend);
+        when(lotaskClient.submit(eq("video"), anyString(), any(), anyString()))
+                .thenReturn(Mono.just("YeirYkxHuQ"));
+        when(mappingStore.put(anyString(), eq("YeirYkxHuQ"), any())).thenReturn(Mono.empty());
+
+        String[] expiresAtHolder = new String[1];
+        StepVerifier.create(orchestrator.create("video", "sk-caller",
+                        Map.of("model", "kling-v1", "params", Map.of("seconds", 5)), null,
+                        "1234567890", null))
+                .assertNext(view -> {
+                    assertThat(view.get("task_no").toString()).startsWith("T");
+                    assertThat(view.get("status")).isEqualTo("PENDING");
+                    // expires_at: ISO-8601 UTC, 落在 video 2h 超时窗内
+                    Object expiresAt = view.get("expires_at");
+                    assertThat(expiresAt).isInstanceOf(String.class);
+                    java.time.Instant parsed = java.time.Instant.parse((String) expiresAt);
+                    assertThat(parsed).isAfter(java.time.Instant.now());
+                    assertThat(parsed).isBefore(java.time.Instant.now()
+                            .plus(Duration.ofHours(2)).plusSeconds(60));
+                    expiresAtHolder[0] = (String) expiresAt;
+                })
+                .verifyComplete();
+
+        // 双锚 (#41): tenantId = validate 响应 tn1; billingRequestId = 数字幂等键原值 (#30 口径)
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(lotaskClient).submit(eq("video"), anyString(), payload.capture(), anyString());
+        assertThat(payload.getValue().get("tenantId")).isEqualTo("tn1");
+        assertThat(payload.getValue().get("billingRequestId")).isEqualTo("1234567890");
+
+        // 与计费链一致: preConsume requestId 同值
+        backend.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS); // validate
+        backend.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS); // distribute
+        RecordedRequest preConsume = backend.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(preConsume).isNotNull();
+        JSONObject preConsumeBody = JSON.parseObject(preConsume.getBody().readUtf8());
+        assertThat(preConsumeBody.getString("requestId")).isEqualTo("1234567890");
+
+        // expires_at 与 create 写入 meta 的 deadline 同值 (同一真源, 非造数)
+        ArgumentCaptor<TaskMetaStore.TaskMeta> meta =
+                ArgumentCaptor.forClass(TaskMetaStore.TaskMeta.class);
+        verify(metaStore).onCreated(anyString(), meta.capture(), any());
+        assertThat(expiresAtHolder[0]).isEqualTo(
+                java.time.Instant.ofEpochMilli(meta.getValue().deadlineEpochMs()).toString());
+    }
+
+    @Test
+    @DisplayName("issue #41: 非数字 trace 无幂等键 → billingRequestId 为网关生成纯数字串且 = preConsume requestId")
+    void createPayloadBillingRequestIdGeneratedMatchesPreConsume() throws InterruptedException {
+        enqueueHappyControlPlane(backend);
+        when(lotaskClient.submit(anyString(), anyString(), any(), anyString()))
+                .thenReturn(Mono.just("YeirYkxHuQ"));
+        when(mappingStore.put(anyString(), eq("YeirYkxHuQ"), any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(orchestrator.create("image", "sk-caller",
+                        Map.of("model", "token-mock-image-01"), "trace-non-numeric"))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(lotaskClient).submit(anyString(), anyString(), payload.capture(), anyString());
+        String billingRequestId = (String) payload.getValue().get("billingRequestId");
+        assertThat(billingRequestId).matches("\\d+");
+        assertThat(payload.getValue().get("tenantId")).isEqualTo("tn1");
+
+        backend.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS); // validate
+        backend.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS); // distribute
+        RecordedRequest preConsume = backend.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(preConsume).isNotNull();
+        JSONObject preConsumeBody = JSON.parseObject(preConsume.getBody().readUtf8());
+        assertThat(preConsumeBody.getString("requestId")).isEqualTo(billingRequestId);
+    }
+
+    // ---------- issue #42: poll / 视图 expires_at ----------
+
+    @Test
+    @DisplayName("issue #42: poll 非终态 meta 存在 → expires_at 透出 (ISO-8601), 值=create 写入的 deadline")
+    void pollRunningCarriesExpiresAtFromMeta() {
+        backend.enqueue(json("{\"code\":0,\"data\":{\"valid\":true}}"));
+        when(mappingStore.get("T-run")).thenReturn(Mono.just("YeirYkxHuQ"));
+        long deadline = System.currentTimeMillis() + Duration.ofHours(2).toMillis();
+        when(metaStore.getMeta("T-run")).thenReturn(Mono.just(new TaskMetaStore.TaskMeta(
+                "YeirYkxHuQ", "pc1", "video", null, deadline, "sk-upstream")));
+        when(lotaskClient.get("YeirYkxHuQ")).thenReturn(Mono.just(new LotaskTaskView(
+                "YeirYkxHuQ", "RUNNING", null, null, null)));
+
+        StepVerifier.create(orchestrator.poll("video", "T-run", "sk-caller", null))
+                .assertNext(view -> {
+                    assertThat(view.get("status")).isEqualTo("RUNNING");
+                    assertThat(view.get("expires_at"))
+                            .isEqualTo(java.time.Instant.ofEpochMilli(deadline).toString());
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("issue #42: poll meta 缺失 (TTL 过期/历史任务) → 无 expires_at 键, 主链路不炸 (不造数)")
+    void pollMetaMissingOmitsExpiresAt() {
+        backend.enqueue(json("{\"code\":0,\"data\":{\"valid\":true}}"));
+        when(mappingStore.get("T-old")).thenReturn(Mono.just("YeirYkxHuQ"));
+        // setUp 默认 getMeta → Mono.empty (meta 缺失)
+        when(lotaskClient.get("YeirYkxHuQ")).thenReturn(Mono.just(new LotaskTaskView(
+                "YeirYkxHuQ", "RUNNING", null, null, null)));
+
+        StepVerifier.create(orchestrator.poll("video", "T-old", "sk-caller", null))
+                .assertNext(view -> {
+                    assertThat(view.get("status")).isEqualTo("RUNNING");
+                    assertThat(view).doesNotContainKey("expires_at");
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("issue #42: 终态条目视图不含 expires_at (字段集不变: result/error 原样回放)")
+    void pollTerminalEntryHasNoExpiresAt() {
+        backend.enqueue(json("{\"code\":0,\"data\":{\"valid\":true}}"));
+        when(mappingStore.get("T-done2")).thenReturn(Mono.just("YeirYkxHuQ"));
+        when(metaStore.getTerminalResult("T-done2")).thenReturn(Mono.just(
+                com.alibaba.fastjson2.JSON.parseObject("{\"status\":\"FAILED\","
+                        + "\"error\":{\"code\":\"UPSTREAM_ERROR\",\"message\":\"上游超时\"}}")));
+
+        StepVerifier.create(orchestrator.poll("video", "T-done2", "sk-caller", null))
+                .assertNext(view -> {
+                    assertThat(view.get("status")).isEqualTo("FAILED");
+                    assertThat(view).doesNotContainKey("expires_at");
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> error = (Map<String, Object>) view.get("error");
+                    assertThat(error.get("code")).isEqualTo("UPSTREAM_ERROR");
+                })
+                .verifyComplete();
+        verify(lotaskClient, never()).get(anyString());
+    }
+
+    @Test
+    @DisplayName("issue #42: generations 超时降级视图透传 expires_at (末次 poll 视图携带时); 不携带则无此键")
+    void generationsProcessingFallbackCarriesExpiresAt() {
+        TaskRelayOrchestrator spy = org.mockito.Mockito.spy(orchestrator);
+        Map<String, Object> processing = new java.util.LinkedHashMap<>();
+        processing.put("task_no", "T5");
+        processing.put("status", "PROCESSING");
+        processing.put("expires_at", "2026-09-29T13:00:00Z");
+        org.mockito.Mockito.doReturn(Mono.just(processing)).when(spy).poll("image", "T5", "key", null);
+
+        StepVerifier.create(spy.pollUntilTerminal("image", "T5", "key", null,
+                        java.time.Instant.now().minusSeconds(1), java.time.Duration.ofMillis(10)))
+                .assertNext(resp -> {
+                    assertThat(resp.get("status")).isEqualTo("PROCESSING");
+                    assertThat(resp.get("poll_url")).isEqualTo("/v1/onetoken/images/T5");
+                    assertThat(resp.get("expires_at")).isEqualTo("2026-09-29T13:00:00Z");
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("issue #42: openai job 轮询视图 expires_at 转 epoch 秒 (与 OneToken ISO-8601 区分); 无该键不补")
+    void openAiJobViewExpiresAtEpochSeconds() {
+        TaskRelayOrchestrator spy = org.mockito.Mockito.spy(orchestrator);
+        Map<String, Object> running = new java.util.LinkedHashMap<>();
+        running.put("task_no", "T9");
+        running.put("status", "RUNNING");
+        running.put("expires_at", "2026-09-29T13:00:00Z");
+        org.mockito.Mockito.doReturn(Mono.just(running)).when(spy).poll("video", "T9", "key", null);
+        StepVerifier.create(spy.videoJob("T9", "key", null))
+                .assertNext(v -> assertThat(v.get("expires_at")).isEqualTo(
+                        java.time.Instant.parse("2026-09-29T13:00:00Z").getEpochSecond()))
+                .verifyComplete();
+
+        Map<String, Object> noExp = new java.util.LinkedHashMap<>();
+        noExp.put("task_no", "T9");
+        noExp.put("status", "RUNNING");
+        org.mockito.Mockito.doReturn(Mono.just(noExp)).when(spy).poll("video", "T9", "key", null);
+        StepVerifier.create(spy.videoJob("T9", "key", null))
+                .assertNext(v -> assertThat(v).doesNotContainKey("expires_at"))
+                .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("issue #42: openai video job 创建视图携带 expires_at (epoch 秒, video 2h 超时窗内)")
+    void openAiVideoJobCreateCarriesExpiresAt() {
+        props.getTask().setTimeouts(Map.of("video", Duration.ofHours(2)));
+        enqueueHappyControlPlane(backend);
+        when(lotaskClient.submit(eq("video"), anyString(), any(), anyString()))
+                .thenReturn(Mono.just("vJob42"));
+        when(mappingStore.put(anyString(), eq("vJob42"), any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(orchestrator.createVideoJob("sk-caller",
+                        Map.of("model", "sora-2", "prompt", "猫滑滑板"), "trace-42", null, null))
+                .assertNext(job -> {
+                    assertThat(job.get("expires_at")).isInstanceOf(Long.class);
+                    long exp = ((Number) job.get("expires_at")).longValue();
+                    assertThat(exp).isGreaterThan(java.time.Instant.now().getEpochSecond());
+                    assertThat(exp).isLessThanOrEqualTo(java.time.Instant.now()
+                            .plus(Duration.ofHours(2)).getEpochSecond() + 60);
+                })
+                .verifyComplete();
     }
 }

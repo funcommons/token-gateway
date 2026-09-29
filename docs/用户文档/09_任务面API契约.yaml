@@ -7,7 +7,7 @@ info:
 
     状态：M2.5a/c 已落地（create/poll/资源代理/webhook/notify 可用）；
     上游任务执行由自写 Worker（task-worker）承载，首个真实上游 Groovy 脚本上线前
-create 可受理但任务不会被执行。协议权威 = THMP 18 号 §3.7；状态托管 = lotask4j 平台（V4+）。
+    create 可受理但任务不会被执行。协议权威 = THMP 18 号 §3.7；状态托管 = lotask4j 平台（V4+）。
 
     - 四段式：create（全额预扣）→ poll（3~5s 驱动，终态幂等）→ notify（HMAC 回调）
       → 资源代理（exp+sig 24h 能力凭证，上游原始 URL 永不透传）。
@@ -268,7 +268,7 @@ components:
       schema:
         type: string
         format: uuid
-      description: 幂等键（UUID v4 建议，回放语义）。成功首响（2xx 非流式 ≤1MB）在窗口内缓存，同凭证 + 同 key 重发原样回放（响应头 Idempotency-Replayed: true）；处理中/不可回放 → 409 + 10501；失败不占键可重试。键值不进入任何下游参数位。
+      description: 幂等键（UUID v4 建议，回放语义）。成功首响（2xx 非流式 ≤1MB）在窗口内缓存，同凭证 + 同 key 重发原样回放（响应头 Idempotency-Replayed：true）；处理中/不可回放 → 409 + 10501；失败不占键可重试。键值不进入任何下游参数位。
 
   responses:
     BadRequest:
@@ -359,6 +359,10 @@ components:
         poll_url:
           type: string
           description: 轮询端点相对路径
+        expires_at:
+          type: string
+          format: date-time
+          description: 任务超时判定线（ISO-8601 UTC，如 2026-08-31T13:00:00Z）；取网关超时钟 deadline（EXPIRED+全额退款的驱动钟），非上游平台值
     ImagesGenerationsResult:
       type: object
       description: /v1/onetoken/images/sync 成功响应（OpenAI images 形状；url 为网关签名代理 URL，24h 有效）
@@ -385,6 +389,10 @@ components:
           type: string
         poll_url:
           type: string
+        expires_at:
+          type: string
+          format: date-time
+          description: 任务超时判定线（ISO-8601 UTC，随末次轮询结果透传；任务元数据缺失时缺席）
     TaskStatus:
       type: object
       description: 轮询响应（透传形状；终态幂等）
@@ -395,6 +403,10 @@ components:
         status:
           type: string
           enum: [PENDING, RUNNING, SUCCEEDED, FAILED, EXPIRED]
+        expires_at:
+          type: string
+          format: date-time
+          description: 任务超时判定线（ISO-8601 UTC，网关超时钟 deadline）；仅非终态且任务元数据在期时携带，终态/历史任务缺席
         result:
           nullable: true
           description: status=SUCCEEDED 时返回
