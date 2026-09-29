@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-29
+
 ### 修复
 
 - **tts 模态 poll_url 双 s（issue #40）**：`createdView` 统一 `modality+"s"` 复数化把 tts（本身 s 结尾的单数路径）误拼成 `/v1/onetoken/ttss/{task_no}`，客户端按 poll_url 轮询恒 404——改四模态显式映射（`pollPathSeg` switch，新增模态须显式登记 fail-fast）；video/image/audio 路径不变
