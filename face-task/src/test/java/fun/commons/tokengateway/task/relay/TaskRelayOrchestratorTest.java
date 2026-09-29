@@ -306,6 +306,25 @@ class TaskRelayOrchestratorTest {
     }
 
     @Test
+    @DisplayName("tts create: poll_url 单数路径 /v1/onetoken/tts/{task_no}, 不复数化成 ttss (issue #40)")
+    void ttsCreatePollUrlSingular() {
+        enqueueHappyControlPlane(backend);
+        when(lotaskClient.submit(eq("tts"), anyString(), any(), eq("http://gw/internal/lotask/webhook")))
+                .thenReturn(Mono.just("LTts1"));
+        when(mappingStore.put(anyString(), eq("LTts1"), any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(orchestrator.create("tts", "sk-caller",
+                        Map.of("model", "tts-1", "input", "你好"), "trace-1"))
+                .assertNext(view -> {
+                    String taskNo = (String) view.get("task_no");
+                    assertThat(taskNo).startsWith("T");
+                    assertThat(view.get("status")).isEqualTo("PENDING");
+                    assertThat(view.get("poll_url")).isEqualTo("/v1/onetoken/tts/" + taskNo);
+                })
+                .verifyComplete();
+    }
+
+    @Test
     @DisplayName("create 正常路径: 控制层三步 → lotask submit (幂等键=task_no, 快照加密) → PENDING 返回")
     void createHappyPath() {
         enqueueHappyControlPlane(backend);

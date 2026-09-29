@@ -6,6 +6,7 @@
 
 ### 修复
 
+- **tts 模态 poll_url 双 s（issue #40）**：`createdView` 统一 `modality+"s"` 复数化把 tts（本身 s 结尾的单数路径）误拼成 `/v1/onetoken/ttss/{task_no}`，客户端按 poll_url 轮询恒 404——改四模态显式映射（`pollPathSeg` switch，新增模态须显式登记 fail-fast）；video/image/audio 路径不变
 - **LLM 面 images 端点 background:true 显式拒绝（issue #39 快修）**：face=all 下任务面 job controller（`OpenAiImagesTaskController`）因同路径冲突不装配（#19 故意设计，非缺陷），`/v1/images/generations` 由 LLM 同步端点占用且此前**不识别 `background` 字段**——异步 job 请求被静默当同步转发。现显式 400 + 10100 拒绝（报文指引 face=task 形态或 `/v1/onetoken/images`），拒绝发生在任何 RPC 之前；background 缺省/false 同步路径不变。face=all 双模态正解挂 #21 协议模块化
 - **validate 拒绝映射矩阵（MMagiX2 回归 B-14/B-24）**：validate fail 信封按 code 终态映射在 4 处消费点统一（RelayOrchestrator.prepare / TaskRelayOrchestrator create+poll / ModelsController）——401→401+10202、402→402+10617（配额耗尽，修前 504 可重试风暴）、403→403+10300（key 封禁），其余 fail 码维持 504 可重试（#22 语义不回退）
 - **幂等键作用域 key+path（MMagiX2 回归 04-F1）**：幂等缓存键改 key+path 组合 MD5——同 key 跨路径各自独立（此前跨端点互相顶 409/回放），同路径异 body 仍 422；凭证原文不再残留存储层；存量条目随 48h TTL 自然淘汰

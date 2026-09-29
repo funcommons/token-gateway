@@ -628,8 +628,22 @@ public class TaskRelayOrchestrator {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("task_no", taskNo);
         out.put("status", TaskStatus.PENDING.name());
-        out.put("poll_url", "/v1/onetoken/" + modality + "s/" + taskNo);
+        out.put("poll_url", "/v1/onetoken/" + pollPathSeg(modality) + "/" + taskNo);
         return out;
+    }
+
+    /**
+     * modality → poll 路径段显式映射 (issue #40): 统一 modality+"s" 复数化会把
+     * tts (本身 s 结尾的单数路径) 误拼成 ttss —— 四模态钉死, 新增模态须在此显式登记.
+     */
+    private static String pollPathSeg(String modality) {
+        return switch (modality) {
+            case "video" -> "videos";
+            case "image" -> "images";
+            case "audio" -> "audios";
+            case "tts" -> "tts";
+            default -> throw new IllegalArgumentException("unknown modality: " + modality);
+        };
     }
 
     /** task_no: T + yyMMddHHmmss + 8 位随机 (手册示例 T20260831...). */
