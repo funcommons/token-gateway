@@ -47,6 +47,12 @@ import java.util.Map;
  *       ③ octet-stream 兜底 — 解析结果持久化 {@code {index}.ct} sidecar, 命中缓存免回源直读</li>
  *   <li>Content-Disposition: inline + 文件名带扩展名 — 浏览器内联渲染而非触发下载</li>
  * </ul>
+ *
+ * <p><b>回源解析 (issue #43 存储格式翻转)</b>: 终态条目优先 —— 条目存在且
+ * resources[index] 为原始 URL (http(s)/data:, 非 /v1/resources/ 代理路径) → 直接回源
+ * 该值 (result-filter 改写后的消费方 OSS URL 因此生效); 旧格式条目 (代理路径) 或无条目
+ * → 回退 lotask 视图原始值链路 (逐字节现状). 渠道 apiKey 附着两路不变 (公共读 OSS
+ * 忽略未知头无害; 消费方契约要求改写后 URL 匿名可读或自带凭证).
  */
 @Slf4j
 @RestController
@@ -80,8 +86,45 @@ public class ResourceProxyController {
         if (Files.exists(cacheFile) && fileSizeOrZero(cacheFile) > 0) {
             return Mono.just(serveCacheFile(taskNo, index, cacheFile));
         }
-        // 取上游原始 URL: 终态条目里已是代理 URL, 须回 lotask 结果拿原文;
-        // 回源凭证 = create 时存入 meta 的渠道 apiKey (上游按渠道验钥)
+        // issue #43 存储格式翻转: 终态条目存原始 (改写后) URL —— 条目优先直读回源;
+        // 旧格式条目 (代理路径) /无条目 → 回退 lotask 视图原始值链路 (逐字节现状).
+        // 回源凭证两路同 = create 时存入 meta 的渠道 apiKey (公共读 OSS 忽略未知头无害)
+        return metaStore.getTerminalResult(taskNo)
+                .flatMap(entry -> Mono.justOrEmpty(rawResourceAt(entry, index)))
+                .flatMap(entryUrl -> metaStore.getMeta(taskNo)
+                        .map(meta -> meta.upstreamApiKey() == null ? "" : meta.upstreamApiKey())
+                        .defaultIfEmpty("")
+                        .flatMap(key -> fetchAndCache(taskNo, index, entryUrl, cacheFile,
+                                key.isEmpty() ? null : key)))
+                .switchIfEmpty(Mono.defer(() -> fetchViaLotask(taskNo, index, cacheFile)));
+    }
+
+    /**
+     * 终态条目取可回源原始值: SUCCEEDED 且 resources[index] 为原始 URL
+     * (http(s)/data: 等, 非 /v1/resources/ 代理路径) → 返回该值; 否则 null
+     * (旧格式代理路径/无资源/非 SUCCEEDED → 调用方回退 lotask 链路).
+     */
+    private static String rawResourceAt(com.alibaba.fastjson2.JSONObject entry, int index) {
+        if (!"SUCCEEDED".equals(entry.getString("status"))) {
+            return null;
+        }
+        Object result = entry.get("result");
+        if (!(result instanceof Map<?, ?> r) || !(r.get("resources") instanceof List<?> list)
+                || index < 0 || index >= list.size()) {
+            return null;
+        }
+        Object v = list.get(index);
+        if (!(v instanceof String s) || s.startsWith("/v1/resources/")) {
+            return null;
+        }
+        return s;
+    }
+
+    /** 旧链路 (逐字节现状): lotask 视图取上游原始 URL 回源 (webhook 未达/旧格式条目兜底 —
+     * 旧格式终态条目存的是代理路径不可回源, 须回 lotask 拿原文).
+     * 回源凭证 = create 时存入 meta 的渠道 apiKey (上游按渠道验钥). */
+    private Mono<ResponseEntity<Flux<DataBuffer>>> fetchViaLotask(String taskNo, int index,
+                                                                  Path cacheFile) {
         return mappingStore.get(taskNo)
                 .switchIfEmpty(Mono.error(new RelayException(404, ApiCode.NOT_FOUND.getCode(),
                         "任务不存在: " + taskNo)))

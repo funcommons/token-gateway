@@ -39,7 +39,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * 资源代理控制器测试: 验签 fail-closed / 缓存命中直发 / 404-409-404 负路径 /
- * 回源带渠道 apiKey + write-through 落盘.
+ * 回源带渠道 apiKey + write-through 落盘 / 终态条目优先回源 (issue #43 存储格式翻转:
+ * 新格式原始 URL 直读条目值, 旧格式代理路径回退 lotask 链路).
  */
 class ResourceProxyControllerTest {
 
@@ -68,6 +69,8 @@ class ResourceProxyControllerTest {
         mappingStore = Mockito.mock(TaskNoMappingStore.class);
         metaStore = Mockito.mock(TaskMetaStore.class);
         lotaskClient = Mockito.mock(LotaskTaskClient.class);
+        // issue #43 存储格式翻转: 回源解析终态条目优先; 缺省无条目 → 回退 lotask 链路 (现状)
+        when(metaStore.getTerminalResult(anyString())).thenReturn(Mono.empty());
 
         controller = new ResourceProxyController(signer, mappingStore, metaStore,
                 lotaskClient, WebClient.builder(), props);
@@ -261,5 +264,98 @@ class ResourceProxyControllerTest {
                 .assertNext(resp -> assertThat(resp.getStatusCode().value()).isEqualTo(200))
                 .verifyComplete();
         assertThat(Files.readAllBytes(file)).isEqualTo(png);
+    }
+
+    // ---------- issue #43 存储格式翻转: 终态条目优先回源 ----------
+
+    @Test
+    void terminalEntryRawUrlFetchesEntryValueDirectly() throws Exception {
+        // 新格式条目 (存改写后原始 URL): 直读条目值回源, 不触 lotask/mapping
+        // —— e2e 断言回源目标是改写后消费方 OSS URL 而非渠道原值
+        allow();
+        String consumerOssUrl = upstream.url("/oss/rewritten.mp4").toString();
+        when(metaStore.getTerminalResult(TASK_NO)).thenReturn(Mono.just(
+                com.alibaba.fastjson2.JSON.parseObject("{\"status\":\"SUCCEEDED\",\"result\":{"
+                        + "\"resources\":[\"" + consumerOssUrl + "\"]}}")));
+        when(metaStore.getMeta(TASK_NO)).thenReturn(Mono.just(meta("sk-channel-key")));
+        // lotask 侧即便有值也是渠道原值 — 不得被回源
+        when(mappingStore.get(TASK_NO)).thenReturn(Mono.just("lotask-1"));
+        when(lotaskClient.get("lotask-1")).thenReturn(Mono.just(
+                view("SUCCESS", Map.of("resources", List.of(upstream.url("/channel/raw.mp4").toString())))));
+        upstream.enqueue(new MockResponse()
+                .setHeader("Content-Type", "video/mp4").setBody("rewritten-oss-bytes"));
+
+        StepVerifier.create(fetch().flatMap(resp -> {
+            assertThat(resp.getStatusCode().value()).isEqualTo(200);
+            return joinBody(resp);
+        }))
+                .assertNext(body -> assertThat(body).isEqualTo("rewritten-oss-bytes"))
+                .verifyComplete();
+
+        RecordedRequest req = upstream.takeRequest(3, TimeUnit.SECONDS);
+        assertThat(req).isNotNull();
+        assertThat(req.getPath()).isEqualTo("/oss/rewritten.mp4");
+        // 渠道 apiKey 附着两路不变 (公共读 OSS 忽略未知头无害)
+        assertThat(req.getHeader("Authorization")).isEqualTo("Bearer sk-channel-key");
+        Mockito.verify(lotaskClient, Mockito.never()).get(anyString());
+        Mockito.verify(mappingStore, Mockito.never()).get(anyString());
+    }
+
+    @Test
+    void legacyProxyEntryFallsBackToLotask() throws Exception {
+        // 旧格式条目 (存代理路径, 不可回源): 回退 lotask 视图原始值链路 (逐字节现状)
+        allow();
+        when(metaStore.getTerminalResult(TASK_NO)).thenReturn(Mono.just(
+                com.alibaba.fastjson2.JSON.parseObject("{\"status\":\"SUCCEEDED\",\"result\":{"
+                        + "\"resources\":[\"/v1/resources/" + TASK_NO + "/0?exp=1&sig=stale\"]}}")));
+        String rawUrl = upstream.url("/channel/raw.mp4").toString();
+        mappedTask("SUCCESS", Map.of("resources", List.of(rawUrl)), null);
+        upstream.enqueue(new MockResponse().setBody("lotask-raw-bytes"));
+
+        StepVerifier.create(fetch().flatMap(resp -> {
+            assertThat(resp.getStatusCode().value()).isEqualTo(200);
+            return joinBody(resp);
+        }))
+                .assertNext(body -> assertThat(body).isEqualTo("lotask-raw-bytes"))
+                .verifyComplete();
+
+        RecordedRequest req = upstream.takeRequest(3, TimeUnit.SECONDS);
+        assertThat(req).isNotNull();
+        assertThat(req.getPath()).isEqualTo("/channel/raw.mp4");
+        // 回退 lotask 链路已走 (存量 defaultIfEmpty 装配期双调形态, 不限定次数, 只证链路命中)
+        Mockito.verify(lotaskClient, Mockito.atLeastOnce()).get("lotask-1");
+    }
+
+    @Test
+    void terminalEntryDataUriDecodesInline() throws Exception {
+        // 新格式条目 + data: URI: 直解码落盘, 不回源 (与 lotask 链路同口径)
+        allow();
+        byte[] png = new byte[]{ (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+        String dataUri = "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(png);
+        when(metaStore.getTerminalResult(TASK_NO)).thenReturn(Mono.just(
+                com.alibaba.fastjson2.JSON.parseObject("{\"status\":\"SUCCEEDED\",\"result\":{"
+                        + "\"resources\":[\"" + dataUri + "\"]}}")));
+        when(metaStore.getMeta(TASK_NO)).thenReturn(Mono.empty());
+
+        StepVerifier.create(fetch())
+                .assertNext(resp -> assertThat(resp.getStatusCode().value()).isEqualTo(200))
+                .verifyComplete();
+        assertThat(upstream.getRequestCount()).isZero();
+        assertThat(Files.readAllBytes(cacheDir.resolve(TASK_NO).resolve("0"))).isEqualTo(png);
+        Mockito.verify(lotaskClient, Mockito.never()).get(anyString());
+    }
+
+    @Test
+    void failedEntryFallsBackToLotask409() {
+        // 非 SUCCEEDED 条目无原始值可取 → 回退 lotask 链路 (409 语义不变)
+        allow();
+        when(metaStore.getTerminalResult(TASK_NO)).thenReturn(Mono.just(
+                com.alibaba.fastjson2.JSON.parseObject("{\"status\":\"FAILED\","
+                        + "\"error\":{\"code\":\"X\"}}")));
+        mappedTask("FAILED", null, null);
+        StepVerifier.create(fetch())
+                .expectErrorSatisfies(e -> assertThat(((RelayException) e).getCode())
+                        .isEqualTo(ApiCode.STATE_CONFLICT.getCode()))
+                .verify();
     }
 }

@@ -3,6 +3,7 @@ package fun.commons.tokengateway.rpc;
 import fun.commons.tokengateway.config.GatewayProperties;
 import fun.commons.tokengateway.spi.config.AuthType;
 import fun.commons.tokengateway.spi.config.EndpointConfig;
+import fun.commons.tokengateway.spi.config.ResultFilterFaceConfig;
 import fun.commons.tokengateway.spi.config.TaskBillingFaceConfig;
 import fun.commons.tokengateway.spi.config.TokenGatewayProperties;
 import lombok.RequiredArgsConstructor;
@@ -14,7 +15,9 @@ import org.springframework.stereotype.Component;
  * <p><b>兼容窗口</b> (issue #2 护栏): 某能力面 url 未配置 (null/空白) 时回退
  * 平移态 {@code gateway.backend.*} (同 url/timeout, 鉴权按 internal-token 有无
  * 映射 jwt/none) —— 存量部署零配置迁移; 全部面显式配置后可删 gateway.backend.*.
- * 第 8 面 {@link #taskBilling()} (issue #31) 逐字段缺省回退 {@link #billing()}.
+ * 第 8 面 {@link #taskBilling()} (issue #31) 逐字段缺省回退 {@link #billing()};
+ * 第 9 面 {@link #resultFilter()} (issue #43) 逐字段缺省回退 backend 平移值
+ * (timeout 例外: 缺省 60s 不回退).
  *
  * <p>寻址方 (rpc/* 各 Http*Api) 只认本类, 不直接感知两代配置键.
  */
@@ -118,6 +121,46 @@ public class CapabilityEndpoints {
     public EndpointConfig modelCatalog() {
         return resolve(spi.getModelCatalog().getUrl(), spi.getModelCatalog().getTimeout(),
                 spi.getModelCatalog().getAuth(), keyOf(spi.getModelCatalog()));
+    }
+
+    /**
+     * 终态结果过滤面 (issue #43, 第 9 面): {@code token-gateway.result-filter.*},
+     * SUCCEEDED 落库前回调消费方改写 result (消费方转存自家 OSS/审核/脱敏).
+     *
+     * <p><b>逐字段缺省回退</b> (照 {@link #taskBilling()} 既有模式, 底座换 backend 平移值):
+     * url 缺省回退 {@code gateway.backend.url}; 凭证 (key/jwt-secret/internal-token 任一)
+     * 缺省回退 backend internal-token (有 → jwt, 无 → none); timeout 缺省
+     * {@link ResultFilterFaceConfig#DEFAULT_TIMEOUT} (60s, 消费方下载+上传大产物需要,
+     * <b>不</b>回退 backend.timeout); path 缺省 {@link ResultFilterFaceConfig#DEFAULT_PATH}.
+     *
+     * <p>鉴权: 面独立凭证存在时显式 auth 优先、否则映射 jwt (internal-token 平移形态);
+     * 凭证与 auth 均未配 → 整体取 backend 平移 (EndpointConfig.auth 缺省 NONE 无法与
+     * 显式 NONE 区分, 同 {@link #taskBilling()} 既有局限). enabled/max-attempts 非寻址字段,
+     * 由消费方 (face-task TerminalResultFilter) 直读 properties.
+     */
+    public EndpointConfig resultFilter() {
+        ResultFilterFaceConfig face = spi.getResultFilter();
+        EndpointConfig merged = new EndpointConfig();
+        merged.setUrl(face.getUrl() != null && !face.getUrl().isBlank()
+                ? face.getUrl() : legacy.getUrl());
+        merged.setTimeout(face.getTimeout() != null
+                ? face.getTimeout() : ResultFilterFaceConfig.DEFAULT_TIMEOUT);
+        merged.setPath(firstNonBlank(face.getPathPrefix(), ResultFilterFaceConfig.DEFAULT_PATH));
+        String credential = firstNonBlank(face.getKey(), face.getJwtSecret(), face.getInternalToken());
+        if (credential != null) {
+            // 面独立凭证: 显式 auth 优先; 否则凭证形态缺省映射 jwt (internal-token 平移形态)
+            merged.setAuth(face.getAuth() != null && face.getAuth() != AuthType.NONE
+                    ? face.getAuth() : AuthType.JWT);
+            merged.setKey(credential);
+            merged.setJwtSecret(credential);
+        } else {
+            String token = legacy.getInternalToken();
+            boolean hasToken = token != null && !token.isBlank();
+            merged.setAuth(hasToken ? AuthType.JWT : AuthType.NONE);
+            merged.setKey(hasToken ? token : null);
+            merged.setJwtSecret(hasToken ? token : null);
+        }
+        return merged;
     }
 
     private String keyOf(EndpointConfig cfg) {

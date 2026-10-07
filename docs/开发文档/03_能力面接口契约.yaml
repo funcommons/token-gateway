@@ -39,6 +39,8 @@ tags:
     description: 模型目录
   - name: task
     description: 任务委托面（可选；仅后端自持任务状态时实现。哑上游任务 API 无需实现——网关本地状态机经 route 面驱动）
+  - name: result-filter
+    description: 终态结果过滤（可选；issue #43。SUCCEEDED 落库前网关回调消费方改写 result——转存自家 OSS/审核/脱敏；仅 result-filter.enabled=true 时调用，默认关）
   - name: channel-health
     description: 渠道健康上报（Mmagix 形态内部 API，网关→控制层方向；与 /gw/v1/* 适配器契约不同形，见文末独立区块）
 security:
@@ -468,6 +470,92 @@ paths:
                                 type: object
                                 nullable: true
                                 additionalProperties: true
+
+  /v1/internal/tasks/result-filter:
+    post:
+      # 终态结果过滤 (issue #43, 第 9 能力面): 任务面 SUCCEEDED 终态 result (含上游渠道裸 URL)
+      # 落库前, 网关回调消费方改写 result —— 消费方下载产物转存自家 OSS (30 天保留)/审核/
+      # 脱敏/日志/缓存; 网关存储与对外 (poll 终态条目/notify 回调) 只见改写后值 (再经网关
+      # 代理 URL 转换)。只拦 SUCCEEDED, FAILED/EXPIRED/CANCELLED 不调用本端点。
+      # 可选端点: 仅 token-gateway.result-filter.enabled=true 时调用 (默认关, 不实现零影响);
+      # 路径为网关缺省值, 可由 token-gateway.result-filter.path-prefix 改指;
+      # 内部鉴权复用能力面三式 (token-gateway.result-filter.auth: none|key|jwt)。
+      tags: [result-filter]
+      operationId: filterTerminalResult
+      summary: 终态结果改写（写时过滤、一次改写；消费方须按 task_no 幂等）
+      description: |
+        幂等义务：同一 taskNo 可能因失败重试（对账/超时钟重放终态事件）或多实例并发被
+        多次回调，消费方必须按 taskNo 幂等（覆盖写同键，重复回调返回同一份改写结果）。
+        失败语义：HTTP 非 2xx / 超时 / 信封 code≠0 → 网关不落终态条目（任务维持非终态，
+        下次重放自然重试，最多 token-gateway.result-filter.max-attempts 次，默认 5）；
+        重试耗尽 → 网关落 [ResultFilter-DeadLetter] 死信日志并 fail-open 落原值
+        （不卡死任务）。计费 settle 与改写解耦：改写失败/重试期间 settle 照常执行。
+        data:null 或 data.result:null = 不改写直通（网关落原值）。
+        生效链路（issue #43 存储格式翻转）：终态条目存改写后原始值；poll 终态视图读时
+        现签代理 URL；资源代理回源按条目原始值直取——因此改写后 resources 里的 URL
+        必须匿名可读或自带凭证（如预签名 OSS URL），网关只附带原渠道 apiKey 头
+        （公共读 OSS 忽略未知头无害），不会注入消费方凭证。
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, taskNo, status, result]
+              properties:
+                requestId:
+                  type: string
+                  description: 请求标识（取 taskNo 原值，消费方日志/对账关联锚）
+                taskNo:
+                  type: string
+                  description: 网关任务号（消费方幂等键——多次回调覆盖写同键）
+                tenantId:
+                  type: string
+                  nullable: true
+                  description: 调用方租户（create 时刻落账；历史任务为 null）
+                modality:
+                  type: string
+                  description: 任务模态（实为 submit task_type；submit-task-type=model 时为模型编码）
+                model:
+                  type: string
+                  nullable: true
+                  description: 请求模型编码（create 时刻落账；历史任务为 null）
+                status:
+                  type: string
+                  enum: [SUCCEEDED]
+                  description: 恒 SUCCEEDED（只拦成功终态）
+                result:
+                  type: object
+                  additionalProperties: true
+                  description: |
+                    原始终态 result（上游裸 URL，未经网关代理 URL 转换），形如
+                    {resources:["https://upstream/..."], usage:{...}}。消费方下载产物
+                    转存/审核/脱敏后在响应 data.result 返回改写后值。
+      responses:
+        '200':
+          description: |
+            改写结果（信封 code=0 + data.result=改写后值；data:null 或 data.result:null =
+            不改写直通；code≠0 = 失败，网关按重试语义处理）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        nullable: true
+                        properties:
+                          result:
+                            type: object
+                            nullable: true
+                            additionalProperties: true
+                            description: 改写后 result（落终态条目为原始值；poll 读时现签代理
+                              URL；资源代理按此原始值回源——其中 URL 须匿名可读或自带凭证）；
+                              null = 直通落原值
 
   # ── Mmagix 形态内部 API（网关→控制层，非 /gw/v1/* 适配器契约）──
   # 网关经 route 面硬编码调用以下路径（HttpChannelApi，路径不可按 face 配置）；

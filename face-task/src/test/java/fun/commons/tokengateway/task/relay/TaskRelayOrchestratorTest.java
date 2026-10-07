@@ -858,6 +858,56 @@ class TaskRelayOrchestratorTest {
         verify(lotaskClient, never()).get(anyString());
     }
 
+    @Test
+    @DisplayName("poll: 旧格式终态条目 (24h 前代理 URL) 读时重签 — sig 换新 exp 新鲜 (issue #43 存量自愈)")
+    void pollTerminalEntryLegacyProxyResignsFresh() {
+        backend.enqueue(json("{\"code\":0,\"data\":{\"valid\":true}}"));
+        when(mappingStore.get("T-old")).thenReturn(Mono.just("YeirYkxHuQ"));
+        when(metaStore.getTerminalResult("T-old")).thenReturn(Mono.just(
+                com.alibaba.fastjson2.JSON.parseObject("{\"status\":\"SUCCEEDED\","
+                        + "\"result\":{\"resources\":[\"/v1/resources/T-old/0?exp=1&sig=stale\"]}}")));
+
+        StepVerifier.create(orchestrator.poll("video", "T-old", "sk-caller", null))
+                .assertNext(view -> {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> result = (Map<String, Object>) view.get("result");
+                    String url = String.valueOf(
+                            ((java.util.List<?>) result.get("resources")).get(0));
+                    assertThat(url).startsWith("/v1/resources/T-old/0?exp=");
+                    assertThat(url).doesNotContain("sig=stale").doesNotContain("exp=1&");
+                    long exp = Long.parseLong(url.replaceAll(".*[?&]exp=(\\d+).*", "$1"));
+                    assertThat(exp).isGreaterThan(System.currentTimeMillis() / 1000);
+                })
+                .verifyComplete();
+        verify(lotaskClient, never()).get(anyString());
+    }
+
+    @Test
+    @DisplayName("poll: 新格式终态条目 (存原始/改写后 URL, issue #43 翻转) 读时现签代理 URL, 原始值不透出")
+    void pollTerminalEntryNewFormatSignsAtRead() {
+        backend.enqueue(json("{\"code\":0,\"data\":{\"valid\":true}}"));
+        when(mappingStore.get("T-new")).thenReturn(Mono.just("YeirYkxHuQ"));
+        when(metaStore.getTerminalResult("T-new")).thenReturn(Mono.just(
+                com.alibaba.fastjson2.JSON.parseObject("{\"status\":\"SUCCEEDED\","
+                        + "\"result\":{\"resources\":[\"https://consumer-oss/rewritten.mp4\"],"
+                        + "\"filtered_by\":\"consumer\"}}")));
+
+        StepVerifier.create(orchestrator.poll("video", "T-new", "sk-caller", null))
+                .assertNext(view -> {
+                    assertThat(view.get("status")).isEqualTo("SUCCEEDED");
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> result = (Map<String, Object>) view.get("result");
+                    String url = String.valueOf(
+                            ((java.util.List<?>) result.get("resources")).get(0));
+                    assertThat(url).startsWith("/v1/resources/T-new/0?exp=");
+                    assertThat(url).doesNotContain("consumer-oss");
+                    // 非 resources 字段原样透出 (改写留痕可见)
+                    assertThat(result.get("filtered_by")).isEqualTo("consumer");
+                })
+                .verifyComplete();
+        verify(lotaskClient, never()).get(anyString());
+    }
+
     // ---------- issue #41: buildPayload 双锚 (tenantId / billingRequestId) ----------
 
     @Test

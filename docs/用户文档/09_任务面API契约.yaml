@@ -204,6 +204,10 @@ paths:
       description: |
         result.resources 返回的是本端点代理 URL（上游原始 URL 永不透传）。
         签名过期/篡改返回 10100 信封；任务非 SUCCEEDED 返回 10402。
+        存储语义（issue #43 起）：终态条目存原始（或 result-filter 改写后）URL，
+        代理签名一律读时现签（poll 终态视图每次返回新鲜 24h exp+sig；存量旧格式
+        条目内的过期签名读时自动重签自愈）。回源按条目原始值直取——result-filter
+        改写后由消费方 OSS 供给（改写后 URL 须匿名可读或自带凭证）。
       security: []
       parameters:
         - name: task_no

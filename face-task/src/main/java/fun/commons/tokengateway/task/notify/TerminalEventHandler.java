@@ -14,6 +14,7 @@ import fun.commons.tokengateway.task.state.TaskMetaStore.TaskMeta;
 import fun.commons.tokengateway.task.state.TaskStateMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
@@ -27,13 +28,22 @@ import java.util.Map;
  * 终态事件处理 (《05》§5.2: webhook 驱动退款/消费 + notify; 三源触发同一入口——
  * webhook 验签通过 / verify-then-act 回查 / 超时钟与对账兜底, 全靠退款幂等收口).
  *
- * <p>SUCCESS → result.resources 转 sig 代理 URL 落终态存储 (上游 URL 永不透传), 预扣转消费;
+ * <p>SUCCESS → 原始 result 落终态存储 (读时转 sig 代理 URL, 上游 URL 永不透传), 预扣转消费;
  * FAILED/CANCELLED → 全额退款 (幂等) → notify. 顺序: 先退款成功再 notify (《05》§7).
  * 收口成功后补一条终态 access-log (issue #29, fire-and-forget).
+ *
+ * <p>终态结果过滤 (issue #43): {@code token-gateway.result-filter.enabled=true} 时
+ * SUCCEEDED 分支在落库<b>之前</b>回调消费方改写原始 result (写时过滤, 一次改写);
+ * 改写失败不落终态条目 (维持非终态待对账/超时钟重放, settle 照常), 重试耗尽 →
+ * 死信 + fail-open 落原值. 开关默认关 = 本类一行新逻辑不执行.
+ *
+ * <p>存储格式翻转 (issue #43 根治): 终态条目存<b>原始 (改写后) result</b>, 签名代理
+ * URL 一律读时现签 (terminalPollView/notify 经 ResourceUrlConverter 转换) —— 存量
+ * 旧格式条目 (存转换后代理 URL, 24h 签名写死) 读时剥查询串重签自愈.
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @Autowired)
 public class TerminalEventHandler {
 
     private final TaskMetaStore metaStore;
@@ -43,6 +53,23 @@ public class TerminalEventHandler {
     private final TokenGatewayProperties props;
     /** 终态 access-log 上报 (issue #29): 终态收口后 fire-and-forget, 不阻塞处理链. */
     private final TaskAccessLogger taskAccessLogger;
+    /**
+     * 终态结果过滤器 (issue #43): SUCCEEDED 落库前回调消费方改写 result.
+     * 兼容构造传 {@link TerminalResultFilter#disabled()} = 默认关闭 (终态链零变化).
+     */
+    private final TerminalResultFilter resultFilter;
+
+    /**
+     * 六参兼容构造 (测试/存量装配): result-filter 接默认关闭实例, 终态链行为与
+     * issue #43 前逐字节一致 (回归红线).
+     */
+    public TerminalEventHandler(TaskMetaStore metaStore, TaskBillingSaga billingSaga,
+                                NotifyDispatcher notifyDispatcher,
+                                fun.commons.tokengateway.task.ResourceUrlConverter resourceUrlConverter,
+                                TokenGatewayProperties props, TaskAccessLogger taskAccessLogger) {
+        this(metaStore, billingSaga, notifyDispatcher, resourceUrlConverter, props,
+                taskAccessLogger, TerminalResultFilter.disabled());
+    }
 
     /**
      * 处理终态事件 (非终态/未知任务静默忽略——轮询中的进度事件不收).
@@ -66,12 +93,19 @@ public class TerminalEventHandler {
         Mono<Void> settle;
         Map<String, Object> notifyBody;
         if (mapped == TaskStatus.SUCCEEDED) {
-            Map<String, Object> converted = resourceUrlConverter.convert(taskNo, result);
-            // SUCCEEDED 也须计费闭环: 预扣转实扣 (settle), 与 saveTerminalResult 串行
+            // issue #43: result-filter 开启时先回调消费方改写原始 result (写时过滤),
+            // 改写后值才进落库→notify; 默认关 = 走下方原链路零变化
+            if (resultFilter.isEnabled()) {
+                return onSucceededWithFilter(taskNo, meta, result, ttl);
+            }
+            // 存储格式翻转 (issue #43 根治): 终态条目存原始 result (读时现签);
+            // notify body 发送时转换 (签名新鲜 24h). SUCCEEDED 也须计费闭环: 预扣转实扣
+            // (settle), 与 saveTerminalResult 串行
             settle = billingSaga.settleOnce(meta.preConsumeId(), taskNo)
                     .then(metaStore.saveTerminalResult(taskNo,
-                            JSON.toJSONString(terminalEntry(TaskStatus.SUCCEEDED, converted, null)), ttl));
-            notifyBody = notifyBody(taskNo, TaskStatus.SUCCEEDED, converted, null);
+                            JSON.toJSONString(terminalEntry(TaskStatus.SUCCEEDED, result, null)), ttl));
+            notifyBody = notifyBody(taskNo, TaskStatus.SUCCEEDED,
+                    resourceUrlConverter.convert(taskNo, result), null);
         } else {
             settle = billingSaga.refundOnce(meta.preConsumeId(), "task " + mapped.name(), taskNo)
                     .then(metaStore.saveTerminalResult(taskNo,
@@ -87,6 +121,41 @@ public class TerminalEventHandler {
                     // 处理异常时链路已 error, 不落记录 (缺失即处理失败信号)
                     taskAccessLogger.reportTerminal(taskNo, meta.modality(), mapped.name());
                 }));
+    }
+
+    /**
+     * SUCCEEDED + result-filter 开启 (issue #43): 先回调消费方改写原始 result (上游裸 URL),
+     * 改写后值落终态条目 (原始值存储, 读时现签) → notify (发送时转代理 URL).
+     *
+     * <p>失败语义: 改写 RPC 失败/超时/信封 code≠0 且重试预算未耗尽 → 不落终态条目、
+     * 不清 deadline、不闭环 pending、不 notify (任务维持非终态, 对账/超时钟重放终态事件
+     * 自然重试); <b>settle 照常执行</b> (改写与结算解耦 —— 上游已交付=该收钱, 改写只闸
+     * 结果可见性). 重试超 max-attempts → [ResultFilter-DeadLetter] 死信 + fail-open 落原值.
+     */
+    private Mono<Void> onSucceededWithFilter(String taskNo, TaskMeta meta,
+                                             Map<String, Object> result, Duration ttl) {
+        Mono<Void> settle = billingSaga.settleOnce(meta.preConsumeId(), taskNo);
+        return resultFilter.filter(taskNo, meta, result, ttl)
+                .flatMap(outcome -> {
+                    if (!outcome.proceed()) {
+                        // 改写失败待重放: 仅 settle 照常, 终态链其余环节不动作
+                        return settle;
+                    }
+                    Map<String, Object> effective = outcome.result();
+                    return settle
+                            .then(metaStore.saveTerminalResult(taskNo,
+                                    JSON.toJSONString(terminalEntry(TaskStatus.SUCCEEDED, effective, null)),
+                                    ttl))
+                            .then(metaStore.clearDeadline(taskNo))
+                            .then(metaStore.closePending(taskNo))
+                            .then(Mono.fromRunnable(() -> {
+                                notifyDispatcher.dispatch(taskNo, meta.notifyUrl(),
+                                        notifyBody(taskNo, TaskStatus.SUCCEEDED,
+                                                resourceUrlConverter.convert(taskNo, effective), null));
+                                taskAccessLogger.reportTerminal(taskNo, meta.modality(),
+                                        TaskStatus.SUCCEEDED.name());
+                            }));
+                });
     }
 
     /**

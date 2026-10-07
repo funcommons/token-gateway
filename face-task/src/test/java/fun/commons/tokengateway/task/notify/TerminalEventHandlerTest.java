@@ -60,7 +60,7 @@ class TerminalEventHandlerTest {
     }
 
     @Test
-    @DisplayName("SUCCESS: resources 转 sig 代理 URL 落终态存储, 不退款, notify")
+    @DisplayName("SUCCESS: 原始 result 落终态存储 (issue #43 存储格式翻转, 读时签名), notify body 转代理 URL, 不退款")
     void successConvertsResources() {
         Map<String, Object> result = Map.of(
                 "resources", List.of("https://upstream/raw.mp4"),
@@ -69,16 +69,26 @@ class TerminalEventHandlerTest {
         StepVerifier.create(handler.onTerminal("T1", META, "SUCCESS", result))
                 .verifyComplete();
 
+        // 终态条目存原始值 (issue #43 翻转: 签名代理 URL 读时现签, 不再写死 24h 签名)
         org.mockito.ArgumentCaptor<String> saved = org.mockito.ArgumentCaptor.forClass(String.class);
         verify(metaStore).saveTerminalResult(eq("T1"), saved.capture(), any());
         String entry = saved.getValue();
         assertThat(entry).contains("\"status\":\"SUCCEEDED\"");
-        assertThat(entry).contains("/v1/resources/T1/0?exp=");
-        assertThat(entry).doesNotContain("https://upstream/raw.mp4");
+        assertThat(entry).contains("https://upstream/raw.mp4");
+        assertThat(entry).doesNotContain("/v1/resources/");
+        // notify body 发送时转换: resources 为新鲜签名代理 URL
+        org.mockito.ArgumentCaptor<Map<String, Object>> body =
+                org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(notifyDispatcher).dispatch(eq("T1"), eq("https://caller/cb"), body.capture());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> notifyResult = (Map<String, Object>) body.getValue().get("result");
+        assertThat(notifyResult).isNotNull();
+        assertThat(String.valueOf(notifyResult.get("resources")))
+                .contains("/v1/resources/T1/0?exp=")
+                .doesNotContain("https://upstream/raw.mp4");
         verify(billingSaga, never()).refundOnce(anyString(), anyString(), anyString());
         verify(metaStore).clearDeadline("T1");
         verify(metaStore).closePending("T1");
-        verify(notifyDispatcher).dispatch(eq("T1"), eq("https://caller/cb"), any());
     }
 
     @Test

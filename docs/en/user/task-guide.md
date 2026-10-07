@@ -106,3 +106,42 @@ token-gateway:
 ```
 
 Scheduling backstops: the timeout clock (deadline → requery terminal state → EXPIRED + refund) and pre-charge–terminal reconciliation are owned by the gateway (TimeoutClockJob / ReconcileJob); the task state machine / retry / zombie reaping are hosted by lotask4j.
+
+## 6. Terminal Result Filtering (result-filter, issue #43)
+
+**Purpose**: a SUCCEEDED terminal result carries raw upstream-channel URLs (time-limited, unmoderated). With this capability enabled, the gateway calls the consumer (capability face, e.g. mmagix) back to rewrite the result **before** storing the terminal entry — the consumer downloads the artifacts to its own OSS (30-day retention), moderates, redacts, logs, caches. The terminal entry stores the **rewritten raw value**; outward views (poll terminal view / notify body) sign fresh proxy URLs at read/send time, and the resource proxy fetches the entry's raw value directly — closing the 30-day-retention loop (fetches hit the consumer's OSS, not the expired channel URL). Only SUCCEEDED is intercepted; FAILED / EXPIRED / CANCELLED bypass the filter unchanged.
+
+**Switch & configuration** (default off; when off, the terminal chain runs zero new logic):
+
+```yaml
+token-gateway:
+  result-filter:
+    enabled: true                          # default false
+    url: http://consumer:9500              # falls back to gateway.backend.url when unset
+    path-prefix: /v1/internal/tasks/result-filter  # default; re-pointable
+    auth: jwt                              # none | key | jwt; credentials fall back to backend internal-token
+    jwt-secret: ${GW_RESULT_FILTER_JWT:}
+    timeout: 60s                           # default 60s (consumer downloads + re-uploads large artifacts)
+    max-attempts: 5                        # rewrite-failure retry budget (driven by reconcile/timeout-clock replays)
+```
+
+**Contract** (implemented by the consumer; field-level schema: the result-filter endpoint in `docs/开发文档/03_能力面接口契约.yaml`):
+
+```http
+POST <url><path-prefix>        # internal auth reuses the capability-face three modes (none|key|jwt)
+{"requestId":"<taskNo>","taskNo":"T...","tenantId":"...","modality":"video","model":"vid-1.5",
+ "status":"SUCCEEDED","result":{...raw result (upstream raw URLs)...}}
+
+→ {"code":0,"data":{"result":{...rewritten...}}}   # rewritten
+→ {"code":0,"data":null}                            # pass-through unchanged (data.result:null is equivalent)
+→ {"code":<non-zero>} / non-2xx / timeout           # failure (retry semantics below)
+```
+
+**Failure, retry & dead letter**: on rewrite RPC failure / timeout / envelope code≠0, the gateway does **not** store the terminal entry (the task stays non-terminal; the reconcile job / timeout clock replays the terminal event and retries naturally, counted at Redis `tgw:result-filter:attempts:{taskNo}`). Beyond `max-attempts`, the gateway logs a `[ResultFilter-DeadLetter]` single-line JSON dead letter (taskNo / original result / error) and **fails open with the original value** (the task is never stuck). Billing settle is decoupled from rewriting: settle proceeds as usual while rewriting fails/retries (delivered upstream work is billable; rewriting only gates result visibility).
+
+**Consumer implementation notes**:
+
+- **Idempotency duty**: the same taskNo may be delivered more than once (retries / multi-instance concurrency) — write by taskNo as an upsert and return the same rewritten result on repeat calls.
+- A rewritten result should carry its own `resources` array (stored raw; the gateway signs proxy URLs per element at read/notify time, and the resource proxy fetches the raw value). **Rewritten URLs must be anonymously readable or self-credentialed** (e.g. pre-signed OSS URLs — the gateway only attaches the original channel apiKey header when fetching, never the consumer's credentials). To pass through, reply `data:null` — do not reply with an empty object.
+- Finish "download upstream artifact + upload to your OSS" within the 60s default timeout; for large artifacts prefer a pass-through-plus-background-copy plan, or raise `timeout`.
+

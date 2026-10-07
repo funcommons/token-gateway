@@ -42,6 +42,12 @@ public class TokenGatewayProperties {
     /** 任务面参数 (face=task/all 时生效). */
     private TaskFaceConfig task = new TaskFaceConfig();
 
+    /**
+     * 终态结果过滤面 (issue #43, 第 9 面): SUCCEEDED 落库前回调消费方改写 result.
+     * 默认关闭; 逐字段缺省回退 backend.* 平移值 (timeout 例外, 缺省 60s).
+     */
+    private ResultFilterFaceConfig resultFilter = new ResultFilterFaceConfig();
+
     /** 渠道健康信号回传 (record-success/failure); off 时需在监控侧补偿. */
     private boolean healthReport = true;
 }

@@ -275,7 +275,10 @@ public class TaskRelayOrchestrator {
                                                 new TaskMetaStore.TaskMeta(lotaskId, preConsumeId,
                                                         submitTaskType,
                                                         notifyUrl == null ? null : notifyUrl.toString(),
-                                                        deadline, channel.getApiKey()), ttl))
+                                                        deadline, channel.getApiKey(),
+                                                        // issue #43: result-filter 回调载荷锚
+                                                        // (tenantId/model; 存量条目为 null)
+                                                        token.getTenantId(), model), ttl))
                                         .thenReturn(createdView(modality, taskNo, deadline));
                             })
                             .onErrorResume(e -> {
@@ -360,15 +363,20 @@ public class TaskRelayOrchestrator {
                 });
     }
 
-    /** 终态条目视图 (终态幂等, 不触 lotask; resources 已是 sig 代理 URL). */
+    /**
+     * 终态条目视图 (终态幂等, 不触 lotask). result 读时经 {@code convertAtRead} 现签:
+     * 新格式条目 (issue #43 起存原始/改写后 URL) → 转新鲜 sig 代理 URL;
+     * 存量旧格式条目 (存转换后代理 URL) → 剥查询串重签自愈 (24h 旧签名不再过期).
+     */
     @SuppressWarnings("unchecked")
     private Map<String, Object> terminalPollView(String taskNo,
                                                  com.alibaba.fastjson2.JSONObject entry) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("task_no", taskNo);
         out.put("status", entry.getString("status"));
-        if (entry.get("result") != null) {
-            out.put("result", entry.get("result"));
+        if (entry.get("result") instanceof Map<?, ?> result) {
+            out.put("result", resourceUrlConverter.convertAtRead(taskNo,
+                    (Map<String, Object>) result));
         }
         if (entry.get("error") != null) {
             out.put("error", entry.get("error"));
