@@ -43,6 +43,33 @@ public class LotaskFaceConfig {
     /** 网关 webhook 接收地址 (submit.callbackUrl 下发, 如 https://gateway/internal/lotask/webhook). */
     private String webhookCallbackUrl;
 
+    /**
+     * worker 零配置自动注册 (2026-10): 发现新任务类型即 POST /api/v1/admin/types upsert.
+     * 缺省开启, 但凭据未配齐时 registrar no-op (缺省静默, 老部署零影响).
+     */
+    private boolean autoRegister = true;
+
+    /**
+     * 平台第二身份 client_id (admin API bearer 用; framework4j 单租户单会话互踢模型下,
+     * admin 面须独立于租户身份的专用账号, 否则轮询登录互踢 10205).
+     */
+    private String platformClientId;
+
+    /** 平台第二身份 client_secret (环境变量注入禁入仓). */
+    private String platformClientSecret;
+
+    /** admin/types upsert 所属租户 ID (数字, 平台侧必填). */
+    private Long platformTenantId;
+
+    /** 自动注册类型的默认并发限制 (upsert body). */
+    private Integer typeConcurrencyLimit = 8;
+
+    /** 自动注册类型的默认超时秒数 (upsert body). */
+    private Integer typeTimeoutSeconds = 3600;
+
+    /** 自动注册类型的默认最大重试次数 (upsert body). */
+    private Integer typeMaxRetries = 3;
+
     /** 连接超时. */
     private Duration connectTimeout = Duration.ofSeconds(3);
 

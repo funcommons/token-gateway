@@ -75,6 +75,9 @@ public class LotaskAuthSigner {
     /** 本进程最近一次使用的 bearer (401 时判断被拒 token 是否仍是共享缓存的当前值). */
     private final AtomicReference<String> lastUsed = new AtomicReference<>();
 
+    /** 平台身份最近一次使用的 bearer (invalidatePlatform 自愈比对用). */
+    private final AtomicReference<String> platformLastUsed = new AtomicReference<>();
+
     private LotaskFaceConfig cfg() {
         return props.getTask().getLotask();
     }
@@ -122,12 +125,18 @@ public class LotaskAuthSigner {
 
     /** 未获锁方: 轮询等对方回写; 超次数兜底自登录 (对方崩溃/锁异常时仍可推进). */
     private Mono<LotaskTokenStore.CachedToken> awaitFreshToken(String key, int left) {
+        return awaitFreshToken(key, left, this::supply);
+    }
+
+    /** 泛化版 (平台第二身份复用; 登录函数由调用方给足身份参数). */
+    private Mono<LotaskTokenStore.CachedToken> awaitFreshToken(String key, int left,
+            java.util.function.Supplier<Mono<LotaskTokenStore.CachedToken>> loginFn) {
         if (left <= 0) {
-            return supply().flatMap(t -> tokenStore.put(key, t).thenReturn(t));
+            return loginFn.get().flatMap(t -> tokenStore.put(key, t).thenReturn(t));
         }
         return Mono.delay(AWAIT_STEP)
                 .then(tokenStore.get(key).filter(this::fresh))
-                .switchIfEmpty(Mono.defer(() -> awaitFreshToken(key, left - 1)));
+                .switchIfEmpty(Mono.defer(() -> awaitFreshToken(key, left - 1, loginFn)));
     }
 
     private String lockKey(String tokenKey) {
@@ -154,11 +163,17 @@ public class LotaskAuthSigner {
 
     /** client_credentials 登录 → access_token + exp 解析. */
     private Mono<LotaskTokenStore.CachedToken> doLogin(LotaskFaceConfig cfg) {
+        return doLogin(cfg.getUrl(), cfg.getTenantName(), cfg.getJwtSecret());
+    }
+
+    /** 登录原语 (租户/平台双身份复用; 凭据由调用方给足). */
+    private Mono<LotaskTokenStore.CachedToken> doLogin(String url, String clientId,
+            String clientSecret) {
         String form = "grant_type=client_credentials"
-                + "&client_id=" + URLEncoder.encode(cfg.getTenantName(), StandardCharsets.UTF_8)
-                + "&client_secret=" + URLEncoder.encode(cfg.getJwtSecret(), StandardCharsets.UTF_8);
+                + "&client_id=" + URLEncoder.encode(clientId, StandardCharsets.UTF_8)
+                + "&client_secret=" + URLEncoder.encode(clientSecret, StandardCharsets.UTF_8);
         return webClientBuilder.build().post()
-                .uri(cfg.getUrl() + "/api/v1/auth/token")
+                .uri(url + "/api/v1/auth/token")
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .bodyValue(form)
                 .retrieve()
@@ -184,6 +199,61 @@ public class LotaskAuthSigner {
     public Mono<Void> invalidate() {
         String key = storeKey();
         String rejected = lastUsed.get();
+        return tokenStore.get(key)
+                .filter(t -> rejected != null && rejected.equals(t.token()))
+                .flatMap(t -> tokenStore.clear(key))
+                .then();
+    }
+
+    /**
+     * 平台第二身份 bearer (admin API 专用, worker 零配置自动注册 2026-10).
+     * <p>framework4j 单租户单会话互踢模型下, admin 面复用租户账号会互踢 (10205) ——
+     * 必须<b>专用平台账号</b>, storeKey 独立 (platform-&lt;clientId&gt;) 与租户身份互不影响.
+     * 凭据未配置即 error (调用方 {@code enabled()} 已先挡, 此处兜底); 登录复用
+     * {@link #awaitFreshToken} 单飞机制 (键隔离).
+     */
+    public Mono<String> platformBearer() {
+        LotaskFaceConfig cfg = cfg();
+        if (cfg.getPlatformClientId() == null || cfg.getPlatformClientId().isBlank()
+                || cfg.getPlatformClientSecret() == null || cfg.getPlatformClientSecret().isBlank()) {
+            return Mono.error(new IllegalStateException(
+                    "lotask platform client 未配置 (autoRegister 需专用平台账号)"));
+        }
+        String key = "tgw:lotask:tok:platform-" + cfg.getPlatformClientId();
+        return tokenStore.get(key)
+                .filter(this::fresh)
+                .switchIfEmpty(Mono.defer(() -> acquirePlatformAndSupply(key, cfg)))
+                .map(LotaskTokenStore.CachedToken::token)
+                .doOnNext(platformLastUsed::set);
+    }
+
+    /** 平台身份单飞登录 (与租户路径同构: 抢锁 → 双检 → 登录回写; 键隔离). */
+    private Mono<LotaskTokenStore.CachedToken> acquirePlatformAndSupply(String key,
+            LotaskFaceConfig cfg) {
+        return tokenStore.tryLock(lockKey(key), LOGIN_LOCK_TTL)
+                .flatMap(locked -> {
+                    if (!locked) {
+                        return awaitFreshToken(key, AWAIT_ATTEMPTS,
+                                () -> doLogin(cfg.getUrl(), cfg.getPlatformClientId(),
+                                        cfg.getPlatformClientSecret()));
+                    }
+                    return tokenStore.get(key)
+                            .filter(this::fresh)
+                            .switchIfEmpty(Mono.defer(() -> doLogin(cfg.getUrl(),
+                                            cfg.getPlatformClientId(), cfg.getPlatformClientSecret())
+                                    .flatMap(t -> tokenStore.put(key, t).thenReturn(t))))
+                            .doFinally(sig -> tokenStore.unlock(lockKey(key)).subscribe());
+                });
+    }
+
+    /** 平台身份 401 自愈 (语义同 {@link #invalidate}, 作用域 = 平台 storeKey). */
+    public Mono<Void> invalidatePlatform() {
+        LotaskFaceConfig cfg = cfg();
+        if (cfg.getPlatformClientId() == null || cfg.getPlatformClientId().isBlank()) {
+            return Mono.empty();
+        }
+        String key = "tgw:lotask:tok:platform-" + cfg.getPlatformClientId();
+        String rejected = platformLastUsed.get();
         return tokenStore.get(key)
                 .filter(t -> rejected != null && rejected.equals(t.token()))
                 .flatMap(t -> tokenStore.clear(key))

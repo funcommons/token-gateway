@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
 
 import java.io.IOException;
@@ -36,10 +37,11 @@ import java.util.stream.Stream;
  *   <li>成功后落本地副本 {@code <scriptsDir>/.cache/<taskType>/v-<version>.groovy}
  *       (原子写: tmp → move); remote 不可达时降级用本地最后副本 + WARN ——
  *       控制层故障时 Worker 自举, 已在跑的 taskType 不中断</li>
- *   <li>taskType 发现: 配置声明 ({@code worker.script-remote.task-types}) ∪ 磁盘缓存
- *       (首启自举) ∪ 已加载索引</li>
- *   <li>fail-fast: remote 模式 base-url / task-types 缺失即抛 IllegalStateException
- *       (误配裸地址跑成空脚本比报错更糟)</li>
+ *   <li>taskType 发现: 配置声明 ({@code worker.script-remote.task-types}) ∪ _index
+ *       自动发现 (discover, 2026-10 零配置) ∪ 磁盘缓存 (首启自举) ∪ 已加载索引;
+ *       "*" 通配 = 等价开启发现</li>
+ *   <li>fail-fast: base-url 缺失即抛; 仅在「未开启发现 且 显式清单空 且 无既有索引」时
+ *       抛 task-types 空 (误配裸地址跑成空脚本比报错更糟)</li>
  * </ul>
  *
  * <p><b>任务内版本锁定</b>: WorkerLoop.runTask 在任务开始时取得 {@link ScriptAsset}
@@ -61,6 +63,9 @@ public class ScriptLoader {
     private static final ParameterizedTypeReference<ApiResponse<RemoteScript>> REMOTE_TYPE =
             new ParameterizedTypeReference<>() {};
 
+    private static final ParameterizedTypeReference<ApiResponse<List<String>>> INDEX_TYPE =
+            new ParameterizedTypeReference<>() {};
+
     /** remote 响应载荷 (信封 data). */
     @Data
     static class RemoteScript {
@@ -79,6 +84,12 @@ public class ScriptLoader {
 
     /** remote 源: taskType → 上次成功拉取时刻 (cacheTtl 节流). */
     private final Map<String, Long> remoteFetchedAt = new ConcurrentHashMap<>();
+
+    /** _index 发现清单 (sticky: 拉取失败保留旧值防抖, 空清单 = 尚未发现过). */
+    private volatile Set<String> indexTypes = Set.of();
+
+    /** _index 上次拉取时刻 (indexCacheTtl 独立节流, 与版本比对节流互不干扰). */
+    private volatile long indexFetchedAt;
 
     public ScriptLoader(WorkerProperties props) {
         this(props, null);
@@ -152,9 +163,14 @@ public class ScriptLoader {
             throw new IllegalStateException(
                     "worker.script-remote.base-url 缺失 (script-source=remote 必填, fail-fast)");
         }
-        if (cfg.getTaskTypes().isEmpty() && byType.isEmpty()) {
+        // 发现面 (2026-10 零配置): task-types 含 * 等价开启 discover; 关闭时维持旧语义
+        boolean discoveryOn = cfg.isDiscover() || cfg.getTaskTypes().contains("*");
+        if (!discoveryOn && explicitTypes(cfg).isEmpty() && byType.isEmpty()) {
             throw new IllegalStateException(
-                    "worker.script-remote.task-types 为空 (remote 无列表端点, 须显式声明)");
+                    "worker.script-remote.task-types 为空且未开启 discover (无类型可消费, fail-fast)");
+        }
+        if (discoveryOn) {
+            fetchIndex(cfg);
         }
         for (String taskType : remoteCandidates(cfg)) {
             Long fetchedAt = remoteFetchedAt.get(taskType);
@@ -166,9 +182,53 @@ public class ScriptLoader {
         }
     }
 
-    /** taskType 候选: 配置声明 ∪ 磁盘缓存自举 ∪ 当前索引. */
+    /** 显式清单 (剔除 "*" 通配符 — 它只表达「开启发现」语义, 非真实类型). */
+    private List<String> explicitTypes(WorkerProperties.ScriptRemote cfg) {
+        return cfg.getTaskTypes().stream().filter(t -> !"*".equals(t)).toList();
+    }
+
+    /**
+     * _index 类型发现 (GET {base-url}/_index → ApiResponse&lt;List&lt;modelCode&gt;&gt;).
+     * <p>独立 indexCacheTtl 节流; sticky: 拉取失败保留旧清单 (控制面瞬断防抖);
+     * 404 = 老 bootstrap 无此端点, 降级显式清单 (兼容矩阵: 新 worker + 老控制面).
+     */
+    private void fetchIndex(WorkerProperties.ScriptRemote cfg) {
+        long now = System.currentTimeMillis();
+        if (now - indexFetchedAt < cfg.getIndexCacheTtl().toMillis()) {
+            return;
+        }
+        indexFetchedAt = now;
+        try {
+            ApiResponse<List<String>> resp = webClientBuilder.build().get()
+                    .uri(cfg.getBaseUrl() + "/_index")
+                    .headers(h -> {
+                        if (cfg.getInternalToken() != null && !cfg.getInternalToken().isBlank()) {
+                            h.set("X-Internal-Token", cfg.getInternalToken());
+                        }
+                    })
+                    .retrieve()
+                    .bodyToMono(INDEX_TYPE)
+                    .timeout(Duration.ofSeconds(5))
+                    .block();
+            if (resp == null || !resp.isSuccess() || resp.getData() == null) {
+                log.warn("[ScriptLoader/remote] _index 响应无效 (sticky 沿用旧清单): code={}",
+                        resp == null ? "null" : resp.getCode());
+                return;
+            }
+            indexTypes = Set.copyOf(resp.getData());
+            log.info("[ScriptLoader/remote] _index 发现 {} 个类型: {}", indexTypes.size(),
+                    indexTypes.isEmpty() ? "[]" : "见 taskTypes 日志");
+        } catch (WebClientResponseException.NotFound e) {
+            log.warn("[ScriptLoader/remote] _index 404 (老控制面无此端点), 降级显式清单");
+        } catch (Exception e) {
+            log.warn("[ScriptLoader/remote] _index 拉取失败 (sticky 沿用旧清单): {}", e.getMessage());
+        }
+    }
+
+    /** taskType 候选: 显式清单 ∪ _index 发现 ∪ 当前索引 ∪ 磁盘缓存自举. */
     private Set<String> remoteCandidates(WorkerProperties.ScriptRemote cfg) {
-        Set<String> candidates = new LinkedHashSet<>(cfg.getTaskTypes());
+        Set<String> candidates = new LinkedHashSet<>(explicitTypes(cfg));
+        candidates.addAll(indexTypes);
         candidates.addAll(byType.keySet());
         if (byType.isEmpty()) { // 首启自举: 控制层不可达时从磁盘缓存恢复
             scanCacheDir().forEach(asset -> {

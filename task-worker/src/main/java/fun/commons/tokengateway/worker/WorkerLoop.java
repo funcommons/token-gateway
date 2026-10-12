@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import fun.commons.tokengateway.task.lotask.RouteSnapshotCipher;
 import fun.commons.tokengateway.worker.config.WorkerProperties;
 import fun.commons.tokengateway.worker.lotask.ClaimedTask;
+import fun.commons.tokengateway.worker.lotask.LotaskTypeRegistrar;
 import fun.commons.tokengateway.worker.lotask.WorkerLotaskClient;
 import fun.commons.tokengateway.worker.script.ScriptExecutor;
 import fun.commons.tokengateway.worker.script.GroovySandbox;
@@ -36,6 +37,7 @@ import java.util.concurrent.Semaphore;
 public class WorkerLoop {
 
     private final WorkerLotaskClient lotaskClient;
+    private final LotaskTypeRegistrar typeRegistrar;
     private final ScriptLoader scriptLoader;
     private final ScriptExecutor scriptExecutor;
     private final ScriptHttpClient http;
@@ -45,10 +47,12 @@ public class WorkerLoop {
     private final Semaphore concurrency;
     private final ExecutorService taskPool;
 
-    public WorkerLoop(WorkerLotaskClient lotaskClient, ScriptLoader scriptLoader,
+    public WorkerLoop(WorkerLotaskClient lotaskClient, LotaskTypeRegistrar typeRegistrar,
+                      ScriptLoader scriptLoader,
                       GroovySandbox sandbox, ScriptHttpClient http,
                       RouteSnapshotCipher snapshotCipher, WorkerProperties props) {
         this.lotaskClient = lotaskClient;
+        this.typeRegistrar = typeRegistrar;
         this.scriptLoader = scriptLoader;
         this.scriptExecutor = new ScriptExecutor(sandbox, props.getHookTimeout());
         this.http = http;
@@ -72,6 +76,14 @@ public class WorkerLoop {
     public void tick() {
         scriptLoader.reload();
         for (String taskType : scriptLoader.taskTypes()) {
+            // 发现新类型即注册 lotask (fire-and-forget, 不阻塞拉单; 未配凭据 no-op;
+            // 注册是增强面, 同步异常也兜住 — 关键拉单路径不受影响)
+            try {
+                typeRegistrar.ensureRegistered(taskType);
+            } catch (Exception e) {
+                log.warn("[WorkerLoop] 类型注册触发失败 (不影响拉单): type={}, err={}",
+                        taskType, e.getMessage());
+            }
             pollBatch(taskType, props.getPullBatchSize());
         }
     }

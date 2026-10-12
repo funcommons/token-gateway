@@ -15,6 +15,7 @@ import reactor.core.publisher.Mono;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * lotask4j worker 域 API (《06》§3.2 实测端点; jwt + 写操作 HMAC 四头复用 LotaskAuthSigner).
@@ -28,9 +29,18 @@ public class WorkerLotaskClient {
 
     private static final String POLL_PATH = "/api/v1/worker/tasks/poll";
 
+    /** 类型拒绝告警节流 (每 type 5 分钟 1 条; 注册未就绪窗口的可见性, 不刷屏). */
+    private static final long TYPE_REJECT_LOG_INTERVAL_MS = 300_000;
+
     private final WebClient.Builder webClientBuilder;
     private final TokenGatewayProperties props;
     private final LotaskAuthSigner authSigner;
+
+    /** type → 最近一次类型拒绝告警时刻 (节流). */
+    private final Map<String, Long> lastTypeRejectLogAt = new ConcurrentHashMap<>();
+
+    /** type → 累计类型拒绝次数 (20101 未注册 / 20102 禁用; 只读暴露). */
+    private final Map<String, Long> typeRejections = new ConcurrentHashMap<>();
 
     private String base() {
         return props.getTask().getLotask().getUrl();
@@ -38,6 +48,26 @@ public class WorkerLotaskClient {
 
     private boolean isAuthKick(Throwable e) {
         return e instanceof WebClientResponseException w && w.getStatusCode().value() == 401;
+    }
+
+    /**
+     * 类型拒绝记账 + 节流告警 (20101 未注册 / 20102 禁用; 零配置轮次: 自动注册
+     * 自愈前的可见性窗口). 语义保持 Mono.empty (poll 空转下轮重试, 不中断循环).
+     */
+    private void onTypeRejected(String taskType, int code, String message) {
+        typeRejections.merge(taskType, 1L, Long::sum);
+        long now = System.currentTimeMillis();
+        Long last = lastTypeRejectLogAt.get(taskType);
+        if (last == null || now - last >= TYPE_REJECT_LOG_INTERVAL_MS) {
+            lastTypeRejectLogAt.put(taskType, now);
+            log.warn("[WorkerClient] 类型拒绝 (注册未就绪?): type={}, code={}, msg={}",
+                    taskType, code, message);
+        }
+    }
+
+    /** 只读快照: type → 累计类型拒绝次数 (运维观测/测试断言用). */
+    public Map<String, Long> unknownTypeRejections() {
+        return Map.copyOf(typeRejections);
     }
 
     /** 抢占一个任务; 无任务 → Mono.empty(). */
@@ -54,7 +84,11 @@ public class WorkerLotaskClient {
                 })
                 .<ClaimedTask>handle((json, sink) -> {
                     JSONObject env = JSON.parseObject(json);
-                    if (env.getIntValue("code") != 0 || env.getJSONObject("data") == null) {
+                    int code = env.getIntValue("code");
+                    if (code != 0 || env.getJSONObject("data") == null) {
+                        if (code == 20101 || code == 20102) {
+                            onTypeRejected(taskType, code, env.getString("message"));
+                        }
                         sink.complete();
                         return;
                     }

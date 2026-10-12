@@ -3,6 +3,7 @@ package fun.commons.tokengateway.worker;
 import fun.commons.tokengateway.task.lotask.RouteSnapshotCipher;
 import fun.commons.tokengateway.worker.config.WorkerProperties;
 import fun.commons.tokengateway.worker.lotask.ClaimedTask;
+import fun.commons.tokengateway.worker.lotask.LotaskTypeRegistrar;
 import fun.commons.tokengateway.worker.lotask.WorkerLotaskClient;
 import fun.commons.tokengateway.worker.script.GroovySandbox;
 import fun.commons.tokengateway.worker.script.GroovyScriptTestHarness;
@@ -32,6 +33,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -77,7 +79,7 @@ class WorkerLoopTest {
             when(lotask.progress(any(), anyString(), anyInt())).thenReturn(Mono.empty());
             when(lotask.result(any(), anyString(), any(), any(), any())).thenReturn(Mono.empty());
 
-            WorkerLoop loop = new WorkerLoop(lotask, loader, new GroovySandbox(),
+            WorkerLoop loop = new WorkerLoop(lotask, mock(LotaskTypeRegistrar.class), loader, new GroovySandbox(),
                     new ScriptHttpClient(WebClient.builder(), props), cipher, props);
 
             Map<String, Object> payload = new LinkedHashMap<>();
@@ -129,7 +131,7 @@ class WorkerLoopTest {
             when(lotask.progress(any(), anyString(), anyInt())).thenReturn(Mono.empty());
             when(lotask.result(any(), anyString(), any(), any(), any())).thenReturn(Mono.empty());
 
-            WorkerLoop loop = new WorkerLoop(lotask, loader, new GroovySandbox(),
+            WorkerLoop loop = new WorkerLoop(lotask, mock(LotaskTypeRegistrar.class), loader, new GroovySandbox(),
                     new ScriptHttpClient(WebClient.builder(), props), cipher, props);
 
             Map<String, Object> payload = new LinkedHashMap<>();
@@ -158,6 +160,11 @@ class WorkerLoopTest {
     /** 真临时脚本目录 + 零 HTTP 脚本 (tick() 起手 reload 重扫磁盘, 反射注入会被清空). */
     private WorkerLoop loopWithTrivialScript(WorkerProperties props,
             WorkerLotaskClient lotask) throws Exception {
+        return loopWithTrivialScript(props, lotask, mock(LotaskTypeRegistrar.class));
+    }
+
+    private WorkerLoop loopWithTrivialScript(WorkerProperties props,
+            WorkerLotaskClient lotask, LotaskTypeRegistrar registrar) throws Exception {
         props.setScriptsDir(tmp.toString());
         props.setUpstreamPollInterval(Duration.ofMillis(10));
         props.setStatusCheckEvery(100);   // 用例不触发取消检测
@@ -167,7 +174,7 @@ class WorkerLoopTest {
 
         ScriptLoader loader = new ScriptLoader(props);
         loader.reload();
-        WorkerLoop loop = new WorkerLoop(lotask, loader, new GroovySandbox(),
+        WorkerLoop loop = new WorkerLoop(lotask, registrar, loader, new GroovySandbox(),
                 new ScriptHttpClient(WebClient.builder(), props),
                 new RouteSnapshotCipher(CIPHER_KEY), props);
         return loop;
@@ -215,5 +222,41 @@ class WorkerLoopTest {
         verify(lotask, timeout(10000).times(2)).result(any(), eq("SUCCESS"),
                 any(), isNull(), isNull());
         verify(lotask, timeout(5000).times(2)).poll(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("tick 发现新类型 → 触发 lotask 注册 (fire-and-forget)")
+    void tickTriggersTypeRegistration() throws Exception {
+        WorkerProperties props = new WorkerProperties();
+        props.setPullBatchSize(4);
+        WorkerLotaskClient lotask = mock(WorkerLotaskClient.class);
+        when(lotask.poll(anyString(), anyString())).thenReturn(Mono.empty());
+        LotaskTypeRegistrar registrar = mock(LotaskTypeRegistrar.class);
+        WorkerLoop loop = loopWithTrivialScript(props, lotask, registrar);
+
+        loop.tick();
+
+        verify(registrar, timeout(5000).atLeastOnce()).ensureRegistered("batchtest");
+    }
+
+    @Test
+    @DisplayName("注册触发抛错不阻塞拉单 (增强与关键路径隔离)")
+    void tickRegistrationFailureDoesNotBlockPolling() throws Exception {
+        WorkerProperties props = new WorkerProperties();
+        props.setPullBatchSize(2);
+        WorkerLotaskClient lotask = mock(WorkerLotaskClient.class);
+        when(lotask.progress(any(), anyString(), anyInt())).thenReturn(Mono.empty());
+        when(lotask.result(any(), anyString(), any(), any(), any())).thenReturn(Mono.empty());
+        when(lotask.poll(anyString(), anyString())).thenReturn(
+                Mono.just(task("t-1", 1)), Mono.just(task("t-2", 2)));
+        LotaskTypeRegistrar registrar = mock(LotaskTypeRegistrar.class);
+        doThrow(new RuntimeException("registrar boom"))
+                .when(registrar).ensureRegistered(anyString());
+        WorkerLoop loop = loopWithTrivialScript(props, lotask, registrar);
+
+        loop.tick();
+
+        verify(lotask, timeout(10000).times(2)).result(any(), eq("SUCCESS"),
+                any(), isNull(), isNull());
     }
 }

@@ -163,4 +163,28 @@ class WorkerLotaskClientTest {
                 .verifyComplete();
         verify(signer, Mockito.atLeastOnce()).invalidate();
     }
+
+    @Test
+    void poll_typeRejected20101_emptyWithThrottledVisibility() {
+        // 20101 (类型未注册) → Mono.empty 语义不变 + 计数暴露; 第 2 次同 type 节流内不再发 log 可观测副作用
+        server.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":20101,\"message\":\"任务类型未知\",\"data\":null}"));
+        StepVerifier.create(client.poll("zz-new-type", "w-1")).verifyComplete();
+
+        server.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":20101,\"message\":\"任务类型未知\",\"data\":null}"));
+        StepVerifier.create(client.poll("zz-new-type", "w-1")).verifyComplete();
+
+        assertThat(client.unknownTypeRejections()).containsEntry("zz-new-type", 2L);
+    }
+
+    @Test
+    void poll_typeRejected20102_disabledCountedSeparately() {
+        // 20102 (类型禁用) 同样进可见性面, 与 20101 同 map 按类型聚合
+        server.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":20102,\"message\":\"任务类型已禁用\",\"data\":null}"));
+        StepVerifier.create(client.poll("off-type", "w-1")).verifyComplete();
+
+        assertThat(client.unknownTypeRejections()).containsEntry("off-type", 1L);
+    }
 }

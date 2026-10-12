@@ -41,6 +41,8 @@ class RemoteScriptLoaderTest {
                         + "/api/v1/internal/work-scripts");
         props.getScriptRemote().setTaskTypes(java.util.List.of("video"));
         props.getScriptRemote().setCacheTtl(java.time.Duration.ofMillis(50));
+        // 旧语义回归组: 显式清单模式 (discover 关; 发现面用例单独开启)
+        props.getScriptRemote().setDiscover(false);
     }
 
     @AfterEach
@@ -173,6 +175,140 @@ class RemoteScriptLoaderTest {
     void emptyTaskTypesFailsFast() {
         props.getScriptRemote().setTaskTypes(java.util.List.of());
         assertThrows(IllegalStateException.class, () -> loader().reload());
+    }
+
+    @Test
+    @DisplayName("fail-fast 收窄: discover=false 且清单空 且 无索引 才抛 (发现开启不抛)")
+    void emptyTaskTypesFailsFastNarrowed() {
+        props.getScriptRemote().setTaskTypes(java.util.List.of());
+        props.getScriptRemote().setDiscover(true);
+        controlPlane.enqueue(indexResponse("video"));
+        enqueueScript("v1", "// s");
+        ScriptLoader loader = loader();
+        loader.reload();
+        assertThat(loader.taskTypes()).containsExactly("video");
+    }
+
+    // ------------------------------------------------------ _index 自动发现 (2026-10)
+
+    private static MockResponse indexResponse(String... types) {
+        String arr = String.join(",",
+                java.util.Arrays.stream(types).map(t -> "\"" + t + "\"").toList());
+        return new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"message\":\"ok\",\"data\":[" + arr + "]}");
+    }
+
+    @Test
+    @DisplayName("_index 发现: 清单类型自动进候选并拉取 (零显式配置)")
+    void discoverIndexFeedsCandidates() throws Exception {
+        props.getScriptRemote().setTaskTypes(java.util.List.of());
+        props.getScriptRemote().setDiscover(true);
+        controlPlane.enqueue(indexResponse("video", "audio"));
+        // 多类型候选取 Set 哈希序, 拉取顺序不定 → 假响应同体, 断言只看类型覆盖
+        enqueueScript("v1", "// s");
+        enqueueScript("v1", "// s");
+
+        ScriptLoader loader = loader();
+        loader.reload();
+
+        assertThat(loader.taskTypes()).containsExactlyInAnyOrder("video", "audio");
+        assertThat(loader.forType("video").orElseThrow().source()).contains("// s");
+        assertThat(loader.forType("audio").orElseThrow().source()).contains("// s");
+    }
+
+    @Test
+    @DisplayName("_index ∪ 显式清单 并集消费 (增量灰度语义保留)")
+    void discoverUnionsExplicitList() throws Exception {
+        props.getScriptRemote().setTaskTypes(java.util.List.of("explicit"));
+        props.getScriptRemote().setDiscover(true);
+        controlPlane.enqueue(indexResponse("video"));
+        enqueueScript("v1", "// video s");
+        enqueueScript("v1", "// explicit s");
+
+        ScriptLoader loader = loader();
+        loader.reload();
+
+        assertThat(loader.taskTypes()).containsExactlyInAnyOrder("video", "explicit");
+    }
+
+    @Test
+    @DisplayName("_index 404 (老控制面无端点) → 降级显式清单, 拉取不受影响")
+    void discover404DegradesToExplicit() throws Exception {
+        props.getScriptRemote().setTaskTypes(java.util.List.of("video"));
+        props.getScriptRemote().setDiscover(true);
+        controlPlane.enqueue(new MockResponse().setResponseCode(404).setBody("nope"));
+        enqueueScript("v1", "// s");
+
+        ScriptLoader loader = loader();
+        loader.reload();
+
+        assertThat(loader.taskTypes()).containsExactly("video");
+        assertThat(loader.forType("video").orElseThrow().source()).contains("// s");
+    }
+
+    @Test
+    @DisplayName("_index 拉取失败 sticky: 保留旧发现清单 (瞬断防抖)")
+    void discoverFailureKeepsStickyIndex() throws Exception {
+        props.getScriptRemote().setTaskTypes(java.util.List.of());
+        props.getScriptRemote().setDiscover(true);
+        props.getScriptRemote().setIndexCacheTtl(java.time.Duration.ofMillis(50));
+        controlPlane.enqueue(indexResponse("video"));
+        enqueueScript("v1", "// s");
+        ScriptLoader loader = loader();
+        loader.reload();
+        assertThat(loader.taskTypes()).containsExactly("video");
+
+        Thread.sleep(80);
+        controlPlane.enqueue(new MockResponse().setResponseCode(500).setBody("down"));
+        enqueueScript("v1", "// s");
+        loader.reload();
+        assertThat(loader.taskTypes()).containsExactly("video");
+    }
+
+    @Test
+    @DisplayName("_index 节流独立: cacheTtl 过期重拉脚本时 index 窗口内不重发 _index")
+    void discoverThrottleIndependentOfScriptTtl() throws Exception {
+        props.getScriptRemote().setTaskTypes(java.util.List.of());
+        props.getScriptRemote().setDiscover(true);
+        props.getScriptRemote().setIndexCacheTtl(java.time.Duration.ofSeconds(60));
+        controlPlane.enqueue(indexResponse("video"));
+        enqueueScript("v1", "// s");
+        ScriptLoader loader = loader();
+        loader.reload();
+        int afterFirst = controlPlane.getRequestCount();
+
+        Thread.sleep(80);
+        enqueueScript("v1", "// s");
+        loader.reload();
+        assertThat(controlPlane.getRequestCount()).isEqualTo(afterFirst + 1);
+    }
+
+    @Test
+    @DisplayName("task-types 含 * 通配 = 等价开启发现")
+    void wildcardEnablesDiscovery() throws Exception {
+        props.getScriptRemote().setTaskTypes(java.util.List.of("*"));
+        props.getScriptRemote().setDiscover(false);
+        controlPlane.enqueue(indexResponse("video"));
+        enqueueScript("v1", "// s");
+
+        ScriptLoader loader = loader();
+        loader.reload();
+
+        assertThat(loader.taskTypes()).containsExactly("video");
+    }
+
+    @Test
+    @DisplayName("discover=false 回归: 全程不发 _index (首请求即脚本拉取)")
+    void discoverOffNeverCallsIndex() throws Exception {
+        props.getScriptRemote().setTaskTypes(java.util.List.of("video"));
+        props.getScriptRemote().setDiscover(false);
+        enqueueScript("v1", "// s");
+
+        loader().reload();
+
+        assertThat(controlPlane.takeRequest().getPath())
+                .isEqualTo("/api/v1/internal/work-scripts/video");
     }
 
     @Test

@@ -38,7 +38,9 @@ worker:
   # script-remote:
   #   base-url: http://mmagix:9400/api/v1/internal/work-scripts
   #   internal-token: ${MMAGIX_INTERNAL_TOKEN:}
-  #   task-types: [video, image, tts]   # remote 无列表端点, 显式声明
+  #   discover: true                     # _index 自动发现 (2026-10 零配置; 404 老控制面降级显式清单)
+  #   task-types: [video, image, tts]    # 显式清单; 与 _index 并集消费; 含 "*" = 等价开启发现
+  #   index-cache-ttl: 60s               # _index 独立节流 (失败 sticky 沿用旧清单)
   #   cache-ttl: 60s                     # 版本比对节流 (窗口内不发 HTTP; 过期拉取比对)
 
 logging:

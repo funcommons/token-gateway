@@ -64,8 +64,20 @@ public class WorkerProperties {
         /** 回调鉴权 X-Internal-Token 头 (env 注入禁入仓; 空 = 不发, 仅 localhost). */
         private String internalToken;
 
-        /** 拉取的 taskType 集合 (remote 模式必填——无列表端点, 由部署方显式声明). */
+        /**
+         * 拉取的 taskType 集合 (remote 模式的显式清单; 含 "*" 时等价开启 discover
+         * 自动发现; 开启发现后本清单与 _index 清单并集消费, 增量灰度仍可用).
+         */
         private List<String> taskTypes = List.of();
+
+        /**
+         * 自动发现总开关 (2026-10 零配置): true 时经 GET {base-url}/_index 拉取
+         * 控制面任务链类型清单; 端点 404 (老 bootstrap) 降级仅用显式清单.
+         */
+        private boolean discover = true;
+
+        /** _index 清单独立节流 (与 cacheTtl 互不干扰; 拉取失败 sticky 沿用旧清单). */
+        private Duration indexCacheTtl = Duration.ofSeconds(60);
 
         /** 版本比对节流: 窗口内跳过 HTTP, 过期后拉取比对版本 (不变不落盘). */
         private Duration cacheTtl = Duration.ofSeconds(60);
