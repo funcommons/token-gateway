@@ -71,6 +71,14 @@ class LotaskTypeRegistrarTest {
                 .setBody("{\"code\":0,\"message\":\"ok\",\"data\":null}"));
     }
 
+    private void enqueueTypes(String... keys) {
+        String arr = java.util.Arrays.stream(keys)
+                .map(k -> "{\"typeKey\":\"" + k + "\"}")
+                .collect(java.util.stream.Collectors.joining(","));
+        server.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"code\":0,\"message\":\"ok\",\"data\":[" + arr + "]}"));
+    }
+
     private RecordedRequest takeRequest() throws InterruptedException {
         return server.takeRequest(3, TimeUnit.SECONDS);
     }
@@ -78,13 +86,18 @@ class LotaskTypeRegistrarTest {
     @Test
     @DisplayName("upsert 契约: bearer-only + admin/types + body 七字段全必填")
     void registerSendsUpsertContract() throws Exception {
+        enqueueTypes();
         enqueueOk();
 
-        StepVerifier.create(registrar.doRegister("zz-probe-type")).verifyComplete();
+        registrar.ensureRegistered("zz-probe-type");
+        Thread.sleep(400);
 
+        assertThat(server.getRequestCount()).isEqualTo(2);
+        RecordedRequest listed = takeRequest();
+        assertThat(listed.getMethod()).isEqualTo("GET");
+        assertThat(listed.getHeader("Authorization")).isEqualTo("Bearer platform-token");
         RecordedRequest req = takeRequest();
         assertThat(req.getPath()).isEqualTo("/api/v1/admin/types");
-        assertThat(req.getHeader("Authorization")).isEqualTo("Bearer platform-token");
         assertThat(req.getHeader("X-Access-Key")).isNull();
         JSONObject body = JSON.parseObject(req.getBody().readUtf8());
         assertThat(body.getLong("tenantId")).isEqualTo(2100412430772998146L);
@@ -99,27 +112,41 @@ class LotaskTypeRegistrarTest {
     @Test
     @DisplayName("幂等: once-per-process, 同类型二次 ensure 不重发请求")
     void ensureIsOncePerProcess() throws Exception {
+        enqueueTypes();
         enqueueOk();
         registrar.ensureRegistered("video");
         takeRequest();
+        takeRequest();
         Thread.sleep(100);
         registrar.ensureRegistered("video");
-        assertThat(server.getRequestCount()).isEqualTo(1);
+        assertThat(server.getRequestCount()).isEqualTo(2);
     }
 
     @Test
-    @DisplayName("失败移除: 平台拒绝 → ensured 移除, 下 tick 重发")
+    @DisplayName("只补缺: lotask 已有的类型跳过 upsert (不覆盖运营调参)")
+    void skipsExistingType() throws Exception {
+        enqueueTypes("video");
+        registrar.ensureRegistered("video");
+        Thread.sleep(400);
+
+        assertThat(server.getRequestCount()).isEqualTo(1);
+        assertThat(takeRequest().getMethod()).isEqualTo("GET");
+    }
+
+    @Test
+    @DisplayName("失败移除: 平台拒绝 → ensured 移除, 下 tick 重发 (清单已缓存不再 GET)")
     void failureRemovedForRetry() throws Exception {
+        enqueueTypes();
         server.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
                 .setBody("{\"code\":40300,\"message\":\"forbidden\",\"data\":null}"));
         registrar.ensureRegistered("flaky");
-        Thread.sleep(300);
-        assertThat(server.getRequestCount()).isEqualTo(1);
+        Thread.sleep(400);
+        assertThat(server.getRequestCount()).isEqualTo(2);
 
         enqueueOk();
         registrar.ensureRegistered("flaky");
-        Thread.sleep(300);
-        assertThat(server.getRequestCount()).isEqualTo(2);
+        Thread.sleep(400);
+        assertThat(server.getRequestCount()).isEqualTo(3);
     }
 
     @Test
