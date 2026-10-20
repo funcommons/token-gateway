@@ -115,7 +115,8 @@ class FormatConverterTest {
         assertThat(choice.get("finish_reason")).isEqualTo("length");
         assertThat(((Map<?, ?>) choice.get("message")).get("content")).isEqualTo("hello");
         Map<?, ?> usage = (Map<?, ?>) out.get("usage");
-        assertThat(usage.get("prompt_tokens")).isEqualTo(10);
+        // P2-34 (2026-10-20 方案①): prompt=in+cached 子集契约 (10+4)
+        assertThat(usage.get("prompt_tokens")).isEqualTo(14);
         assertThat(usage.get("completion_tokens")).isEqualTo(5);
         assertThat(usage.get("total_tokens")).isEqualTo(15);
         assertThat(((Map<?, ?>) usage.get("prompt_tokens_details")).get("cached_tokens")).isEqualTo(4);
@@ -499,7 +500,7 @@ class FormatConverterTest {
         Map<String, Object> out = converter.openAiToAnthropicResponse(Map.of(
                 "choices", List.of(Map.of(
                         "message", Map.of("content", "hi"), "finish_reason", "stop")),
-                "usage", Map.of("prompt_tokens", 36, "completion_tokens", 16,
+                "usage", Map.of("prompt_tokens", 164, "completion_tokens", 16,  // P2-34: 子集契约 prompt 含 cached (36+128)
                         "prompt_tokens_details", Map.of("cached_tokens", 128, "audio_tokens", 6),
                         "completion_tokens_details", Map.of("reasoning_tokens", 9, "audio_tokens", 2))));
         Map<?, ?> usage = (Map<?, ?>) out.get("usage");

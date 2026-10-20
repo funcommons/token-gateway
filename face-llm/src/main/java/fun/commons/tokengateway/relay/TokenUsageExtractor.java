@@ -71,6 +71,11 @@ public final class TokenUsageExtractor {
         int input = toInt(raw.get("input_tokens"));
         int output = toInt(raw.get("output_tokens"));
         int cached = toInt(raw.get("cache_read_input_tokens"));
+        // P2-34 口径归一 (2026-10-20 用户裁决方案①): Anthropic 加法口径 (input_tokens 不含
+        // cache_read) 在本仓内部统一为 OpenAI 子集契约 (input 含 cached) —— input=input+cached。
+        // 不归一则 settle 链 PriceOfJson.llmTokenSplit 按 cached⊆input 契约 clamp(cached→input),
+        // 全部输入被按 cached 便宜价计, anthropic 渠道系统性少收 ~78%
+        input = input + Math.max(cached, 0);
         // issue #26 口径定版: creation 独立成维, 不再并入 cached
         Long cacheCreation = toNullableLong(raw.get("cache_creation_input_tokens"));
         // 网关转换产物扩展键 (openAiToAnthropicResponse 注入, 仅在有值时存在)

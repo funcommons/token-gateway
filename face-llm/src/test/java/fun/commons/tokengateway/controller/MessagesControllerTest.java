@@ -249,7 +249,8 @@ class MessagesControllerTest {
             }
         }
         assertThat(settleBody).isNotNull();
-        assertThat(settleBody).contains("\"actualPromptTokens\":36");
+        // P2-34 (2026-10-20 方案①): settle 口径 prompt 含 cached (36+128=164)
+        assertThat(settleBody).contains("\"actualPromptTokens\":164");
         assertThat(settleBody).contains("\"actualCompletionTokens\":16");
         // 口径定版: read → cacheReadTokens=128 (旧口径曾把 creation 并入成 128+64)
         assertThat(settleBody).contains("\"cacheReadTokens\":128");

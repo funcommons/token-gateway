@@ -58,7 +58,8 @@ class TokenUsageExtractorTest {
         Map<String, Object> response = Map.of("usage", usage);
 
         TokenUsage u = TokenUsageExtractor.fromAnthropic(response);
-        assertThat(u.promptTokens()).isEqualTo(36);
+        // P2-34 (2026-10-20 方案①): 归一为仓内子集契约 prompt 含 cached (36+128)
+        assertThat(u.promptTokens()).isEqualTo(164);
         assertThat(u.completionTokens()).isEqualTo(16);
         assertThat(u.cachedTokens()).isEqualTo(128);
     }
@@ -129,7 +130,8 @@ class TokenUsageExtractorTest {
 
         TokenUsage u = TokenUsageExtractor.fromAnthropic(Map.of("usage", usage));
         // 总量字段语义不变: prompt 含 cached 部分, 拆分只发生在细分字段
-        assertThat(u.promptTokens()).isEqualTo(36);
+        // (P2-34 2026-10-20 方案① 起该契约真正兑现: 36+128=164, 旧实现漏归一恒 36)
+        assertThat(u.promptTokens()).isEqualTo(164);
         assertThat(u.completionTokens()).isEqualTo(16);
         assertThat(u.cachedTokens()).isEqualTo(128);
         assertThat(u.cacheCreationTokens()).isEqualTo(64);

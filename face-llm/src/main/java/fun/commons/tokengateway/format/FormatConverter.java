@@ -391,7 +391,13 @@ public class FormatConverter {
             Map<String, Object> mapped = new LinkedHashMap<>();
             int inVal = toInt(u.get("input_tokens"));
             int outVal = toInt(u.get("output_tokens"));
-            mapped.put("prompt_tokens", inVal);
+            // P2-34 口径归一 (2026-10-20 用户裁决方案①): Anthropic 加法口径 (input_tokens 不含
+            // cache_read) 转 OpenAI 子集契约 (cached ⊆ prompt) 时, prompt_tokens 必须含缓存命中
+            // (inVal+cachedVal) —— 原「保形不保义」直搬 inVal 致 cached>prompt, 下游计价按
+            // PriceOfJson.llmTokenSplit 的 clamp 把全部输入压到 cached 便宜价, anthropic 渠道
+            // 系统性少收 ~78% (实测 sale=0.0004 vs 正确 0.0018)
+            int cachedReadVal = u.get("cache_read_input_tokens") instanceof Number n ? n.intValue() : 0;
+            mapped.put("prompt_tokens", inVal + Math.max(cachedReadVal, 0));
             mapped.put("completion_tokens", outVal);
             mapped.put("total_tokens", inVal + outVal);
             Object cached = u.get("cache_read_input_tokens");
@@ -880,7 +886,12 @@ public class FormatConverter {
         Object usage = openaiResp.get("usage");
         if (usage instanceof Map<?, ?> u) {
             Map<String, Object> mapped = new LinkedHashMap<>();
-            mapped.put("input_tokens", toInt(u.get("prompt_tokens")));
+            // P2-34 口径归一 (2026-10-20 方案①, 与正向 anthropic→openai 对偶): OpenAI 子集
+            // (prompt 含 cached) → Anthropic 加法 (input 不含 cache_read): input = prompt - cached
+            int promptVal = toInt(u.get("prompt_tokens"));
+            int cachedOutVal = u.get("prompt_tokens_details") instanceof Map<?, ?> d0
+                    && d0.get("cached_tokens") instanceof Number n0 ? Math.max(n0.intValue(), 0) : 0;
+            mapped.put("input_tokens", Math.max(promptVal - cachedOutVal, 0));
             mapped.put("output_tokens", toInt(u.get("completion_tokens")));
             // issue #26 计费口径修复: OpenAI cached_tokens → Anthropic 标准键 cache_read_input_tokens,
             // 修复 Messages 非流式链 (OpenAI 上游) cacheRead 被丢计 0 的口径损失
