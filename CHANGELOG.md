@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-20
+
+### 新增
+
+- **worker 任务类型零配置发现 + lotask 自动注册（M2/M3/M4）**：脚本目录扫描即注册（scripts/<taskType>/ 落盘热载，每 5s tick）；LotaskTypeRegistrar 平台凭据桥接（yml/env 三键）自动注册任务类型，只补缺不覆盖；日志挂对回调。task-worker 与平台解耦：零配置接入新模态
+- **image/audio/tts 三模态 token-mock 适配脚本（三钩子形态）**：补齐四模态联调默认上游（video 既有）；image 真异步作业同构、audio/tts 同步单跳（create 零调用占位+poll 首跳真实调用）；规约=钩子返回 Map 的 GString 显式 .toString()（fastjson2 bean 序列化坑）
+
+### 修复
+
+- **anthropic cached 口径归一（P2-34，子集契约 prompt 含 cached）**：anthropic 加法口径（input_tokens 不含 cache_read）未经归一直搬进 OpenAI 子集契约，产出 cached>prompt 逆差；下游计价按 clamp(cached→input) 把全部输入压到 cached 便宜价——**anthropic 渠道系统性少收 ~78%**（实测 sale=0.0004 vs 正确 0.0018）。三处归一：TokenUsageExtractor.fromAnthropic 提取归一（input=input+cached，settle actualPromptTokens 自此含 cached——TokenUsage「prompt 含 cached」设计契约终于被实现兑现）+ FormatConverter 正向（prompt=in+cached）与反向（input=prompt-cached）对偶归一。测试断言随契约兑现翻正（36→164 等），gateway-core 232 + face-llm 246 + task-worker 58 全绿
+
 ## [0.19.0] - 2026-10-07
 
 ### 新增
