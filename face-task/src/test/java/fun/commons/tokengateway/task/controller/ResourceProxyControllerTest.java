@@ -358,4 +358,83 @@ class ResourceProxyControllerTest {
                         .isEqualTo(ApiCode.STATE_CONFLICT.getCode()))
                 .verify();
     }
+
+    // ---------- 直通模式 (resource-cache-enabled=false): 无盘依赖, 回源即流式转发 ----------
+
+    private void enableDirectMode() {
+        props.getTask().setResourceCacheEnabled(false);
+    }
+
+    @Test
+    void directModeStreamsUpstreamIgnoringDisk() throws Exception {
+        // 直通: 盘上存量脏缓存不读, 每次都回源; Content-Type/文件名定型口径与缓存模式一致
+        enableDirectMode();
+        allow();
+        Path stale = cacheDir.resolve(TASK_NO).resolve("0");
+        Files.createDirectories(stale.getParent());
+        Files.write(stale, "stale-disk-bytes".getBytes());
+        mappedTask("SUCCESS",
+                Map.of("resources", List.of(upstream.url("/f") + ".png"), "usage", Map.of()),
+                "sk-channel-key");
+        upstream.enqueue(new MockResponse().setHeader("Content-Type", "image/png").setBody("fresh-1"));
+
+        StepVerifier.create(fetch().flatMap(resp -> {
+            assertThat(resp.getStatusCode().value()).isEqualTo(200);
+            assertThat(resp.getHeaders().getContentType()).isEqualTo(org.springframework.http.MediaType.IMAGE_PNG);
+            assertThat(resp.getHeaders().getFirst("Content-Disposition"))
+                    .contains(TASK_NO + "-0.png");
+            return joinBody(resp);
+        }))
+                .assertNext(body -> assertThat(body).isEqualTo("fresh-1"))
+                .verifyComplete();
+
+        // 不落盘: 目录内仍是预置脏文件, 未被回源内容覆写
+        assertThat(Files.readString(stale)).isEqualTo("stale-disk-bytes");
+        // 每次取用都回源: 第二次请求再次打上游 (无盘上续命)
+        upstream.enqueue(new MockResponse().setHeader("Content-Type", "image/png").setBody("fresh-2"));
+        StepVerifier.create(fetch().flatMap(resp -> joinBody(resp)))
+                .assertNext(body -> assertThat(body).isEqualTo("fresh-2"))
+                .verifyComplete();
+        assertThat(upstream.getRequestCount()).isEqualTo(2);
+    }
+
+    @Test
+    void directModeDataUriServesWithoutDisk() throws Exception {
+        // 直通 + data: URI: 内存解码直发, 不落盘不回源 (与缓存模式同口径, 仅少落盘)
+        enableDirectMode();
+        allow();
+        byte[] png = new byte[]{ (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+        String dataUri = "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(png);
+        when(metaStore.getTerminalResult(TASK_NO)).thenReturn(Mono.just(
+                com.alibaba.fastjson2.JSON.parseObject("{\"status\":\"SUCCEEDED\",\"result\":{"
+                        + "\"resources\":[\"" + dataUri + "\"]}}")));
+        when(metaStore.getMeta(TASK_NO)).thenReturn(Mono.empty());
+
+        StepVerifier.create(fetch().flatMap(resp -> {
+            assertThat(resp.getStatusCode().value()).isEqualTo(200);
+            assertThat(resp.getHeaders().getContentType()).isEqualTo(org.springframework.http.MediaType.IMAGE_PNG);
+            return DataBufferUtils.join(resp.getBody()).map(db -> {
+                byte[] b = new byte[db.readableByteCount()];
+                db.read(b);
+                DataBufferUtils.release(db);
+                return b;
+            });
+        }))
+                .assertNext(body -> assertThat(body).isEqualTo(png))
+                .verifyComplete();
+        assertThat(upstream.getRequestCount()).isZero();
+        assertThat(Files.exists(cacheDir.resolve(TASK_NO))).isFalse();
+    }
+
+    @Test
+    void directModeUnknownTaskStill404() {
+        // 直通复用同一回源解析链: 任务不存在 404 语义不变
+        enableDirectMode();
+        allow();
+        when(mappingStore.get(TASK_NO)).thenReturn(Mono.empty());
+        StepVerifier.create(fetch())
+                .expectErrorSatisfies(e -> assertThat(((RelayException) e).getCode())
+                        .isEqualTo(ApiCode.NOT_FOUND.getCode()))
+                .verify();
+    }
 }

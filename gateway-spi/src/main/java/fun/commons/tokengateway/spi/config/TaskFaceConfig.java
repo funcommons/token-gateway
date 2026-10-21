@@ -28,6 +28,15 @@ public class TaskFaceConfig {
     /** 资源代理缓存目录 (face=task 实例挂盘; 默认相对工作目录, 部署时挂持久卷并显式配置). */
     private String resourceCacheDir = "./data/tgw-cache";
 
+    /**
+     * 资源代理缓存盘开关 (缺省 true = 写穿本地盘, 与既有部署逐字节等价).
+     * false = 直通模式: 回源上游流式转发, 全程不落盘不依赖本地目录 —
+     * 多副本 / 只读根文件系统 (allinone appliance) 部署适用.
+     * 代价: 每次取用都回源上游 (vendor 签名 URL 过期后不可复取, 不再有盘上续命),
+     * 且外部消费方反复下载会重复回源.
+     */
+    private boolean resourceCacheEnabled = true;
+
     /** 资源代理 sig 签名密钥 (环境变量注入). */
     private String resourceSignKey;
 

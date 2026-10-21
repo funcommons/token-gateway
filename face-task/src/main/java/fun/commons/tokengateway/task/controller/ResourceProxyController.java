@@ -37,6 +37,9 @@ import java.util.Map;
  * 任务非 SUCCEEDED → 409+10402. 流式回源 + 本地缓存盘 (write-through:
  * 缓存命中直接发文件; 未命中拉上游写盘后从盘发, 大文件不驻内存).
  * 上游原始 URL 永不透传 (《05》§4).
+ * <p>直通模式 (token-gateway.task.resource-cache-enabled=false): 跳过缓存盘,
+ * 回源响应体 Flux 原样流式转发 — 无本地盘依赖, 多副本 / 只读根文件系统
+ * (allinone appliance) 部署适用; 代价 = 每次取用都回源 (上游签名 URL 过期不可复取).
  *
  * <p>Web 可看性 (2026-09-17 计费合规测试实测反馈):
  * <ul>
@@ -81,6 +84,12 @@ public class ResourceProxyController {
             return Mono.error(new RelayException(400, ApiCode.PARAM_ERROR.getCode(),
                     "资源签名无效或已过期"));
         }
+        // 直通模式 (resource-cache-enabled=false): 无本地盘依赖, 回源即流式转发 —
+        // 多副本 / 只读根文件系统 (allinone appliance) 部署适用
+        if (!props.getTask().isResourceCacheEnabled()) {
+            return resolveUpstream(taskNo, index)
+                    .flatMap(src -> streamDirect(taskNo, index, src.url(), src.apiKey()));
+        }
         Path cacheFile = cacheFile(taskNo, index);
         // 命中判定要求非空: write-through 半途失败会留 0 字节文件, 视为未命中走回源 (防空文件毒化)
         if (Files.exists(cacheFile) && fileSizeOrZero(cacheFile) > 0) {
@@ -89,14 +98,8 @@ public class ResourceProxyController {
         // issue #43 存储格式翻转: 终态条目存原始 (改写后) URL —— 条目优先直读回源;
         // 旧格式条目 (代理路径) /无条目 → 回退 lotask 视图原始值链路 (逐字节现状).
         // 回源凭证两路同 = create 时存入 meta 的渠道 apiKey (公共读 OSS 忽略未知头无害)
-        return metaStore.getTerminalResult(taskNo)
-                .flatMap(entry -> Mono.justOrEmpty(rawResourceAt(entry, index)))
-                .flatMap(entryUrl -> metaStore.getMeta(taskNo)
-                        .map(meta -> meta.upstreamApiKey() == null ? "" : meta.upstreamApiKey())
-                        .defaultIfEmpty("")
-                        .flatMap(key -> fetchAndCache(taskNo, index, entryUrl, cacheFile,
-                                key.isEmpty() ? null : key)))
-                .switchIfEmpty(Mono.defer(() -> fetchViaLotask(taskNo, index, cacheFile)));
+        return resolveUpstream(taskNo, index)
+                .flatMap(src -> fetchAndCache(taskNo, index, src.url(), cacheFile, src.apiKey()));
     }
 
     /**
@@ -120,11 +123,27 @@ public class ResourceProxyController {
         return s;
     }
 
-    /** 旧链路 (逐字节现状): lotask 视图取上游原始 URL 回源 (webhook 未达/旧格式条目兜底 —
-     * 旧格式终态条目存的是代理路径不可回源, 须回 lotask 拿原文).
-     * 回源凭证 = create 时存入 meta 的渠道 apiKey (上游按渠道验钥). */
-    private Mono<ResponseEntity<Flux<DataBuffer>>> fetchViaLotask(String taskNo, int index,
-                                                                  Path cacheFile) {
+    /** 上游回源源 (原始 URL + create 时存入 meta 的渠道 apiKey, 公共读 OSS 忽略未知头无害). */
+    private record UpstreamSource(String url, String apiKey) {
+    }
+
+    /**
+     * 上游原始 URL 解析两路合一 (issue #43 存储格式翻转):
+     * 终态条目 resources[index] 为原始 URL → 直读条目值;
+     * 旧格式代理路径条目 / 无条目 → 回退 lotask 视图原始值链路 (逐字节现状).
+     */
+    private Mono<UpstreamSource> resolveUpstream(String taskNo, int index) {
+        return metaStore.getTerminalResult(taskNo)
+                .flatMap(entry -> Mono.justOrEmpty(rawResourceAt(entry, index)))
+                .flatMap(entryUrl -> metaStore.getMeta(taskNo)
+                        .map(meta -> meta.upstreamApiKey() == null ? "" : meta.upstreamApiKey())
+                        .defaultIfEmpty("")
+                        .map(key -> new UpstreamSource(entryUrl, key.isEmpty() ? null : key)))
+                .switchIfEmpty(Mono.defer(() -> viaLotaskSource(taskNo, index)));
+    }
+
+    /** lotask 链路解析半程: 视图取上游原始 URL, 回源凭证同条目链路. */
+    private Mono<UpstreamSource> viaLotaskSource(String taskNo, int index) {
         return mappingStore.get(taskNo)
                 .switchIfEmpty(Mono.error(new RelayException(404, ApiCode.NOT_FOUND.getCode(),
                         "任务不存在: " + taskNo)))
@@ -145,7 +164,7 @@ public class ResourceProxyController {
                         return Mono.error(new RelayException(404, ApiCode.NOT_FOUND.getCode(),
                                 "资源索引越界: " + index));
                     }
-                    return fetchAndCache(taskNo, index, upstreamUrl, cacheFile, upstreamKey);
+                    return Mono.just(new UpstreamSource(upstreamUrl, upstreamKey));
                 });
     }
 
@@ -187,6 +206,53 @@ public class ResourceProxyController {
                     return Mono.error(new RelayException(502, ApiCode.THIRD_PARTY_ERROR.getCode(),
                             "上游资源回源失败"));
                 });
+    }
+
+    /**
+     * 直通模式 (resource-cache-enabled=false): 回源上游, 响应体 Flux 原样流式转发 —
+     * 全程不落盘, Content-Type 定型口径与缓存模式一致 (上游响应头优先, 回退 URL 扩展名).
+     * 渠道 apiKey 附着口径不变 (create 时存入 meta, 上游按渠道验钥).
+     */
+    private Mono<ResponseEntity<Flux<DataBuffer>>> streamDirect(String taskNo, int index,
+                                                                String upstreamUrl, String upstreamApiKey) {
+        // data: URI 无源可回 — 内存解码直发 (仅 base64 形态, 同缓存模式口径)
+        if (upstreamUrl.startsWith("data:")) {
+            return decodeDataUri(upstreamUrl)
+                    .map(bytes -> serveBytes(taskNo, index, bytes, dataUriMediaType(upstreamUrl)));
+        }
+        // issue #16: 签名 URL 须走 URI 重载, 模板模式会重复编码 %2B 等序列致上游 403
+        WebClient.RequestHeadersSpec<?> spec = webClientBuilder.build().get()
+                .uri(java.net.URI.create(upstreamUrl));
+        if (upstreamApiKey != null && !upstreamApiKey.isBlank()) {
+            spec.header(HttpHeaders.AUTHORIZATION, "Bearer " + upstreamApiKey);
+        }
+        return spec.retrieve().toEntityFlux(DataBuffer.class)
+                .map(entity -> {
+                    MediaType type = resolveUpstreamMediaType(upstreamUrl,
+                            entity.getHeaders().getContentType());
+                    return ResponseEntity.ok()
+                            .contentType(type)
+                            .header(HttpHeaders.CONTENT_DISPOSITION,
+                                    "inline; filename=\"" + taskNo + "-" + index + "."
+                                            + extensionOf(type) + "\"")
+                            .body(entity.getBody());
+                })
+                .onErrorResume(e -> {
+                    log.error("[ResourceProxy] 直通回源失败: err={}", e.getMessage());
+                    return Mono.error(new RelayException(502, ApiCode.THIRD_PARTY_ERROR.getCode(),
+                            "上游资源回源失败"));
+                });
+    }
+
+    /** 内存字节直发 (data: URI 直通形态); 媒体类型缺省 octet-stream. */
+    private ResponseEntity<Flux<DataBuffer>> serveBytes(String taskNo, int index,
+                                                        byte[] bytes, MediaType type) {
+        MediaType effective = type != null ? type : MediaType.APPLICATION_OCTET_STREAM;
+        return ResponseEntity.ok()
+                .contentType(effective)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "inline; filename=\"" + taskNo + "-" + index + "." + extensionOf(effective) + "\"")
+                .body(Flux.just(new DefaultDataBufferFactory().wrap(bytes)));
     }
 
     /**
