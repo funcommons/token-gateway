@@ -25,17 +25,18 @@ public class TaskFaceConfig {
      */
     private String distributePath = "/api/v1/internal/work-channels/distribute";
 
-    /** 资源代理缓存目录 (face=task 实例挂盘; 默认相对工作目录, 部署时挂持久卷并显式配置). */
+    /** 资源代理缓存目录 (仅缓存模式使用; 显式 resourceCacheEnabled=true 时须挂持久卷并显式配置). */
     private String resourceCacheDir = "./data/tgw-cache";
 
     /**
-     * 资源代理缓存盘开关 (缺省 true = 写穿本地盘, 与既有部署逐字节等价).
-     * false = 直通模式: 回源上游流式转发, 全程不落盘不依赖本地目录 —
-     * 多副本 / 只读根文件系统 (allinone appliance) 部署适用.
-     * 代价: 每次取用都回源上游 (vendor 签名 URL 过期后不可复取, 不再有盘上续命),
-     * 且外部消费方反复下载会重复回源.
+     * 资源代理缓存盘开关 (缺省 false = 直通模式).
+     * 直通: 回源上游流式转发, 全程不落盘不依赖本地目录 — 无本地状态, 多副本 /
+     * 只读根文件系统 (allinone appliance) 开箱即用 (2026-10-21 缺省反转, 根因:
+     * 容器内 createDirectories 失败 → 「缓存盘不可用」500 → MMagiX2 内链转存全断).
+     * true = 写穿本地盘 (legacy): 命中直发, 未命中拉上游写盘后从盘发 —
+     * 价值仅剩「上游签名 URL 过期后盘上续命」, 需自行保证目录可写.
      */
-    private boolean resourceCacheEnabled = true;
+    private boolean resourceCacheEnabled = false;
 
     /** 资源代理 sig 签名密钥 (环境变量注入). */
     private String resourceSignKey;

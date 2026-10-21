@@ -85,6 +85,13 @@ class ResourceProxyControllerTest {
         when(signer.verify(anyString(), anyInt(), anyLong(), anyString())).thenReturn(true);
     }
 
+    /**
+     * 缓存盘模式须显式开启 (2026-10-21 缺省反转: 直通为默认, 直通用例不再显式设开关).
+     */
+    private void enableCacheMode() {
+        props.getTask().setResourceCacheEnabled(true);
+    }
+
     private static TaskMeta meta(String apiKey) {
         return new TaskMeta("lotask-1", "pc-1", "video", null, 0L, apiKey);
     }
@@ -128,6 +135,7 @@ class ResourceProxyControllerTest {
 
     @Test
     void cacheHitServesFileWithoutAnyRemoteCall() {
+        enableCacheMode();
         allow();
         Path file = cacheDir.resolve(TASK_NO).resolve("0");
         try {
@@ -177,6 +185,7 @@ class ResourceProxyControllerTest {
 
     @Test
     void fetchCachesUpstreamWithChannelKey() throws Exception {
+        enableCacheMode();
         allow();
         upstream.enqueue(new MockResponse()
                 .setHeader("Content-Type", "application/octet-stream")
@@ -204,6 +213,7 @@ class ResourceProxyControllerTest {
 
     @Test
     void noChannelKeySendsNoAuthHeader() throws Exception {
+        enableCacheMode();
         allow();
         upstream.enqueue(new MockResponse().setBody("anon"));
         mappedTask("SUCCESS", Map.of("resources", List.of(upstream.url("/f").toString())), null);
@@ -214,6 +224,7 @@ class ResourceProxyControllerTest {
 
     @Test
     void dataUriDecodedInlineWithoutUpstream() throws Exception {
+        enableCacheMode();
         // 上游同步 API 经 url 字段回 data: URI (OpenAI 兼容面实测形态) — 不回源, 直解码落盘
         allow();
         byte[] png = new byte[]{ (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
@@ -250,6 +261,7 @@ class ResourceProxyControllerTest {
 
     @Test
     void emptyCacheFileDoesNotPoison() throws Exception {
+        enableCacheMode();
         // write-through 半途失败会留 0 字节缓存 — 不得视为命中 (否则永发空文件), 须回源重拉
         allow();
         Path file = cacheDir.resolve(TASK_NO).resolve("0");
@@ -270,6 +282,7 @@ class ResourceProxyControllerTest {
 
     @Test
     void terminalEntryRawUrlFetchesEntryValueDirectly() throws Exception {
+        enableCacheMode();
         // 新格式条目 (存改写后原始 URL): 直读条目值回源, 不触 lotask/mapping
         // —— e2e 断言回源目标是改写后消费方 OSS URL 而非渠道原值
         allow();
@@ -303,6 +316,7 @@ class ResourceProxyControllerTest {
 
     @Test
     void legacyProxyEntryFallsBackToLotask() throws Exception {
+        enableCacheMode();
         // 旧格式条目 (存代理路径, 不可回源): 回退 lotask 视图原始值链路 (逐字节现状)
         allow();
         when(metaStore.getTerminalResult(TASK_NO)).thenReturn(Mono.just(
@@ -328,6 +342,7 @@ class ResourceProxyControllerTest {
 
     @Test
     void terminalEntryDataUriDecodesInline() throws Exception {
+        enableCacheMode();
         // 新格式条目 + data: URI: 直解码落盘, 不回源 (与 lotask 链路同口径)
         allow();
         byte[] png = new byte[]{ (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
